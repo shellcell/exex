@@ -1,5 +1,5 @@
-// Command elf-explorer is a terminal UI for exploring ELF binaries: header,
-// sections, symbols, disassembly, and DWARF-driven source mapping.
+// Command elf-explorer is a terminal UI for exploring ELF and Mach-O binaries:
+// header, sections, symbols, disassembly, and DWARF-driven source mapping.
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 
 func main() {
 	if len(os.Args) != 2 || os.Args[1] == "-h" || os.Args[1] == "--help" {
-		fmt.Fprintf(os.Stderr, "usage: %s <elf-binary>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s <elf-or-macho-binary>\n", os.Args[0])
 		os.Exit(2)
 	}
 	path := os.Args[1]

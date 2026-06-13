@@ -1,158 +1,251 @@
 package ui
 
-// This file owns the hex view: opening a section into the viewer, navigating
-// byte-by-byte, and rendering the offset | hex | ascii table.
+// This file owns the two byte-dump views:
+//
+//   - Hex (modeHex):  a continuous virtual-address dump of *every* mapped
+//                     section, stitched together in VA order. Scrolling runs
+//                     from the first mapped byte to the last.
+//   - Raw (modeRaw):  the entire file, addressed by file offset (0 → EOF).
+//
+// Both share the same offset|hex|ascii renderer; they differ only in their
+// byte source and how a row's leading address is computed.
 
 import (
-	"debug/elf"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/psimonen/elf-explorer/internal/binfile"
 )
 
 const bytesPerHexRow = 16
 
-// hexLoadCap caps how many bytes the hex viewer loads at once. Plenty for a
-// terminal-sized window; bigger objects can be re-explored via goto.
-const hexLoadCap = 64 * 1024
+// ensureHex builds the virtual-address image lazily.
+func (m *Model) ensureHex() {
+	if m.hexImg == nil {
+		m.hexImg = m.file.VAImage()
+	}
+}
 
-// openHexForSection switches into the hex viewer focused on the given section.
-// Non-allocated sections still have file data; we read it via Data().
-func (m *Model) openHexForSection(sec *elf.Section) {
-	data, err := m.file.SectionData(sec, hexLoadCap)
-	if err != nil {
-		m.setStatus(err.Error(), true)
+// ensureRaw grabs the whole-file byte slice lazily.
+func (m *Model) ensureRaw() {
+	if m.rawData == nil {
+		m.rawData = m.file.Raw()
+	}
+}
+
+// openHexAt switches to the virtual-address hex view with the cursor parked on
+// addr. Reports an error if addr isn't inside any mapped section.
+func (m *Model) openHexAt(addr uint64) {
+	m.ensureHex()
+	pos, ok := m.hexImg.PosForAddr(addr)
+	if !ok {
+		m.setStatus(fmt.Sprintf("0x%x is not in any mapped section", addr), true)
 		return
 	}
-	if len(data) == 0 {
-		m.setStatus(fmt.Sprintf("section %s has no data", sec.Name), true)
-		return
-	}
-	m.hexBase = sec.Addr
-	m.hexData = data
-	m.hexSection = sec
-	m.hexCur = 0
-	m.hexTop = 0
+	m.hexCur = pos
+	m.hexTop = (pos / bytesPerHexRow) * bytesPerHexRow
 	m.mode = modeHex
 	m.status = ""
 }
 
-// openHexAt opens the hex viewer at a virtual address with up to size bytes
-// (0 = use the hexLoadCap). Used to view data symbols (OBJECT/TLS/COMMON) at
-// their actual bytes inside the containing section.
-func (m *Model) openHexAt(addr, size uint64) {
-	n := int(size)
-	if n <= 0 || n > hexLoadCap {
-		n = hexLoadCap
+// openRawAt switches to the raw file view with the cursor on file offset off.
+func (m *Model) openRawAt(off uint64) {
+	m.ensureRaw()
+	pos := int(off)
+	if pos < 0 || pos >= len(m.rawData) {
+		pos = 0
 	}
-	data, err := m.file.ReadAt(addr, n)
-	if err != nil {
-		m.setStatus(err.Error(), true)
-		return
-	}
-	m.hexBase = addr
-	m.hexData = data
-	m.hexSection = m.file.SectionAt(addr)
-	m.hexCur = 0
-	m.hexTop = 0
-	m.mode = modeHex
+	m.rawCur = pos
+	m.rawTop = (pos / bytesPerHexRow) * bytesPerHexRow
+	m.mode = modeRaw
 	m.status = ""
 }
 
-func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
-	if len(m.hexData) == 0 {
-		return m, nil
-	}
+// moveByteCursor applies a navigation key to a byte cursor over n bytes.
+func (m *Model) moveByteCursor(key string, cur, n int) int {
 	row := bytesPerHexRow
 	switch key {
 	case "left", "h":
-		if m.hexCur > 0 {
-			m.hexCur--
+		if cur > 0 {
+			cur--
 		}
 	case "right", "l":
-		if m.hexCur < len(m.hexData)-1 {
-			m.hexCur++
+		if cur < n-1 {
+			cur++
 		}
 	case "up", "k":
-		if m.hexCur >= row {
-			m.hexCur -= row
+		if cur >= row {
+			cur -= row
 		}
 	case "down", "j":
-		if m.hexCur+row < len(m.hexData) {
-			m.hexCur += row
+		if cur+row < n {
+			cur += row
 		}
 	case "pgup":
-		m.hexCur = max(0, m.hexCur-row*m.bodyHeight())
+		cur = max(0, cur-row*m.bodyHeight())
 	case "pgdown":
-		m.hexCur = min(len(m.hexData)-1, m.hexCur+row*m.bodyHeight())
-	case "home":
-		m.hexCur = 0
+		cur = min(n-1, cur+row*m.bodyHeight())
+	case "home", "g g":
+		cur = 0
 	case "end", "G":
-		m.hexCur = len(m.hexData) - 1
+		cur = n - 1
+	}
+	return cur
+}
+
+func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
+	m.ensureHex()
+	data := m.hexImg.Data
+	if len(data) == 0 {
+		return m, nil
+	}
+	switch key {
 	case "a":
-		addr := m.hexBase + uint64(m.hexCur)
+		addr := m.hexImg.AddrAt(m.hexCur)
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
 	case "s":
-		addr := m.hexBase + uint64(m.hexCur)
+		addr := m.hexImg.AddrAt(m.hexCur)
 		if sym, ok := m.file.SymbolAt(addr); ok {
 			m.copyToClipboard(sym.Name, "symbol")
 		} else {
 			m.setStatus("no symbol at this address", true)
 		}
+	case "]":
+		m.hexCur = m.seekNonZero(data, m.hexCur, true)
+	case "[":
+		m.hexCur = m.seekNonZero(data, m.hexCur, false)
+	default:
+		m.hexCur = m.moveByteCursor(key, m.hexCur, len(data))
 	}
 	return m, nil
 }
 
-// renderHex draws a classic offset | hex | ascii hex dump for the currently
-// loaded byte window.
-func (m *Model) renderHex() string {
-	bodyH := m.bodyHeight()
-	if len(m.hexData) == 0 {
-		return padBody("press 2, pick a non-executable section, and hit Enter to view bytes\n", m.width, bodyH)
+// seekNonZero moves a byte cursor to the next/previous non-zero byte. It
+// reports via the status line when there is no further non-zero byte.
+func (m *Model) seekNonZero(data []byte, cur int, forward bool) int {
+	if forward {
+		for i := cur + 1; i < len(data); i++ {
+			if data[i] != 0 {
+				return i
+			}
+		}
+	} else {
+		for i := cur - 1; i >= 0; i-- {
+			if data[i] != 0 {
+				return i
+			}
+		}
 	}
+	m.setStatus("no more non-zero bytes in this direction", false)
+	return cur
+}
 
+func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
+	m.ensureRaw()
+	if len(m.rawData) == 0 {
+		return m, nil
+	}
+	switch key {
+	case "a":
+		m.copyToClipboard(fmt.Sprintf("0x%x", m.rawCur), "offset")
+	case "s":
+		if sec := m.sectionAtOffset(uint64(m.rawCur)); sec != nil {
+			m.copyToClipboard(sec.Name, "section name")
+		} else {
+			m.setStatus("offset is not inside any section's file data", true)
+		}
+	case "]":
+		m.rawCur = m.seekNonZero(m.rawData, m.rawCur, true)
+	case "[":
+		m.rawCur = m.seekNonZero(m.rawData, m.rawCur, false)
+	default:
+		m.rawCur = m.moveByteCursor(key, m.rawCur, len(m.rawData))
+	}
+	return m, nil
+}
+
+// sectionAtOffset returns the section whose file bytes cover off.
+func (m *Model) sectionAtOffset(off uint64) *binfile.Section {
+	for i := range m.file.Sections {
+		s := &m.file.Sections[i]
+		if s.FileSize == 0 {
+			continue
+		}
+		if off >= s.Offset && off < s.Offset+s.FileSize {
+			return s
+		}
+	}
+	return nil
+}
+
+func (m *Model) renderHex() string {
+	m.ensureHex()
+	if m.hexImg.Len() == 0 {
+		return padBody("no mapped sections to display\n", m.width, m.bodyHeight())
+	}
+	banner := fmt.Sprintf(" virtual-address image · %d bytes · %d mapped sections",
+		m.hexImg.Len(), len(m.hexImg.Regions))
+	if r := m.hexImg.RegionAt(m.hexCur); r != nil {
+		banner = fmt.Sprintf(" %s   @ 0x%0*x   ·   %d bytes across %d mapped sections",
+			r.Name, m.file.AddrHexWidth(), m.hexImg.AddrAt(m.hexCur), m.hexImg.Len(), len(m.hexImg.Regions))
+	}
+	return m.renderHexDump(m.hexImg.Data, m.hexCur, &m.hexTop, m.hexImg.AddrAt, banner)
+}
+
+func (m *Model) renderRaw() string {
+	m.ensureRaw()
+	if len(m.rawData) == 0 {
+		return padBody("empty file\n", m.width, m.bodyHeight())
+	}
+	banner := fmt.Sprintf(" raw file · %d bytes · file offsets", len(m.rawData))
+	if sec := m.sectionAtOffset(uint64(m.rawCur)); sec != nil {
+		banner = fmt.Sprintf(" raw file · offset 0x%x · in %s · %d bytes total",
+			m.rawCur, sec.Name, len(m.rawData))
+	}
+	return m.renderHexDump(m.rawData, m.rawCur, &m.rawTop, func(pos int) uint64 { return uint64(pos) }, banner)
+}
+
+// renderHexDump draws a classic offset|hex|ascii table. addrAt maps a byte
+// position to the address shown at the start of its row, so the same renderer
+// serves both the VA image and the raw file view.
+func (m *Model) renderHexDump(data []byte, cur int, topPtr *int, addrAt func(pos int) uint64, banner string) string {
+	bodyH := m.bodyHeight()
 	row := bytesPerHexRow
 	addrW := m.file.AddrHexWidth()
-	curRow := m.hexCur / row
+
+	curRow := cur / row
 	visible := bodyH - 1
 	if visible < 1 {
 		visible = 1
 	}
-	topRow := m.hexTop / row
+	topRow := *topPtr / row
 	if curRow < topRow {
 		topRow = curRow
 	} else if curRow >= topRow+visible {
 		topRow = curRow - visible + 1
 	}
-	m.hexTop = topRow * row
+	*topPtr = topRow * row
 
-	banner := ""
-	if m.hexSection != nil {
-		banner = fmt.Sprintf(" %s   base 0x%0*x   shown %d / %d bytes",
-			m.hexSection.Name, addrW, m.hexSection.Addr, len(m.hexData), m.hexSection.Size)
-	} else {
-		banner = fmt.Sprintf(" base 0x%0*x   %d bytes", addrW, m.hexBase, len(m.hexData))
-	}
 	out := stickySymStyle.Render(padRight(banner, m.width)) + "\n"
-
-	end := m.hexTop + visible*row
-	if end > len(m.hexData) {
-		end = len(m.hexData)
+	end := *topPtr + visible*row
+	if end > len(data) {
+		end = len(data)
 	}
-	for off := m.hexTop; off < end; off += row {
-		out += m.renderHexRow(off, addrW) + "\n"
+	for off := *topPtr; off < end; off += row {
+		out += m.renderHexRow(data, cur, off, addrW, addrAt) + "\n"
 	}
 	return padBody(out, m.width, bodyH)
 }
 
-func (m *Model) renderHexRow(off, addrW int) string {
+func (m *Model) renderHexRow(data []byte, cur, off, addrW int, addrAt func(pos int) uint64) string {
 	row := bytesPerHexRow
 	end := off + row
-	if end > len(m.hexData) {
-		end = len(m.hexData)
+	if end > len(data) {
+		end = len(data)
 	}
-	addr := m.hexBase + uint64(off)
+	addr := addrAt(off)
 	var hexCol, asciiCol strings.Builder
 	for i := off; i < off+row; i++ {
 		if i > off {
@@ -166,12 +259,12 @@ func (m *Model) renderHexRow(off, addrW int) string {
 			asciiCol.WriteByte(' ')
 			continue
 		}
-		b := m.hexData[i]
+		b := data[i]
 		ascii := byte('.')
 		if b >= 0x20 && b < 0x7f {
 			ascii = b
 		}
-		if i == m.hexCur {
+		if i == cur {
 			hexCol.WriteString(tableSelStyle.Render(hex2(b)))
 			asciiCol.WriteString(tableSelStyle.Render(string(ascii)))
 		} else {

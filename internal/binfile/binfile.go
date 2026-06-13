@@ -1,38 +1,130 @@
-// Package binfile loads an ELF file and exposes the bits the explorer needs:
-// header info, sections, symbols, address→source mapping, and a section-aware
-// virtual-address reader.
+// Package binfile loads an executable (ELF or Mach-O) and exposes the bits the
+// explorer needs through a single, format-neutral model: header info,
+// sections, symbols, address→source mapping, and continuous virtual-address /
+// raw-file byte images for the hex and disassembly views.
 package binfile
 
 import (
 	"debug/dwarf"
-	"debug/elf"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/psimonen/elf-explorer/internal/disasm"
 )
 
-type File struct {
-	Path      string
-	ELF       *elf.File
-	Sections  []*elf.Section
-	Symbols   []Symbol // sorted by Name
-	Info      *Info    // dynamic linker / libc / build-id (populated by loadInfo)
-	symByAddr []Symbol // sorted by Addr
-	dwarf     *dwarf.Data
-	lines     []lineEntry             // sorted by Addr
-	sources   map[string][]string     // resolved file -> lines
-	secCache  map[*elf.Section][]byte // memoised sec.Data() — sections can be MBs
+// Format identifies the container the binary was loaded from.
+type Format string
+
+const (
+	FormatELF   Format = "ELF"
+	FormatMachO Format = "Mach-O"
+)
+
+// SymKind is a format-neutral symbol category. Both ELF symbol types and the
+// looser Mach-O symbol table are mapped onto these so the UI can colour and
+// route a symbol without knowing where it came from.
+type SymKind uint8
+
+const (
+	SymOther   SymKind = iota
+	SymFunc            // executable code
+	SymObject          // data object
+	SymSection         // names a whole section
+	SymFile            // source filename
+	SymTLS             // thread-local storage
+	SymCommon          // uninitialised common block
+)
+
+// SymBind is a format-neutral symbol binding/scope.
+type SymBind uint8
+
+const (
+	BindLocal SymBind = iota
+	BindGlobal
+	BindWeak
+)
+
+// SectionCategory drives section-table row colouring without leaning on
+// format-specific section types.
+type SectionCategory uint8
+
+const (
+	CatOther   SectionCategory = iota
+	CatText                    // executable code
+	CatData                    // writable data
+	CatBSS                     // zero-initialised data
+	CatRodata                  // read-only allocated data
+	CatTLS                     // thread-local storage
+	CatDebug                   // DWARF / debug info
+	CatNote                    // notes / build metadata
+	CatSymtab                  // symbol & string tables
+	CatDynamic                 // dynamic-linking metadata
+	CatReloc                   // relocations
+)
+
+// Section is one named region of the file, in a format-neutral shape. Addr is
+// the load (virtual) address, 0 when the section is not mapped. Offset/FileSize
+// describe where its bytes live in the file (FileSize == 0 for BSS-style
+// zero-fill sections that occupy no file space).
+type Section struct {
+	Name     string
+	Addr     uint64
+	Size     uint64 // in-memory size
+	Offset   uint64 // file offset of the bytes
+	FileSize uint64 // bytes actually present in the file
+	TypeName string // short type label for the table ("PROGBITS", "__text", …)
+	Flags    string // short flag string ("AX", "r-x", …)
+	Category SectionCategory
+	Alloc    bool // occupies memory at runtime (has a virtual address)
+	Exec     bool // executable
+	Write    bool // writable
 }
 
+// Symbol is a format-neutral symbol. Name is the raw (possibly mangled) name
+// as stored in the file; Demangled holds the human-readable form when the name
+// was a recognised C++/Rust mangling, else "".
 type Symbol struct {
-	Name    string
-	Addr    uint64
-	Size    uint64
-	Type    elf.SymType
-	Bind    elf.SymBind
-	Section string
+	Name      string
+	Demangled string
+	Addr      uint64
+	Size      uint64
+	Kind      SymKind
+	Bind      SymBind
+	Section   string
+}
+
+// Display returns the demangled name when available, else the raw name.
+func (s Symbol) Display() string {
+	if s.Demangled != "" {
+		return s.Demangled
+	}
+	return s.Name
+}
+
+type File struct {
+	Path     string
+	Format   Format
+	Sections []Section
+	Symbols  []Symbol // sorted by Name
+	Info     *Info
+
+	raw       []byte // entire file contents (source for the raw view + section data)
+	arch      disasm.Arch
+	entry     uint64
+	addrWidth int // hex digits in a printed address (8 or 16)
+	header    []string
+
+	symByAddr []Symbol // sorted by Addr
+	dwarf     *dwarf.Data
+	lines     []lineEntry         // sorted by Addr
+	sources   map[string][]string // resolved file -> lines
+
+	vaImage   *Image        // all mapped sections, in VA order (lazy)
+	execImage *Image        // executable sections only, in VA order (lazy)
+	strings   []StringEntry // printable strings, extracted lazily
 }
 
 type lineEntry struct {
@@ -41,62 +133,98 @@ type lineEntry struct {
 	Line int
 }
 
+// Open reads path, detects its container format, and builds the neutral model.
 func Open(path string) (*File, error) {
-	ef, err := elf.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	f := &File{
-		Path:     path,
-		ELF:      ef,
-		Sections: ef.Sections,
-		sources:  map[string][]string{},
-		secCache: map[*elf.Section][]byte{},
+		Path:    path,
+		raw:     raw,
+		sources: map[string][]string{},
+	}
+	switch {
+	case len(raw) >= 4 && raw[0] == 0x7f && raw[1] == 'E' && raw[2] == 'L' && raw[3] == 'F':
+		if err := f.loadELF(); err != nil {
+			return nil, err
+		}
+	case isMachO(raw):
+		if err := f.loadMachO(); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unrecognised file format (not ELF or Mach-O)")
 	}
 
-	// Symbols: merge static + dynamic, dedupe by (name, addr).
-	staticSyms, _ := ef.Symbols()
-	dynSyms, _ := ef.DynamicSymbols()
-	seen := map[string]bool{}
-	add := func(s elf.Symbol) {
-		key := fmt.Sprintf("%s@%x", s.Name, s.Value)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		sec := ""
-		if int(s.Section) >= 0 && int(s.Section) < len(ef.Sections) {
-			sec = ef.Sections[s.Section].Name
-		}
-		f.Symbols = append(f.Symbols, Symbol{
-			Name:    s.Name,
-			Addr:    s.Value,
-			Size:    s.Size,
-			Type:    elf.ST_TYPE(s.Info),
-			Bind:    elf.ST_BIND(s.Info),
-			Section: sec,
-		})
-	}
-	for _, s := range staticSyms {
-		add(s)
-	}
-	for _, s := range dynSyms {
-		add(s)
+	f.finalizeSymbols()
+	return f, nil
+}
+
+// finalizeSymbols sorts symbols, fills in missing sizes, and builds the
+// address-indexed copy used for reverse lookups. Loaders append unsorted
+// symbols with their Size left at 0 when the container doesn't record one
+// (notably Mach-O); we infer those from the gap to the next symbol so the
+// disasm view can still annotate ranges and SymbolAt can cover an address.
+func (f *File) finalizeSymbols() {
+	for i := range f.Symbols {
+		f.Symbols[i].Demangled = demangleName(f.Symbols[i].Name)
 	}
 	sort.Slice(f.Symbols, func(i, j int) bool { return f.Symbols[i].Name < f.Symbols[j].Name })
 
-	f.symByAddr = make([]Symbol, len(f.Symbols))
-	copy(f.symByAddr, f.Symbols)
-	sort.Slice(f.symByAddr, func(i, j int) bool { return f.symByAddr[i].Addr < f.symByAddr[j].Addr })
-
-	// DWARF is optional.
-	if d, err := ef.DWARF(); err == nil {
-		f.dwarf = d
-		f.lines = loadLines(d)
+	f.symByAddr = make([]Symbol, 0, len(f.Symbols))
+	for _, s := range f.Symbols {
+		if s.Addr != 0 {
+			f.symByAddr = append(f.symByAddr, s)
+		}
 	}
+	sort.Slice(f.symByAddr, func(i, j int) bool {
+		if f.symByAddr[i].Addr != f.symByAddr[j].Addr {
+			return f.symByAddr[i].Addr < f.symByAddr[j].Addr
+		}
+		return f.symByAddr[i].Size > f.symByAddr[j].Size
+	})
+	f.inferSizes()
+}
 
-	f.loadInfo()
-	return f, nil
+// inferSizes gives zero-sized symbols an extent reaching to the next symbol at
+// a higher address (clamped to the containing section's end). Symbols that
+// already carry a size are left untouched.
+func (f *File) inferSizes() {
+	for i := range f.symByAddr {
+		if f.symByAddr[i].Size != 0 {
+			continue
+		}
+		addr := f.symByAddr[i].Addr
+		var next uint64
+		for j := i + 1; j < len(f.symByAddr); j++ {
+			if f.symByAddr[j].Addr > addr {
+				next = f.symByAddr[j].Addr
+				break
+			}
+		}
+		if sec := f.SectionAt(addr); sec != nil {
+			secEnd := sec.Addr + sec.Size
+			if next == 0 || next > secEnd {
+				next = secEnd
+			}
+		}
+		if next > addr {
+			f.symByAddr[i].Size = next - addr
+		}
+	}
+}
+
+// sectionData returns the file bytes backing a section (nil for zero-fill).
+func (f *File) sectionData(s *Section) []byte {
+	if s.FileSize == 0 {
+		return nil
+	}
+	end := s.Offset + s.FileSize
+	if s.Offset >= uint64(len(f.raw)) || end > uint64(len(f.raw)) {
+		return nil
+	}
+	return f.raw[s.Offset:end]
 }
 
 func loadLines(d *dwarf.Data) []lineEntry {
@@ -165,10 +293,40 @@ func (f *File) SymbolAt(addr uint64) (Symbol, bool) {
 	return Symbol{}, false
 }
 
-// SectionAt returns the section whose VM range covers addr.
-func (f *File) SectionAt(addr uint64) *elf.Section {
-	for _, s := range f.Sections {
-		if s.Type == elf.SHT_NULL || s.Flags&elf.SHF_ALLOC == 0 {
+// NextSymbol returns the first symbol (by address) strictly after addr that
+// satisfies pred (a nil pred accepts any symbol).
+func (f *File) NextSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
+	for _, s := range f.symByAddr {
+		if s.Addr <= addr {
+			continue
+		}
+		if pred == nil || pred(s) {
+			return s, true
+		}
+	}
+	return Symbol{}, false
+}
+
+// PrevSymbol returns the last symbol (by address) strictly before addr that
+// satisfies pred (a nil pred accepts any symbol).
+func (f *File) PrevSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
+	for i := len(f.symByAddr) - 1; i >= 0; i-- {
+		s := f.symByAddr[i]
+		if s.Addr >= addr {
+			continue
+		}
+		if pred == nil || pred(s) {
+			return s, true
+		}
+	}
+	return Symbol{}, false
+}
+
+// SectionAt returns the mapped section whose VM range covers addr.
+func (f *File) SectionAt(addr uint64) *Section {
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		if !s.Alloc || s.Size == 0 {
 			continue
 		}
 		if addr >= s.Addr && addr < s.Addr+s.Size {
@@ -178,110 +336,11 @@ func (f *File) SectionAt(addr uint64) *elf.Section {
 	return nil
 }
 
-// IsMapped reports whether addr falls inside any allocated section. Cheap —
-// it never loads section data. Used in tight rendering loops where we just
-// want to know "is this a follow-able address inside this binary?".
-func (f *File) IsMapped(addr uint64) bool {
-	return f.SectionAt(addr) != nil
-}
+// IsMapped reports whether addr falls inside any mapped section.
+func (f *File) IsMapped(addr uint64) bool { return f.SectionAt(addr) != nil }
 
-// NextAllocSectionAfter returns the allocated section with the smallest Addr
-// strictly greater than addr, or nil if none. Used by the hex view to step
-// over inter-section gaps when scrolling forward.
-func (f *File) NextAllocSectionAfter(addr uint64) *elf.Section {
-	var best *elf.Section
-	for _, s := range f.Sections {
-		if s.Type == elf.SHT_NULL || s.Flags&elf.SHF_ALLOC == 0 || s.Size == 0 {
-			continue
-		}
-		if s.Addr > addr && (best == nil || s.Addr < best.Addr) {
-			best = s
-		}
-	}
-	return best
-}
-
-// PrevAllocSectionBefore returns the allocated section with the largest Addr
-// strictly less than addr, or nil if none.
-func (f *File) PrevAllocSectionBefore(addr uint64) *elf.Section {
-	var best *elf.Section
-	for _, s := range f.Sections {
-		if s.Type == elf.SHT_NULL || s.Flags&elf.SHF_ALLOC == 0 || s.Size == 0 {
-			continue
-		}
-		if s.Addr < addr && (best == nil || s.Addr > best.Addr) {
-			best = s
-		}
-	}
-	return best
-}
-
-// NextExecSectionAfter is like NextAllocSectionAfter but limited to sections
-// whose contents make sense to disassemble.
-func (f *File) NextExecSectionAfter(addr uint64) *elf.Section {
-	var best *elf.Section
-	for _, s := range f.Sections {
-		if !IsExecSection(s) {
-			continue
-		}
-		if s.Addr > addr && (best == nil || s.Addr < best.Addr) {
-			best = s
-		}
-	}
-	return best
-}
-
-// PrevExecSectionBefore is like PrevAllocSectionBefore but limited to
-// executable sections.
-func (f *File) PrevExecSectionBefore(addr uint64) *elf.Section {
-	var best *elf.Section
-	for _, s := range f.Sections {
-		if !IsExecSection(s) {
-			continue
-		}
-		if s.Addr < addr && (best == nil || s.Addr > best.Addr) {
-			best = s
-		}
-	}
-	return best
-}
-
-// ReadAt reads up to n bytes from the loaded image starting at virtual addr.
-// Section data is memoised: subsequent reads from the same section are O(1).
-func (f *File) ReadAt(addr uint64, n int) ([]byte, error) {
-	sec := f.SectionAt(addr)
-	if sec == nil {
-		return nil, fmt.Errorf("address 0x%x not mapped to any allocated section", addr)
-	}
-	data, err := f.cachedSectionData(sec)
-	if err != nil {
-		return nil, err
-	}
-	off := int64(addr - sec.Addr)
-	if off >= int64(len(data)) {
-		return nil, fmt.Errorf("address 0x%x is past section end", addr)
-	}
-	end := off + int64(n)
-	if end > int64(len(data)) {
-		end = int64(len(data))
-	}
-	return data[off:end], nil
-}
-
-// cachedSectionData returns sec.Data() with memoisation. Sections in real
-// binaries can be megabytes — repeatedly reading them through sec.Data() for
-// each rendered line tanks the disasm view's framerate.
-func (f *File) cachedSectionData(sec *elf.Section) ([]byte, error) {
-	if d, ok := f.secCache[sec]; ok {
-		return d, nil
-	}
-	d, err := sec.Data()
-	if err != nil {
-		return nil, err
-	}
-	f.secCache[sec] = d
-	return d, nil
-}
+// IsExecSection reports whether a section is executable (eligible for disasm).
+func IsExecSection(s *Section) bool { return s != nil && s.Exec && s.Size > 0 }
 
 // SourceLines returns the source file's lines, searching common locations.
 func (f *File) SourceLines(name string) []string {
@@ -311,35 +370,21 @@ func (f *File) SourceLines(name string) []string {
 func (f *File) HasDWARF() bool { return f.dwarf != nil }
 
 // Entry returns the entry-point virtual address.
-func (f *File) Entry() uint64 { return f.ELF.Entry }
+func (f *File) Entry() uint64 { return f.entry }
 
-// Machine returns the ELF machine field.
-func (f *File) Machine() elf.Machine { return f.ELF.Machine }
+// Arch returns the disassembler architecture for this binary.
+func (f *File) Arch() disasm.Arch { return f.arch }
 
-// AddrHexWidth is the number of hex digits an address should be printed with
-// for this binary: 8 for 32-bit ELF, 16 for 64-bit ELF.
+// Raw returns the entire file contents (source for the raw hex view).
+func (f *File) Raw() []byte { return f.raw }
+
+// AddrHexWidth is the number of hex digits an address should be printed with.
 func (f *File) AddrHexWidth() int {
-	if f.ELF.Class == elf.ELFCLASS32 {
-		return 8
+	if f.addrWidth == 0 {
+		return 16
 	}
-	return 16
+	return f.addrWidth
 }
 
-// HeaderInfo returns the ELF header as a list of "Label: value" lines.
-func (f *File) HeaderInfo() []string {
-	h := f.ELF.FileHeader
-	return []string{
-		fmt.Sprintf("Path:        %s", f.Path),
-		fmt.Sprintf("Class:       %s", h.Class),
-		fmt.Sprintf("Data:        %s", h.Data),
-		fmt.Sprintf("Version:     %s", h.Version),
-		fmt.Sprintf("OS/ABI:      %s", h.OSABI),
-		fmt.Sprintf("ABI version: %d", h.ABIVersion),
-		fmt.Sprintf("Type:        %s", h.Type),
-		fmt.Sprintf("Machine:     %s", h.Machine),
-		fmt.Sprintf("Entry:       0x%x", h.Entry),
-		fmt.Sprintf("Sections:    %d", len(f.Sections)),
-		fmt.Sprintf("Symbols:     %d", len(f.Symbols)),
-		fmt.Sprintf("DWARF info:  %v", f.dwarf != nil),
-	}
-}
+// HeaderInfo returns the container header as a list of "Label: value" lines.
+func (f *File) HeaderInfo() []string { return f.header }

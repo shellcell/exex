@@ -97,6 +97,12 @@ type Colors struct {
 	SectionDynamicLinking string `yaml:"section_dynamic_linking"`
 	// SHT_REL/RELA — relocations.
 	SectionRelocations string `yaml:"section_relocations"`
+
+	// ---- Source pane: syntax-highlighting theme -------------------------
+	// Name of a chroma style used to highlight the disasm view's source pane
+	// (e.g. "monokai", "github-dark", "nord", "dracula", "catppuccin-mocha").
+	// Unset keeps the built-in default. Unknown names fall back gracefully.
+	SyntaxTheme string `yaml:"syntax_theme"`
 }
 
 // Keys binds string actions to one or more keys. Any entry can be a single
@@ -124,6 +130,10 @@ type Keys struct {
 	ViewHex StringOrSlice `yaml:"view_hex"`
 	// Switch to the Libs view. (default: 6)
 	ViewLibs StringOrSlice `yaml:"view_libs"`
+	// Switch to the Raw (file-offset) hex view. (default: 7)
+	ViewRaw StringOrSlice `yaml:"view_raw"`
+	// Switch to the Strings view. (default: 8)
+	ViewStrings StringOrSlice `yaml:"view_strings"`
 	// Toggle the side-by-side source pane in Disasm. (default: tab)
 	ToggleSource StringOrSlice `yaml:"toggle_source"`
 	// Copy current address. (default: a)

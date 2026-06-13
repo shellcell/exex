@@ -7,50 +7,92 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/psimonen/elf-explorer/internal/binfile"
 	"github.com/psimonen/elf-explorer/internal/disasm"
 )
 
 // historyCap caps the depth of the back/forward stack in the disasm view.
 const historyCap = 10
 
-// disasmWindow caps the number of bytes we decode at once. Big enough to fill
-// a screen comfortably, small enough to keep redraws snappy.
-const disasmWindow = 4096
+// ensureDisasm decodes *every* executable section, in virtual-address order,
+// into m.disasmInst — once, on first use. The whole-binary decode means the
+// view can scroll across all code without reloading windows, and jumps become
+// a cursor move rather than a re-decode. Returns false when no disassembler is
+// available or there is no executable code.
+func (m *Model) ensureDisasm() bool {
+	if m.disasmBuilt {
+		return m.dis != nil && len(m.disasmInst) > 0
+	}
+	m.disasmBuilt = true
+	if m.dis == nil {
+		return false
+	}
+	img := m.file.ExecImage()
+	insts := make([]disasm.Inst, 0, img.Len()/4+16)
+	for _, r := range img.Regions {
+		seg := img.Data[r.Off : r.Off+int(r.Size)]
+		insts = append(insts, disasm.Range(m.dis, seg, r.Addr, 0)...)
+	}
+	m.disasmInst = insts
+	return len(insts) > 0
+}
 
-// loadDisasmAt fills disasmInst by decoding a window starting at addr and
-// records the jump in the back/forward history. The cursor position the user
-// is leaving behind is snapshotted into the *previous* history entry first,
-// so the back arrow lands them on the exact instruction they jumped from.
+// instIndexForAddr finds the instruction covering addr (or the nearest one at
+// a lower address). ok reports whether addr actually falls within the returned
+// instruction's bytes.
+func (m *Model) instIndexForAddr(addr uint64) (idx int, ok bool) {
+	insts := m.disasmInst
+	if len(insts) == 0 {
+		return 0, false
+	}
+	i := sort.Search(len(insts), func(i int) bool { return insts[i].Addr > addr })
+	if i == 0 {
+		return 0, false
+	}
+	j := i - 1
+	in := insts[j]
+	if addr >= in.Addr && addr < in.Addr+uint64(len(in.Bytes)) {
+		return j, true
+	}
+	return j, in.Addr == addr
+}
+
+// loadDisasmAt moves the disasm cursor to addr and records the jump in the
+// back/forward history. The cursor position the user is leaving behind is
+// snapshotted into the *previous* history entry first, so the back arrow lands
+// them on the exact instruction they jumped from.
 func (m *Model) loadDisasmAt(addr uint64) {
 	m.snapshotCursorToHistory()
 	if m.loadDisasmAtNoHistory(addr) {
-		m.pushHistory(addr)
+		m.pushHistory(m.disasmInst[m.disasmCur].Addr)
 	}
 }
 
-// loadDisasmAtNoHistory is the same as loadDisasmAt minus the history push.
-// Used by back/forward so they don't recursively record their own steps.
-// Returns true on success.
+// loadDisasmAtNoHistory is loadDisasmAt minus the history push. Used by
+// back/forward so they don't recursively record their own steps. Returns true
+// on success.
 func (m *Model) loadDisasmAtNoHistory(addr uint64) bool {
-	if m.dis == nil {
-		m.setStatus("no disassembler for this architecture", true)
+	if !m.ensureDisasm() {
+		m.setStatus("no disassembler / no executable code", true)
 		return false
 	}
-	buf, err := m.file.ReadAt(addr, disasmWindow)
-	if err != nil {
-		m.setStatus(err.Error(), true)
-		return false
+	idx, ok := m.instIndexForAddr(addr)
+	if !ok {
+		if _, mapped := m.file.ExecImage().PosForAddr(addr); !mapped {
+			m.setStatus(fmt.Sprintf("0x%x is not in an executable section", addr), true)
+			return false
+		}
 	}
-	m.disasmAddr = addr
-	m.disasmInst = disasm.Range(m.dis, buf, addr, 0)
-	m.disasmCur = 0
-	m.disasmTop = 0
+	m.disasmCur = idx
+	m.disasmTop = idx
+	m.disasmPositioned = true
 	m.mode = modeDisasm
 	m.status = ""
 	return true
@@ -114,6 +156,35 @@ func (m *Model) goForward() {
 	m.setStatus(fmt.Sprintf("forward (%d/%d)", m.historyPos+1, len(m.history)), false)
 }
 
+// jumpSymbol moves the cursor to the next (or previous) symbol that lives in
+// executable code, so the user can step function-by-function through the
+// disassembly. The jump is recorded in the back/forward history.
+func (m *Model) jumpSymbol(forward bool) {
+	if len(m.disasmInst) == 0 {
+		return
+	}
+	cur := m.disasmInst[m.disasmCur].Addr
+	inExec := func(s binfile.Symbol) bool {
+		_, ok := m.file.ExecImage().PosForAddr(s.Addr)
+		return ok
+	}
+	var (
+		sym binfile.Symbol
+		ok  bool
+	)
+	if forward {
+		sym, ok = m.file.NextSymbol(cur, inExec)
+	} else {
+		sym, ok = m.file.PrevSymbol(cur, inExec)
+	}
+	if !ok {
+		m.setStatus("no more symbols in this direction", false)
+		return
+	}
+	m.loadDisasmAt(sym.Addr)
+	m.setStatus("→ "+sym.Display(), false)
+}
+
 func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "left":
@@ -122,6 +193,12 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	case "right":
 		m.goForward()
 		return m, nil
+	case "]":
+		m.jumpSymbol(true)
+		return m, nil
+	case "[":
+		m.jumpSymbol(false)
+		return m, nil
 	case "up", "k":
 		if m.disasmCur > 0 {
 			m.disasmCur--
@@ -129,18 +206,6 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		if m.disasmCur < len(m.disasmInst)-1 {
 			m.disasmCur++
-		}
-		// Auto-load next window when running off the end. Use the no-history
-		// variant so plain scrolling doesn't pollute the back/forward stack.
-		if m.disasmCur >= len(m.disasmInst)-1 && len(m.disasmInst) > 0 {
-			last := m.disasmInst[len(m.disasmInst)-1]
-			next := last.Addr + uint64(len(last.Bytes))
-			if m.file.IsMapped(next) {
-				saved := m.disasmCur
-				m.loadDisasmAtNoHistory(next)
-				m.mode = modeDisasm
-				m.disasmCur = saved
-			}
 		}
 	case "pgup":
 		m.disasmCur = max(0, m.disasmCur-m.bodyHeight())
@@ -279,9 +344,9 @@ func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uin
 func (m *Model) targetAnnotation(addr uint64) string {
 	if sym, ok := m.file.SymbolAt(addr); ok {
 		if addr == sym.Addr {
-			return sym.Name
+			return sym.Display()
 		}
-		return fmt.Sprintf("%s+0x%x", sym.Name, addr-sym.Addr)
+		return fmt.Sprintf("%s+0x%x", sym.Display(), addr-sym.Addr)
 	}
 	if sec := m.file.SectionAt(addr); sec != nil {
 		return sec.Name
@@ -323,9 +388,9 @@ func (m *Model) renderStickySymbol(w int) string {
 	if sym, ok := m.file.SymbolAt(addr); ok {
 		off := addr - sym.Addr
 		if off == 0 {
-			text = fmt.Sprintf(" %s   @  0x%0*x", sym.Name, m.file.AddrHexWidth(), addr)
+			text = fmt.Sprintf(" %s   @  0x%0*x", sym.Display(), m.file.AddrHexWidth(), addr)
 		} else {
-			text = fmt.Sprintf(" %s + 0x%x   @  0x%0*x", sym.Name, off, m.file.AddrHexWidth(), addr)
+			text = fmt.Sprintf(" %s + 0x%x   @  0x%0*x", sym.Display(), off, m.file.AddrHexWidth(), addr)
 		}
 	} else {
 		text = fmt.Sprintf(" (no symbol)   @  0x%0*x", m.file.AddrHexWidth(), addr)
@@ -352,7 +417,7 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 	for i := m.disasmTop; i < end && emitted < h; i++ {
 		inst := m.disasmInst[i]
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			tag := symbolNameStyle.Render("<" + sym.Name + ">:")
+			tag := symbolNameStyle.Render("<" + sym.Display() + ">:")
 			b.WriteString(padRight(" "+tag, w))
 			b.WriteString("\n")
 			emitted++
@@ -406,6 +471,8 @@ func (m *Model) renderSourcePane(w, h int) string {
 		return border.Render(padBody(body, inner, h))
 	}
 
+	hl := m.highlightedSource(file, src)
+
 	var b strings.Builder
 	b.WriteString(infoStyle.Render(fmt.Sprintf("%s:%d", file, line)))
 	b.WriteString("\n")
@@ -427,12 +494,21 @@ func (m *Model) renderSourcePane(w, h int) string {
 		if i-1 >= 0 && i-1 < len(src) {
 			content = src[i-1]
 		}
-		prefix := srcLineNoStyle.Render(fmt.Sprintf("%5d  ", i))
-		ln := prefix + content
-		if i == line {
-			ln = srcCurLineStyle.Render(padRight(stripANSI(ln), inner))
+		// Prefer the syntax-highlighted rendering of this line when available.
+		shown := content
+		if hl != nil && i-1 >= 0 && i-1 < len(hl) {
+			shown = hl[i-1]
 		}
-		b.WriteString(ln)
+		// The current line gets a highlighted gutter + marker so it stands out
+		// without flattening the token colours of the code itself.
+		var prefix string
+		if i == line {
+			prefix = srcCurLineStyle.Render(fmt.Sprintf("%4d ▸ ", i))
+		} else {
+			prefix = srcLineNoStyle.Render(fmt.Sprintf("%4d   ", i))
+		}
+		avail := inner - lipgloss.Width(stripANSI(prefix))
+		b.WriteString(prefix + fitANSIWidth(shown, avail))
 		b.WriteString("\n")
 	}
 	return border.Render(padBody(b.String(), inner, h))

@@ -1,11 +1,9 @@
 package ui
 
 import (
-	"debug/elf"
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/psimonen/elf-explorer/internal/binfile"
 	"github.com/psimonen/elf-explorer/internal/disasm"
 )
 
@@ -30,77 +28,91 @@ func styleForClass(c disasm.InstClass) lipgloss.Style {
 	return mnemonicStyle
 }
 
-// styleForSymbol picks the row colour for a symbol based on its ELF type.
+// styleForSymbol picks the row colour for a symbol based on its neutral kind.
 // Bind (LOCAL/GLOBAL/WEAK) is folded in: globals are bold, weaks are italic,
-// locals stay plain — so the same colour family stays consistent for the
-// type while letting the eye spot scope at a glance.
-//
-// All colours come from the package-level palette vars so user config (loaded
-// by ApplyColors) takes effect automatically.
-func styleForSymbol(t elf.SymType, b elf.SymBind) lipgloss.Style {
+// locals stay plain — so the same colour family stays consistent for the kind
+// while letting the eye spot scope at a glance.
+func styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Style {
 	var base lipgloss.Style
-	switch t {
-	case elf.STT_FUNC:
+	switch k {
+	case binfile.SymFunc:
 		base = symFuncStyle
-	case elf.STT_OBJECT:
+	case binfile.SymObject:
 		base = symObjectStyle
-	case elf.STT_FILE:
+	case binfile.SymFile:
 		base = symFileStyle
-	case elf.STT_SECTION:
+	case binfile.SymSection:
 		base = symSectionStyle
-	case elf.STT_TLS:
+	case binfile.SymTLS:
 		base = symTLSStyle
-	case elf.STT_COMMON:
+	case binfile.SymCommon:
 		base = symCommonStyle
 	default:
 		base = symOtherStyle
 	}
 	switch b {
-	case elf.STB_GLOBAL:
+	case binfile.BindGlobal:
 		base = base.Bold(true)
-	case elf.STB_WEAK:
+	case binfile.BindWeak:
 		base = base.Italic(true)
 	}
 	return base
 }
 
-// styleForSection picks the row colour for a section based on its semantics.
-// Reads from the package-level palette so user config overrides take effect.
-func styleForSection(s *elf.Section) lipgloss.Style {
+// styleForSection picks the row colour for a section based on its category.
+func styleForSection(s *binfile.Section) lipgloss.Style {
 	if s == nil {
 		return tableRowStyle
 	}
-	name := s.Name
-	flags := s.Flags
-
-	// Debug info first — typically large and noisy.
-	if strings.HasPrefix(name, ".debug") || strings.HasPrefix(name, ".zdebug") {
+	switch s.Category {
+	case binfile.CatDebug:
 		return secDebugStyle
-	}
-	if strings.HasPrefix(name, ".note") {
+	case binfile.CatNote:
 		return secNoteStyle
-	}
-	switch s.Type {
-	case elf.SHT_SYMTAB, elf.SHT_DYNSYM, elf.SHT_STRTAB:
+	case binfile.CatSymtab:
 		return secSymtabStyle
-	case elf.SHT_DYNAMIC, elf.SHT_HASH, elf.SHT_GNU_HASH, elf.SHT_GNU_VERSYM,
-		elf.SHT_GNU_VERDEF, elf.SHT_GNU_VERNEED:
+	case binfile.CatDynamic:
 		return secDynamicStyle
-	}
-	if s.Type == elf.SHT_REL || s.Type == elf.SHT_RELA {
+	case binfile.CatReloc:
 		return secRelocStyle
-	}
-	if flags&elf.SHF_EXECINSTR != 0 {
+	case binfile.CatText:
 		return secTextStyle
-	}
-	if flags&elf.SHF_TLS != 0 {
+	case binfile.CatTLS:
 		return secTLSStyle
-	}
-	if flags&elf.SHF_WRITE != 0 {
+	case binfile.CatData, binfile.CatBSS:
 		return secDataStyle
-	}
-	if flags&elf.SHF_ALLOC != 0 {
+	case binfile.CatRodata:
 		return secRodataStyle
 	}
 	return tableRowStyle
+}
+
+// kindString / bindString render neutral symbol kinds and bindings for the
+// symbol table's Type and Bind columns.
+func kindString(k binfile.SymKind) string {
+	switch k {
+	case binfile.SymFunc:
+		return "FUNC"
+	case binfile.SymObject:
+		return "OBJECT"
+	case binfile.SymSection:
+		return "SECTION"
+	case binfile.SymFile:
+		return "FILE"
+	case binfile.SymTLS:
+		return "TLS"
+	case binfile.SymCommon:
+		return "COMMON"
+	}
+	return "NOTYPE"
+}
+
+func bindString(b binfile.SymBind) string {
+	switch b {
+	case binfile.BindGlobal:
+		return "GLOBAL"
+	case binfile.BindWeak:
+		return "WEAK"
+	}
+	return "LOCAL"
 }

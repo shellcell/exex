@@ -52,6 +52,11 @@ colors:
   section_dynamic_linking: "141"   # DYNAMIC / HASH / GNU_VERSYM*
   section_relocations: "173"       # REL / RELA
 
+  # ---- Source pane syntax-highlighting theme -----------------------------
+  # Any chroma style name, e.g. monokai, github-dark, nord, dracula,
+  # catppuccin-mocha, onedark, vulcan. Unknown names fall back gracefully.
+  syntax_theme: catppuccin-mocha
+
 keys:
   quit: [q, ctrl+c]
   goto: g
@@ -61,6 +66,7 @@ keys:
   view_disasm: "4"
   view_hex: "5"
   view_libs: "6"
+  view_raw: "7"
   toggle_source: tab
   copy_address: a
   copy_symbol: s

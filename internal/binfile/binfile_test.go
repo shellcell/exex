@@ -49,22 +49,21 @@ func TestOpenAndProbeSampleBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if !f.HasDWARF() {
-		t.Fatal("expected DWARF info in sample binary")
-	}
 	if f.Entry() == 0 {
 		t.Fatal("expected non-zero entry")
 	}
 
-	var foundMain, foundMultiply bool
-	for _, s := range f.Symbols {
-		if s.Name == "main" {
-			foundMain = true
+	// Symbol names may carry a leading underscore (Mach-O / macОS).
+	sym := func(name string) (Symbol, bool) {
+		for _, s := range f.Symbols {
+			if s.Name == name || s.Name == "_"+name {
+				return s, true
+			}
 		}
-		if s.Name == "multiply" {
-			foundMultiply = true
-		}
+		return Symbol{}, false
 	}
+	mainSym, foundMain := sym("main")
+	_, foundMultiply := sym("multiply")
 	if !foundMain || !foundMultiply {
 		t.Fatalf("missing expected symbols: main=%v multiply=%v", foundMain, foundMultiply)
 	}
@@ -74,19 +73,21 @@ func TestOpenAndProbeSampleBinary(t *testing.T) {
 		t.Fatalf("entry 0x%x not mapped to any section", f.Entry())
 	}
 
-	// DWARF should map main's address to sample.c.
-	var mainAddr uint64
-	for _, s := range f.Symbols {
-		if s.Name == "main" {
-			mainAddr = s.Addr
-			break
+	// The executable image should cover the entry point.
+	if _, ok := f.ExecImage().PosForAddr(f.Entry()); !ok {
+		t.Fatalf("entry 0x%x not present in the executable image", f.Entry())
+	}
+
+	// DWARF is optional: linked Mach-O executables keep their debug info in
+	// separate .o/dSYM bundles. Only assert source mapping when DWARF is
+	// actually embedded (e.g. ELF builds with -g).
+	if f.HasDWARF() {
+		file, line := f.LookupAddr(mainSym.Addr)
+		if file == "" || line == 0 {
+			t.Fatalf("addr→source lookup failed for main at 0x%x", mainSym.Addr)
 		}
-	}
-	file, line := f.LookupAddr(mainAddr)
-	if file == "" || line == 0 {
-		t.Fatalf("addr→source lookup failed for main at 0x%x", mainAddr)
-	}
-	if !strings.HasSuffix(file, "sample.c") {
-		t.Fatalf("unexpected source file: %s", file)
+		if !strings.HasSuffix(file, "sample.c") {
+			t.Fatalf("unexpected source file: %s", file)
+		}
 	}
 }

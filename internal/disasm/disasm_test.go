@@ -1,42 +1,16 @@
 package disasm
 
 import (
-	"debug/elf"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestAMD64SampleHasCommonInstruction(t *testing.T) {
-	cc, err := exec.LookPath("gcc")
-	if err != nil {
-		cc, err = exec.LookPath("cc")
-	}
-	if err != nil {
-		t.Skip("no C compiler")
-	}
-	dir := t.TempDir()
-	src := filepath.Join(dir, "s.c")
-	bin := filepath.Join(dir, "s")
-	if err := os.WriteFile(src, []byte("int main(void){return 0;}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command(cc, "-O0", "-o", bin, src).CombinedOutput()
-	if err != nil {
-		t.Fatalf("compile failed: %v\n%s", err, out)
-	}
-
-	ef, err := elf.Open(bin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ef.Close()
-	if ef.Machine != elf.EM_X86_64 {
-		t.Skipf("host is %s, not x86-64", ef.Machine)
-	}
-	d, err := For(ef.Machine)
+// TestAMD64DecodesCommonPrologue decodes a hand-assembled x86-64 function
+// prologue. Keeping the bytes inline makes the test independent of any host
+// compiler or object-file container (the explorer runs on both ELF and
+// Mach-O hosts, so reaching for a real binary here would be fragile).
+func TestAMD64DecodesCommonPrologue(t *testing.T) {
+	d, err := For(ArchAMD64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,30 +18,28 @@ func TestAMD64SampleHasCommonInstruction(t *testing.T) {
 		t.Fatalf("unexpected disassembler: %s", d.Name())
 	}
 
-	// Find .text and decode a slice; expect at least one "mov" or "push".
-	for _, s := range ef.Sections {
-		if s.Name != ".text" {
-			continue
-		}
-		data, err := s.Data()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(data) > 256 {
-			data = data[:256]
-		}
-		insts := Range(d, data, s.Addr, 0)
-		if len(insts) == 0 {
-			t.Fatal("no instructions decoded from .text")
-		}
-		joined := ""
-		for _, i := range insts {
-			joined += " " + i.Text
-		}
-		if !(strings.Contains(joined, "push") || strings.Contains(joined, "mov")) {
-			t.Fatalf("expected push/mov in decoded .text, got: %s", joined)
-		}
-		return
+	// push %rbp; mov %rsp,%rbp; xor %eax,%eax; pop %rbp; ret
+	code := []byte{0x55, 0x48, 0x89, 0xe5, 0x31, 0xc0, 0x5d, 0xc3}
+	insts := Range(d, code, 0x1000, 0)
+	if len(insts) == 0 {
+		t.Fatal("no instructions decoded")
 	}
-	t.Fatal(".text section not found")
+	var joined string
+	for _, i := range insts {
+		joined += " " + i.Text
+	}
+	if !strings.Contains(joined, "push") || !strings.Contains(joined, "mov") {
+		t.Fatalf("expected push/mov in decoded stream, got:%s", joined)
+	}
+
+	// The classifier should flag the trailing ret.
+	if got := insts[len(insts)-1].Class; got != ClassRet {
+		t.Fatalf("expected last instruction classified as ret, got %v", got)
+	}
+}
+
+func TestUnsupportedArch(t *testing.T) {
+	if _, err := For(ArchUnknown); err == nil {
+		t.Fatal("expected error for unknown arch")
+	}
 }

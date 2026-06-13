@@ -3,13 +3,25 @@
 package disasm
 
 import (
-	"debug/elf"
 	"fmt"
 	"strings"
 
 	"golang.org/x/arch/arm64/arm64asm"
 	"golang.org/x/arch/riscv64/riscv64asm"
 	"golang.org/x/arch/x86/x86asm"
+)
+
+// Arch is a format-neutral CPU architecture selector. binfile maps each
+// container's machine field (ELF e_machine, Mach-O cputype, …) onto one of
+// these so the disassembler never has to know which container it came from.
+type Arch uint8
+
+const (
+	ArchUnknown Arch = iota
+	ArchX86          // 32-bit x86
+	ArchAMD64        // x86-64
+	ArchARM64        // AArch64
+	ArchRISCV64      // 64-bit RISC-V
 )
 
 // InstClass classifies an instruction's high-level role so the UI can colour
@@ -97,18 +109,18 @@ type Disassembler interface {
 	Name() string
 }
 
-func For(m elf.Machine) (Disassembler, error) {
-	switch m {
-	case elf.EM_X86_64:
+func For(a Arch) (Disassembler, error) {
+	switch a {
+	case ArchAMD64:
 		return amd64{}, nil
-	case elf.EM_386:
+	case ArchX86:
 		return x86{}, nil
-	case elf.EM_AARCH64:
+	case ArchARM64:
 		return arm64d{}, nil
-	case elf.EM_RISCV:
+	case ArchRISCV64:
 		return riscv64d{}, nil
 	}
-	return nil, fmt.Errorf("unsupported machine: %s", m)
+	return nil, fmt.Errorf("unsupported architecture")
 }
 
 type amd64 struct{}

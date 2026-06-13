@@ -2,11 +2,11 @@
 package ui
 
 import (
-	"debug/elf"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -28,6 +28,8 @@ const (
 	modeDisasm
 	modeHex
 	modeLibs
+	modeRaw
+	modeStrings
 )
 
 func (m mode) String() string {
@@ -44,6 +46,10 @@ func (m mode) String() string {
 		return "Hex"
 	case modeLibs:
 		return "Libs"
+	case modeRaw:
+		return "Raw"
+	case modeStrings:
+		return "Strings"
 	}
 	return "?"
 }
@@ -61,7 +67,7 @@ type Model struct {
 	headerVP viewport.Model
 
 	// Sections view.
-	sections    []*elf.Section
+	sections    []binfile.Section
 	sectionsCur int
 	sectionsTop int
 
@@ -71,13 +77,20 @@ type Model struct {
 	symbolsCur      int
 	symbolsTop      int
 
-	// Disasm view.
-	disasmAddr uint64
-	disasmInst []disasm.Inst
-	disasmCur  int
-	disasmTop  int
-	showSource bool
-	srcVP      viewport.Model
+	// Disasm view. disasmInst holds the decode of *every* executable section,
+	// in virtual-address order, built once on first use (disasmBuilt). The
+	// decode is deferred until the view is first opened; disasmInitAddr is where
+	// the cursor lands on that first open (the entry point), and
+	// disasmPositioned guards that one-time landing.
+	disasmInst       []disasm.Inst
+	disasmBuilt      bool
+	disasmInitAddr   uint64
+	disasmPositioned bool
+	disasmCur        int
+	disasmTop        int
+	showSource       bool
+	srcVP            viewport.Model
+	srcHL            map[string][]string // filename → per-line syntax-highlighted source
 
 	// Navigation history for the disasm view: the last `historyCap` jump
 	// targets, with `historyPos` indicating where in that ring we are. Left
@@ -85,16 +98,29 @@ type Model struct {
 	history    []uint64
 	historyPos int
 
-	// Hex view.
-	hexBase    uint64
-	hexData    []byte
-	hexSection *elf.Section
-	hexCur     int // byte offset into hexData
-	hexTop     int // first row's byte offset (multiple of bytesPerHexRow)
+	// Hex view (virtual-address): a continuous dump of every mapped section,
+	// addressed by virtual address via hexImg.
+	hexImg *binfile.Image
+	hexCur int // byte position into hexImg.Data
+	hexTop int // first row's byte position (multiple of bytesPerHexRow)
+
+	// Raw view: the entire file dumped by file offset.
+	rawData []byte
+	rawCur  int
+	rawTop  int
 
 	// Libs view.
 	libsCur int
 	libsTop int
+
+	// Strings view.
+	stringsList []binfile.StringEntry
+	stringsCur  int
+	stringsTop  int
+
+	// Mouse double-click tracking (for follow-on-double-click in disasm).
+	lastClickY  int
+	lastClickAt time.Time
 
 	// Go-to-address modal.
 	gotoInput  textinput.Model
@@ -109,7 +135,7 @@ type Model struct {
 }
 
 func New(f *binfile.File) (*Model, error) {
-	d, err := disasm.For(f.Machine())
+	d, err := disasm.For(f.Arch())
 	if err != nil {
 		// Don't fail — the user can still browse header/sections/symbols.
 		d = nil
@@ -149,10 +175,9 @@ func New(f *binfile.File) (*Model, error) {
 	m.srcVP = viewport.New(0, 0)
 	m.recomputeSymbols()
 
-	// Land the disasm cursor on the entry point by default if it's mapped.
-	if d != nil && f.Entry() != 0 {
-		m.loadDisasmAt(f.Entry())
-	}
+	// The disassembly is decoded lazily on first open (it can be large); record
+	// where the cursor should land then — the entry point.
+	m.disasmInitAddr = f.Entry()
 	return m, nil
 }
 
@@ -163,7 +188,9 @@ func (m *Model) recomputeSymbols() {
 	needle := strings.ToLower(m.symbolsFilter.Value())
 	m.symbolsFiltered = m.symbolsFiltered[:0]
 	for i, s := range m.file.Symbols {
-		if needle == "" || strings.Contains(strings.ToLower(s.Name), needle) {
+		if needle == "" ||
+			strings.Contains(strings.ToLower(s.Name), needle) ||
+			(s.Demangled != "" && strings.Contains(strings.ToLower(s.Demangled), needle)) {
 			m.symbolsFiltered = append(m.symbolsFiltered, i)
 		}
 	}
@@ -171,7 +198,6 @@ func (m *Model) recomputeSymbols() {
 		m.symbolsCur = max(0, len(m.symbolsFiltered)-1)
 	}
 }
-
 
 func (m *Model) setStatus(s string, isError bool) {
 	m.status = s
@@ -191,6 +217,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 	return m, nil
 }
@@ -242,26 +271,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case actionQuit:
 		return m, tea.Quit
 	case actionViewInfo:
-		m.mode = modeInfo
+		m.switchMode(modeInfo)
 		return m, nil
 	case actionViewSections:
-		m.mode = modeSections
+		m.switchMode(modeSections)
 		return m, nil
 	case actionViewSymbols:
-		m.mode = modeSymbols
+		m.switchMode(modeSymbols)
 		return m, nil
 	case actionViewDisasm:
-		if m.dis == nil {
-			m.setStatus("no disassembler for this architecture", true)
-			return m, nil
-		}
-		m.mode = modeDisasm
+		m.switchMode(modeDisasm)
 		return m, nil
 	case actionViewHex:
-		m.mode = modeHex
+		m.switchMode(modeHex)
 		return m, nil
 	case actionViewLibs:
-		m.mode = modeLibs
+		m.switchMode(modeLibs)
+		return m, nil
+	case actionViewRaw:
+		m.switchMode(modeRaw)
+		return m, nil
+	case actionViewStrings:
+		m.switchMode(modeStrings)
 		return m, nil
 	case actionGoto:
 		m.gotoActive = true
@@ -283,9 +314,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateDisasm(key)
 	case modeHex:
 		return m.updateHex(key)
+	case modeRaw:
+		return m.updateRaw(key)
+	case modeStrings:
+		return m.updateStrings(key)
 	case modeLibs:
 		return m.updateLibs(key)
 	case modeInfo:
+		switch key {
+		case "home":
+			m.headerVP.GotoTop()
+			return m, nil
+		case "end", "G":
+			m.headerVP.GotoBottom()
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.headerVP, cmd = m.headerVP.Update(msg)
 		return m, cmd
@@ -313,10 +356,15 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		m.sectionsCur = len(m.sections) - 1
 	case "enter":
 		sec := m.sections[m.sectionsCur]
-		if binfile.IsExecSection(sec) && m.dis != nil {
+		switch {
+		case binfile.IsExecSection(&sec) && m.dis != nil:
 			m.loadDisasmAt(sec.Addr)
-		} else {
-			m.openHexForSection(sec)
+		case sec.Alloc && sec.Addr != 0:
+			m.openHexAt(sec.Addr)
+		default:
+			// No virtual address (debug, symbol tables, …): show its bytes in
+			// the raw file view at the section's file offset.
+			m.openRawAt(sec.Offset)
 		}
 	case "a":
 		sec := m.sections[m.sectionsCur]
@@ -327,8 +375,6 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-
-
 
 func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 	switch key {
@@ -377,53 +423,26 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openSymbol opens a symbol in the most appropriate view:
+// openSymbol opens a symbol in the most appropriate view. The hex and disasm
+// views span the whole binary now, so this only chooses which view to land in
+// and seeks the cursor onto the symbol's address:
 //   - FUNC                  → disasm
-//   - OBJECT/TLS/COMMON     → hex view of the *whole containing section*,
-//                             with the cursor parked on the symbol's bytes
-//                             (so the user can scroll around adjacent data)
-//   - SECTION               → hex view of the whole section
-//   - NOTYPE                → exec section ⇒ disasm; else hex (whole section)
+//   - OBJECT/TLS/COMMON     → hex (virtual-address) view, cursor on the symbol
+//   - SECTION               → exec ⇒ disasm; else hex/raw at the section
+//   - NOTYPE                → exec section ⇒ disasm; else hex; else raw
 func (m *Model) openSymbol(sym binfile.Symbol) {
-	switch sym.Type {
-	case elf.STT_FUNC:
+	switch sym.Kind {
+	case binfile.SymFunc:
 		m.loadDisasmAt(sym.Addr)
-	case elf.STT_OBJECT, elf.STT_TLS, elf.STT_COMMON:
-		m.openHexInSectionAt(sym.Addr, sym.Size)
-	case elf.STT_SECTION:
-		if sec := m.file.SectionAt(sym.Addr); sec != nil {
-			m.openHexForSection(sec)
-		} else {
-			m.openHexAt(sym.Addr, sym.Size)
-		}
+	case binfile.SymObject, binfile.SymTLS, binfile.SymCommon:
+		m.openHexAt(sym.Addr)
 	default:
 		if sec := m.file.SectionAt(sym.Addr); sec != nil && binfile.IsExecSection(sec) {
 			m.loadDisasmAt(sym.Addr)
 		} else {
-			m.openHexInSectionAt(sym.Addr, sym.Size)
+			m.openHexAt(sym.Addr)
 		}
 	}
-}
-
-// openHexInSectionAt opens the hex viewer on the section containing addr,
-// then seeks the cursor to addr (and best-effort to the start of the
-// symbol's row in the visible window). If addr isn't inside any allocated
-// section it falls back to a windowed read of just `size` bytes.
-func (m *Model) openHexInSectionAt(addr, size uint64) {
-	sec := m.file.SectionAt(addr)
-	if sec == nil {
-		m.openHexAt(addr, size)
-		return
-	}
-	m.openHexForSection(sec)
-	off := int(addr - sec.Addr)
-	if off < 0 || off >= len(m.hexData) {
-		return
-	}
-	m.hexCur = off
-	// Align the top row to the cursor's row so the symbol is immediately
-	// visible after the jump.
-	m.hexTop = (off / bytesPerHexRow) * bytesPerHexRow
 }
 
 // copyToClipboard puts text on the system clipboard and reports success or
@@ -440,35 +459,43 @@ func (m *Model) handleGoto(val string) {
 	if val == "" {
 		return
 	}
-	// Hex address first.
-	parsed, err := parseAddr(val)
-	if err == nil {
-		if m.dis == nil {
-			m.setStatus("no disassembler for this architecture", true)
-			return
-		}
-		m.loadDisasmAt(parsed)
+	// A numeric address routes to whichever view can show it.
+	if parsed, err := parseAddr(val); err == nil {
+		m.gotoAddr(parsed)
 		return
 	}
 	// Else treat as symbol name (exact, then substring).
 	idx := sort.Search(len(m.file.Symbols), func(i int) bool { return m.file.Symbols[i].Name >= val })
-	if idx < len(m.file.Symbols) && m.file.Symbols[idx].Name == val {
-		s := m.file.Symbols[idx]
-		if s.Addr != 0 && m.dis != nil {
-			m.loadDisasmAt(s.Addr)
-			return
-		}
+	if idx < len(m.file.Symbols) && m.file.Symbols[idx].Name == val && m.file.Symbols[idx].Addr != 0 {
+		m.openSymbol(m.file.Symbols[idx])
+		return
 	}
 	needle := strings.ToLower(val)
 	for _, s := range m.file.Symbols {
-		if s.Addr != 0 && strings.Contains(strings.ToLower(s.Name), needle) {
-			if m.dis != nil {
-				m.loadDisasmAt(s.Addr)
-				return
-			}
+		if s.Addr == 0 {
+			continue
+		}
+		if strings.Contains(strings.ToLower(s.Name), needle) ||
+			(s.Demangled != "" && strings.Contains(strings.ToLower(s.Demangled), needle)) {
+			m.openSymbol(s)
+			return
 		}
 	}
 	m.setStatus(fmt.Sprintf("not found: %s", val), true)
+}
+
+// gotoAddr jumps to a virtual address: disasm if it lands in executable code,
+// otherwise the hex view if it lands in any mapped section.
+func (m *Model) gotoAddr(addr uint64) {
+	if _, ok := m.file.ExecImage().PosForAddr(addr); ok && m.dis != nil {
+		m.loadDisasmAt(addr)
+		return
+	}
+	if _, ok := m.file.VAImage().PosForAddr(addr); ok {
+		m.openHexAt(addr)
+		return
+	}
+	m.setStatus(fmt.Sprintf("0x%x is not in any mapped section", addr), true)
 }
 
 func parseAddr(s string) (uint64, error) {
@@ -503,6 +530,10 @@ func (m *Model) View() string {
 		body = m.renderDisasm()
 	case modeHex:
 		body = m.renderHex()
+	case modeRaw:
+		body = m.renderRaw()
+	case modeStrings:
+		body = m.renderStrings()
 	case modeLibs:
 		body = m.renderLibs()
 	}
@@ -517,23 +548,35 @@ func (m *Model) View() string {
 	return out
 }
 
+// tabItems is the ordered tab strip, shared by renderTabs (drawing) and
+// tabHitTest (mouse mapping) so the two never drift apart.
+var tabItems = []struct {
+	label string
+	mode  mode
+}{
+	{"1·Info", modeInfo},
+	{"2·Sections", modeSections},
+	{"3·Symbols", modeSymbols},
+	{"4·Disasm", modeDisasm},
+	{"5·Hex", modeHex},
+	{"6·Libs", modeLibs},
+	{"7·Raw", modeRaw},
+	{"8·Strings", modeStrings},
+}
+
+func (m *Model) tabSegment(label string, active bool) string {
+	if active {
+		return activeTabStyle.Render(label)
+	}
+	return tabStyle.Render(label)
+}
+
 func (m *Model) renderTabs() string {
-	render := func(label string, active bool) string {
-		if active {
-			return activeTabStyle.Render(label)
-		}
-		return tabStyle.Render(label)
+	segs := []string{titleStyle.Render(" elf-explorer ")}
+	for _, t := range tabItems {
+		segs = append(segs, m.tabSegment(t.label, m.mode == t.mode))
 	}
-	tabs := []string{
-		titleStyle.Render(" elf-explorer "),
-		render("1·Info", m.mode == modeInfo),
-		render("2·Sections", m.mode == modeSections),
-		render("3·Symbols", m.mode == modeSymbols),
-		render("4·Disasm", m.mode == modeDisasm),
-		render("5·Hex", m.mode == modeHex),
-		render("6·Libs", m.mode == modeLibs),
-	}
-	row := lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
+	row := lipgloss.JoinHorizontal(lipgloss.Left, segs...)
 	pad := m.width - lipgloss.Width(row)
 	if pad > 0 {
 		row += strings.Repeat(" ", pad)
@@ -541,21 +584,62 @@ func (m *Model) renderTabs() string {
 	return row
 }
 
+// tabHitTest maps an x column on the tab row to the tab the user clicked.
+func (m *Model) tabHitTest(x int) (mode, bool) {
+	pos := lipgloss.Width(titleStyle.Render(" elf-explorer "))
+	for _, t := range tabItems {
+		w := lipgloss.Width(m.tabSegment(t.label, m.mode == t.mode))
+		if x >= pos && x < pos+w {
+			return t.mode, true
+		}
+		pos += w
+	}
+	return 0, false
+}
+
+// switchMode changes the active view, building the lazy state a view needs
+// before it can render. Shared by the keyboard dispatch and tab clicks.
+func (m *Model) switchMode(md mode) {
+	switch md {
+	case modeDisasm:
+		if !m.ensureDisasm() {
+			m.setStatus("no disassembler for this architecture", true)
+			return
+		}
+		// First time in: land on the entry point. loadDisasmAt sets the mode.
+		if !m.disasmPositioned && m.disasmInitAddr != 0 {
+			m.loadDisasmAt(m.disasmInitAddr)
+			return
+		}
+	case modeHex:
+		m.ensureHex()
+	case modeRaw:
+		m.ensureRaw()
+	case modeStrings:
+		m.ensureStrings()
+	}
+	m.mode = md
+}
+
 func (m *Model) renderFooter() string {
 	var help string
 	switch m.mode {
 	case modeInfo:
-		help = "1-6 switch view · g goto · q quit"
+		help = "1-8 switch view · ↑/↓ scroll · Home/End begin/end · g goto · q quit"
+	case modeStrings:
+		help = "↑/↓ move · Home/End begin/end · Enter jump (if mapped) · a copy addr/off · s copy string · q quit"
 	case modeSections:
-		help = "↑/↓ move · Enter view (disasm or hex) · g goto · q quit"
+		help = "↑/↓ move · Home/End begin/end · Enter view (disasm/hex/raw) · g goto · q quit"
 	case modeSymbols:
-		help = "↑/↓ move · / filter · Enter jump · g goto · q quit"
+		help = "↑/↓ move · Home/End begin/end · / filter · Enter jump · g goto · q quit"
 	case modeDisasm:
-		help = "↑/↓ scroll · ←/→ history · Enter follow · a copy addr · s copy sym · Tab source · g goto · q quit"
+		help = "↑/↓ scroll · [ ] prev/next sym · ←/→ history · Home/End begin/end · Enter follow · a/s copy · Tab src · g goto · q quit"
 	case modeHex:
-		help = "←/↓/↑/→ move · a copy addr · s copy sym · g goto · q quit"
+		help = "↑/↓/←/→ move · [ ] prev/next non-zero · Home/End begin/end · a copy addr · s copy sym · g goto · q quit"
+	case modeRaw:
+		help = "↑/↓/←/→ move · [ ] prev/next non-zero · Home/End begin/end · a copy offset · s copy sec · g goto · q quit"
 	case modeLibs:
-		help = "↑/↓ move · q quit"
+		help = "↑/↓ move · Home/End begin/end · q quit"
 	}
 	left := footerStyle.Render(help)
 	right := ""
@@ -654,8 +738,8 @@ func padKey(s string, w int) string {
 func (m *Model) renderSections() string {
 	bodyH := m.bodyHeight()
 	// columns: idx, name, type, addr, size, flags
-	addrW := m.file.AddrHexWidth()        // hex digits in an address
-	addrCol := 2 + addrW                  // "0x" + digits
+	addrW := m.file.AddrHexWidth() // hex digits in an address
+	addrCol := 2 + addrW           // "0x" + digits
 	hdr := fmt.Sprintf(" %3s  %-22s %-14s %-*s %-12s  %s",
 		"#", "Name", "Type", addrCol, "Addr", "Size", "Flags")
 	if len(hdr) > m.width {
@@ -683,12 +767,12 @@ func (m *Model) renderSections() string {
 	for i := m.sectionsTop; i < end; i++ {
 		s := m.sections[i]
 		line := fmt.Sprintf(" %3d  %-22s %-14s 0x%0*x %-12d  %s",
-			i, truncate(s.Name, 22), trimSecType(s.Type.String()), addrW, s.Addr, s.Size, sectionFlags(s.Flags))
+			i, truncate(s.Name, 22), truncate(s.TypeName, 14), addrW, s.Addr, s.Size, s.Flags)
 		line = padRight(line, m.width)
 		if i == m.sectionsCur {
 			b.WriteString(tableSelStyle.Render(line))
 		} else {
-			b.WriteString(styleForSection(s).Render(line))
+			b.WriteString(styleForSection(&s).Render(line))
 		}
 		b.WriteString("\n")
 	}
@@ -733,18 +817,17 @@ func (m *Model) renderSymbols() string {
 	for i := m.symbolsTop; i < end; i++ {
 		s := m.file.Symbols[m.symbolsFiltered[i]]
 		line := fmt.Sprintf(" 0x%0*x %-6d %-5s %-8s  %s",
-			addrW, s.Addr, s.Size, trimBind(s.Bind), trimType(s.Type), s.Name)
+			addrW, s.Addr, s.Size, bindString(s.Bind), kindString(s.Kind), s.Display())
 		line = padRight(line, m.width)
 		if i == m.symbolsCur {
 			rows.WriteString(tableSelStyle.Render(line))
 		} else {
-			rows.WriteString(styleForSymbol(s.Type, s.Bind).Render(line))
+			rows.WriteString(styleForSymbol(s.Kind, s.Bind).Render(line))
 		}
 		rows.WriteString("\n")
 	}
 	return padBody(rows.String(), m.width, bodyH)
 }
-
 
 // ---- helpers ----
 
@@ -816,40 +899,6 @@ func padBody(s string, w, h int) string {
 	return strings.Join(lines, "\n")
 }
 
-func sectionFlags(f elf.SectionFlag) string {
-	var b strings.Builder
-	if f&elf.SHF_ALLOC != 0 {
-		b.WriteByte('A')
-	}
-	if f&elf.SHF_WRITE != 0 {
-		b.WriteByte('W')
-	}
-	if f&elf.SHF_EXECINSTR != 0 {
-		b.WriteByte('X')
-	}
-	if f&elf.SHF_MERGE != 0 {
-		b.WriteByte('M')
-	}
-	if f&elf.SHF_STRINGS != 0 {
-		b.WriteByte('S')
-	}
-	if f&elf.SHF_TLS != 0 {
-		b.WriteByte('T')
-	}
-	if b.Len() == 0 {
-		return "-"
-	}
-	return b.String()
-}
-
-func trimSecType(s string) string { return strings.TrimPrefix(s, "SHT_") }
-func trimBind(b elf.SymBind) string {
-	return strings.TrimPrefix(b.String(), "STB_")
-}
-func trimType(t elf.SymType) string {
-	return strings.TrimPrefix(t.String(), "STT_")
-}
-
 // overlay places fg over bg at column x, row y. Both are pre-rendered strings.
 func overlay(bg, fg string, x, y int) string {
 	if x < 0 {
@@ -906,6 +955,20 @@ func stripANSI(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+// fitANSIWidth keeps a styled string intact when it fits within w visible
+// columns, and falls back to a plain truncation when it doesn't — so a single
+// over-long source line can't break the side-by-side layout while normal-width
+// lines retain their syntax colours.
+func fitANSIWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if lipgloss.Width(stripANSI(s)) <= w {
+		return s
+	}
+	return truncateANSI(s, w)
 }
 
 // truncateANSI naively truncates while keeping the trailing SGR reset.

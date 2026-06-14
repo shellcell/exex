@@ -14,6 +14,15 @@ type Image struct {
 	Regions []Region
 }
 
+// Window is a bounded slice of an Image. Start/End are byte positions within
+// Image.Data; End is exclusive.
+type Window struct {
+	Addr  uint64
+	Data  []byte
+	Start int
+	End   int
+}
+
 // Region records where one section landed inside the flattened image.
 type Region struct {
 	Addr uint64 // virtual address of the first byte
@@ -70,6 +79,64 @@ func (im *Image) RegionAt(pos int) *Region {
 		return nil
 	}
 	return &im.Regions[i-1]
+}
+
+// Window returns a clamped byte window into the image.
+func (im *Image) Window(start, size int) Window {
+	if im == nil || len(im.Data) == 0 || size <= 0 {
+		return Window{}
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(im.Data) {
+		start = len(im.Data)
+	}
+	if size > len(im.Data)-start {
+		size = len(im.Data) - start
+	}
+	end := start + size
+	if end < start {
+		end = start
+	}
+	return Window{
+		Addr:  im.AddrAt(start),
+		Data:  im.Data[start:end],
+		Start: start,
+		End:   end,
+	}
+}
+
+// WindowContaining returns a clamped byte window that contains addr, with up
+// to before bytes of context preceding it.
+func (im *Image) WindowContaining(addr uint64, size, before int) (Window, bool) {
+	pos, ok := im.PosForAddr(addr)
+	if !ok {
+		return Window{}, false
+	}
+	if size <= 0 || size > len(im.Data) {
+		size = len(im.Data)
+	}
+	if size == 0 {
+		return Window{}, false
+	}
+	if before < 0 {
+		before = 0
+	}
+	if before >= size {
+		before = size - 1
+	}
+	start := pos - before
+	if start < 0 {
+		start = 0
+	}
+	if start+size > len(im.Data) {
+		start = len(im.Data) - size
+		if start < 0 {
+			start = 0
+		}
+	}
+	return im.Window(start, size), true
 }
 
 // buildImage flattens the sections selected by keep (in VA order) into an Image.

@@ -43,3 +43,21 @@ func TestUnsupportedArch(t *testing.T) {
 		t.Fatal("expected error for unknown arch")
 	}
 }
+
+func TestAMD64RangeRecoversFromDecoderPanic(t *testing.T) {
+	d, err := For(ArchAMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// These bytes have triggered x/arch x86 AVX decoder panics in the wild when
+	// decoding from a mid-stream offset. Range must degrade them to bad bytes
+	// instead of letting the panic escape into the UI.
+	code := []byte{0xc5, 0xf5, 0x00, 0x00, 0x62, 0x61, 0x7d, 0x08, 0x00, 0x00}
+	insts := Range(d, code, 0x1000, 0)
+	if len(insts) == 0 {
+		t.Fatal("expected placeholder instructions for undecodable bytes")
+	}
+	if insts[0].Text != "(bad)" {
+		t.Fatalf("first instruction = %q, want (bad)", insts[0].Text)
+	}
+}

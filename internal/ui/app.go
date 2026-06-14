@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -32,6 +33,8 @@ const (
 	modeRaw
 	modeStrings
 )
+
+const defaultDisasmMaxBytes = 2 << 20
 
 func (m mode) String() string {
 	switch m {
@@ -80,22 +83,29 @@ type Model struct {
 	symbolsCur      int
 	symbolsTop      int
 
-	// Disasm view. disasmInst holds the decode of *every* executable section,
-	// in virtual-address order, built once on first use (disasmBuilt). The
-	// decode is deferred until the view is first opened; disasmInitAddr is where
-	// the cursor lands on that first open (the entry point), and
-	// disasmPositioned guards that one-time landing.
-	disasmInst       []disasm.Inst
-	disasmBuilt      bool
-	disasmDecoding   bool // background decode in flight
-	disasmInitAddr   uint64
-	disasmTarget     string // configured landing/redirect strategy
-	disasmPositioned bool
-	disasmCur        int
-	disasmTop        int
-	showSource       bool
-	srcVP            viewport.Model
-	srcHL            map[string][]string // filename → per-line syntax-highlighted source
+	// Disasm view. disasmInst holds the currently loaded decode window only. The
+	// first window is loaded lazily on first open; later jumps replace it with a
+	// bounded span around the requested address so large binaries never expand
+	// into a whole-image instruction slice.
+	disasmInst          []disasm.Inst
+	disasmBuilt         bool
+	disasmDecoding      bool // background decode in flight
+	disasmMaxBytes      int
+	disasmSearchWorkers int
+	disasmPendingAddr   uint64
+	disasmInitAddr      uint64
+	disasmTarget        string // configured landing/redirect strategy
+	disasmPositioned    bool
+	disasmCur           int
+	disasmTop           int
+	disasmPosLo         int
+	disasmPosHi         int
+	disasmCacheMu       sync.RWMutex
+	disasmCache         map[disasmCacheKey]disasmCacheEntry
+	disasmCacheOrder    []disasmCacheKey
+	showSource          bool
+	srcVP               viewport.Model
+	srcHL               map[string][]string // filename → per-line syntax-highlighted source
 
 	// Navigation history for the disasm view: the last `historyCap` jump
 	// targets, with `historyPos` indicating where in that ring we are. Left
@@ -135,9 +145,17 @@ type Model struct {
 	gotoTop     int // scroll offset into gotoResults
 
 	// Search prompt (hex / raw / disasm), with last query remembered for n/N.
-	searchInput  textinput.Model
-	searchActive bool
-	searchQuery  string
+	searchInput      textinput.Model
+	searchActive     bool
+	searchQuery      string
+	searchSeq        int
+	searchRunning    bool
+	searchCancelable bool
+	searchResults    disasmSearchCache
+	searchCursorMode int
+	searchCursorAddr uint64
+	searchForward    bool
+	searchFromCursor bool
 
 	// Transient status message displayed in the footer.
 	status      string
@@ -206,17 +224,22 @@ func New(f *binfile.File) (*Model, error) {
 	searchInput.CharLimit = 256
 
 	m := &Model{
-		file:           f,
-		dis:            d,
-		mode:           modeInfo,
-		sections:       f.Sections,
-		symbolsFilter:  filter,
-		sectionsFilter: secFilter,
-		gotoInput:      gotoInput,
-		searchInput:    searchInput,
-		showSource:     true,
-		keys:           keys,
-		keyAlias:       keyAlias,
+		file:                f,
+		dis:                 d,
+		mode:                modeInfo,
+		disasmMaxBytes:      defaultDisasmMaxBytes,
+		disasmSearchWorkers: 0,
+		disasmCache:         map[disasmCacheKey]disasmCacheEntry{},
+		sections:            f.Sections,
+		symbolsFilter:       filter,
+		sectionsFilter:      secFilter,
+		gotoInput:           gotoInput,
+		searchInput:         searchInput,
+		searchForward:       true,
+		searchFromCursor:    true,
+		showSource:          true,
+		keys:                keys,
+		keyAlias:            keyAlias,
 	}
 	m.headerVP = viewport.New(0, 0)
 	m.srcVP = viewport.New(0, 0)
@@ -229,6 +252,12 @@ func New(f *binfile.File) (*Model, error) {
 	m.disasmTarget = cfg.Behavior.DefaultDisasmTarget
 	if m.disasmTarget == "" {
 		m.disasmTarget = "lowest"
+	}
+	if cfg.Behavior.DisasmMaxBytes > 0 {
+		m.disasmMaxBytes = cfg.Behavior.DisasmMaxBytes
+	}
+	if cfg.Behavior.DisasmSearchWorkers > 0 {
+		m.disasmSearchWorkers = cfg.Behavior.DisasmSearchWorkers
 	}
 	m.disasmInitAddr = f.DefaultExecAddr(m.disasmTarget)
 
@@ -262,7 +291,7 @@ func (m *Model) Init() tea.Cmd {
 	// If the configured default view is Disasm, switchMode already flagged a
 	// decode; kick it off here (New can't return a Cmd).
 	if m.disasmDecoding && !m.disasmBuilt && m.dis != nil {
-		return m.decodeDisasmCmd()
+		return m.decodeDisasmCmd(m.disasmPendingAddr)
 	}
 	return nil
 }
@@ -290,13 +319,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	case disasmReadyMsg:
-		// Ignore a late delivery if a synchronous decode already ran.
-		if !m.disasmDecoding {
+		// Ignore late delivery if a synchronous jump already loaded a newer span.
+		if !m.disasmDecoding || msg.addr != m.disasmPendingAddr {
 			return m, nil
 		}
 		m.disasmInst = msg.insts
+		m.disasmPosLo = msg.posLo
+		m.disasmPosHi = msg.posHi
 		m.disasmBuilt = true
 		m.disasmDecoding = false
+		m.disasmPendingAddr = 0
 		if len(m.disasmInst) == 0 {
 			m.setStatus("no executable code to disassemble", true)
 			return m, nil
@@ -304,6 +336,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.disasmPositioned && m.disasmInitAddr != 0 {
 			m.loadDisasmAt(m.disasmInitAddr)
 		}
+		return m, nil
+
+	case disasmSearchProgressMsg:
+		if !m.searchRunning || msg.seq != m.searchSeq {
+			return m, nil
+		}
+		m.cacheDisasmSearchHits(msg.found, msg.forward)
+		m.noteDisasmSearchCoverage(msg.scannedLo, msg.scannedHi)
+		if msg.done {
+			m.searchRunning = false
+			m.searchCancelable = false
+			if msg.hit != nil {
+				m.setDisasmWindow(msg.hit.win, msg.hit.insts)
+				m.disasmCur = msg.hit.idx
+				m.disasmTop = msg.hit.idx
+				m.disasmPositioned = true
+				m.mode = modeDisasm
+				m.searchCursorMode = searchCursorAtMatch
+				m.searchCursorAddr = msg.hit.addr
+				m.setStatus("match: "+strings.TrimSpace(msg.hit.text), false)
+				return m, m.prefetchDisasmAroundCmd(msg.hit.addr)
+			} else {
+				if msg.next.forward {
+					m.searchResults.forwardExhausted = true
+					m.searchCursorMode = searchCursorAfterEnd
+				} else {
+					m.searchResults.backwardExhausted = true
+					m.searchCursorMode = searchCursorBeforeStart
+				}
+				m.searchCursorAddr = 0
+				m.setStatus("not found: "+m.searchQuery, true)
+			}
+			return m, nil
+		}
+		m.setStatus(msg.status, false)
+		return m, m.searchDisasmStepCmd(msg.next)
+
+	case disasmPrefetchMsg:
 		return m, nil
 	}
 	return m, nil
@@ -315,6 +385,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The help overlay swallows the next keypress to dismiss itself.
 	if m.helpActive {
 		m.helpActive = false
+		return m, nil
+	}
+	if m.searchRunning && key == "esc" {
+		m.cancelSearch("search cancelled")
 		return m, nil
 	}
 
@@ -351,12 +425,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.searchActive = false
 			m.searchInput.Blur()
 			return m, nil
+		case "ctrl+r":
+			m.searchForward = !m.searchForward
+			return m, nil
+		case "ctrl+o":
+			m.searchFromCursor = !m.searchFromCursor
+			return m, nil
 		case "enter":
 			m.searchQuery = strings.TrimSpace(m.searchInput.Value())
 			m.searchActive = false
 			m.searchInput.Blur()
-			m.runSearch(true, true)
-			return m, nil
+			return m, m.runSearchFromPrompt()
 		}
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
@@ -734,8 +813,21 @@ func (m *Model) renderSearchModal() string {
 	case modeHex, modeRaw:
 		hint = "Search hex bytes (de ad be ef), \"text\", or 0x…"
 	}
+	direction := "forward"
+	origin := "from current"
+	if !m.searchForward {
+		direction = "backward"
+	}
+	if !m.searchFromCursor {
+		if m.searchForward {
+			origin = "from start"
+		} else {
+			origin = "from end"
+		}
+	}
 	body := hint + "\n\n" + m.searchInput.View() + "\n\n" +
-		footerStyle.Render("Enter find · Esc cancel · then n/N for next/prev")
+		footerStyle.Render(fmt.Sprintf("direction: %s · origin: %s", direction, origin)) + "\n" +
+		footerStyle.Render("Ctrl+R toggle direction · Ctrl+O toggle origin · Enter find · Esc cancel · then n/N for next/prev")
 	return modalStyle.Render(body)
 }
 
@@ -813,11 +905,13 @@ func (m *Model) switchMode(md mode) tea.Cmd {
 		}
 		m.mode = modeDisasm
 		if !m.disasmBuilt {
-			// Decode in the background and show a spinner meanwhile; the cursor
-			// lands on the entry point when the decode lands (disasmReadyMsg).
+			// Decode the initial window in the background; later jumps decode a
+			// fresh bounded span synchronously so targeted navigation lands
+			// immediately.
 			if !m.disasmDecoding {
 				m.disasmDecoding = true
-				return m.decodeDisasmCmd()
+				m.disasmPendingAddr = m.disasmInitAddr
+				return m.decodeDisasmCmd(m.disasmInitAddr)
 			}
 			return nil
 		}
@@ -851,6 +945,9 @@ func (m *Model) renderFooter() string {
 		help = "Enter jump · / filter · g goto · ? help · q quit"
 	case modeDisasm:
 		help = "Enter follow · [ ] sym · ←/→ history · / search · g goto · ? help · q quit"
+		if m.searchRunning {
+			help = "Esc cancel search · [ ] sym · ←/→ history · / search · g goto · ? help · q quit"
+		}
 	case modeHex:
 		help = "[ ] non-zero · / search · a/s copy · g goto · ? help · q quit"
 	case modeRaw:

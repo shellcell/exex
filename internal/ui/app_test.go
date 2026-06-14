@@ -13,7 +13,7 @@ import (
 // TestRenderAllViews drives the model through every view (and some navigation)
 // against a real binary, asserting each frame renders without panicking and
 // produces output. It's a smoke test for the format-neutral rewrite and the
-// new full-file hex / disasm / raw views.
+// new full-file hex / raw views and the bounded disasm window.
 func TestRenderAllViews(t *testing.T) {
 	path := firstExisting("/bin/ls", "/usr/bin/true", "/bin/cat")
 	if path == "" {
@@ -27,6 +27,7 @@ func TestRenderAllViews(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	m.disasmMaxBytes = 16 << 10
 
 	var model tea.Model = m
 
@@ -37,7 +38,9 @@ func TestRenderAllViews(t *testing.T) {
 		t.Helper()
 		model, _ = model.Update(msg)
 		if mm, ok := model.(*Model); ok && mm.disasmDecoding {
-			model, _ = model.Update(disasmReadyMsg{insts: mm.decodeExecImage()})
+			addr := mm.disasmPendingAddr
+			win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
+			model, _ = model.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
 		}
 	}
 
@@ -55,6 +58,16 @@ func TestRenderAllViews(t *testing.T) {
 		pump(msg)
 		if strings.TrimSpace(model.View()) == "" {
 			t.Fatalf("empty render after key %q", s)
+		}
+	}
+	assertDisasmBudget := func() {
+		t.Helper()
+		mm, ok := model.(*Model)
+		if !ok || len(mm.disasmInst) == 0 {
+			return
+		}
+		if got := mm.disasmPosHi - mm.disasmPosLo; got > mm.disasmMaxBytes {
+			t.Fatalf("disasm window = %d bytes, budget = %d", got, mm.disasmMaxBytes)
 		}
 	}
 
@@ -82,15 +95,22 @@ func TestRenderAllViews(t *testing.T) {
 	send("pgup")
 	send("]")
 	send("[")
-	// Disasm: scroll, step symbols, follow, and walk history.
+	// Disasm: scroll across multiple windows, step symbols, follow, search, and
+	// walk history.
 	send("4")
+	assertDisasmBudget()
 	send("pgdown")
+	assertDisasmBudget()
 	send("]")
+	assertDisasmBudget()
 	send("[")
 	send("enter")
+	assertDisasmBudget()
 	send("left")
 	send("end")
+	assertDisasmBudget()
 	send("home")
+	assertDisasmBudget()
 
 	// Mouse: wheel scroll and a left click in a few views.
 	mouse := func(b tea.MouseButton, action tea.MouseAction, x, y int) {
@@ -143,7 +163,9 @@ func TestRenderAllViews(t *testing.T) {
 	send("/")
 	send("m")
 	send("enter")
+	assertDisasmBudget()
 	send("n")
+	assertDisasmBudget()
 
 	// Sections filter.
 	send("2")
@@ -172,6 +194,286 @@ func TestRenderAllViews(t *testing.T) {
 	}
 }
 
+func TestGotoChromeMainOnChromiumBinary(t *testing.T) {
+	const path = "/usr/lib/chromium-browser/chromium-browser"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("chromium binary unavailable")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	m, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.disasmMaxBytes = 256 << 10
+
+	model := tea.Model(m)
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	mm := model.(*Model)
+
+	mm.gotoInput.SetValue("ChromeMain")
+	mm.recomputeGoto()
+	if len(mm.gotoResults) == 0 {
+		t.Fatal("expected goto results for ChromeMain")
+	}
+	mm.activateGoto()
+	if mm.mode != modeDisasm {
+		t.Fatalf("mode = %v, want disasm", mm.mode)
+	}
+	if len(mm.disasmInst) == 0 {
+		t.Fatal("expected disasm window after goto")
+	}
+	addr := mm.disasmInst[mm.disasmCur].Addr
+	sym, ok := mm.file.SymbolAt(addr)
+	if !ok {
+		t.Fatalf("no symbol at current disasm address 0x%x", addr)
+	}
+	if sym.Display() != "ChromeMain" {
+		t.Fatalf("landed on %q at 0x%x, want ChromeMain", sym.Display(), addr)
+	}
+	if got := mm.disasmPosHi - mm.disasmPosLo; got > mm.disasmMaxBytes {
+		t.Fatalf("disasm window = %d bytes, budget = %d", got, mm.disasmMaxBytes)
+	}
+
+	mm.jumpDisasmBoundary(false)
+	mm.searchQuery = "ChromeMain"
+	runModelCmd(t, mm, mm.runSearch(true, true))
+	if len(mm.disasmInst) == 0 {
+		t.Fatal("expected disasm window after search")
+	}
+	addr = mm.disasmInst[mm.disasmCur].Addr
+	sym, ok = mm.file.SymbolAt(addr)
+	if !ok || sym.Display() != "ChromeMain" {
+		t.Fatalf("search landed on %q at 0x%x, want ChromeMain", sym.Display(), addr)
+	}
+}
+
+func TestSearchMovsblOnChromiumBinary(t *testing.T) {
+	const path = "/usr/lib/chromium-browser/chromium-browser"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("chromium binary unavailable")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	m, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.disasmMaxBytes = 256 << 10
+	m.width, m.height = 120, 40
+
+	m.jumpDisasmBoundary(false)
+	m.searchQuery = "movsbl"
+	runModelCmd(t, m, m.runSearch(true, true))
+	if len(m.disasmInst) == 0 {
+		t.Fatal("expected disasm window after search")
+	}
+	got := strings.ToLower(m.disasmInst[m.disasmCur].Text)
+	if !strings.Contains(got, "movsbl") {
+		t.Fatalf("search landed on %q, want movsbl", got)
+	}
+	if got := m.disasmPosHi - m.disasmPosLo; got > m.disasmMaxBytes {
+		t.Fatalf("disasm window = %d bytes, budget = %d", got, m.disasmMaxBytes)
+	}
+	first := m.disasmInst[m.disasmCur].Addr
+	if len(m.searchResults.hits) < 2 {
+		t.Fatalf("expected cached movsbl hits, got %d", len(m.searchResults.hits))
+	}
+	cmd := m.runSearch(true, false)
+	if m.searchRunning {
+		t.Fatal("expected cached movsbl hit not to start background search")
+	}
+	runModelCmd(t, m, cmd)
+	second := m.disasmInst[m.disasmCur].Addr
+	if second <= first {
+		t.Fatalf("expected later cached movsbl hit, got 0x%x after 0x%x", second, first)
+	}
+	for i := 0; i < 6; i++ {
+		runModelCmd(t, m, m.runSearch(true, false))
+	}
+	if len(m.searchResults.hits) < 6 {
+		t.Fatalf("expected several cached movsbl hits, got %d", len(m.searchResults.hits))
+	}
+	for i := 0; i < 4; i++ {
+		cmd = m.runSearch(false, false)
+		if m.searchRunning {
+			t.Fatal("expected backward cached hit not to restart background search")
+		}
+		runModelCmd(t, m, cmd)
+	}
+}
+
+func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
+	const path = "/usr/lib/chromium-browser/chromium-browser"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("chromium binary unavailable")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	m, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.disasmMaxBytes = 256 << 10
+	m.width, m.height = 120, 40
+
+	m.jumpDisasmBoundary(false)
+	m.searchQuery = "badbeef"
+	runModelCmd(t, m, m.runSearch(true, true))
+	first := m.disasmInst[m.disasmCur].Addr
+	if !strings.Contains(strings.ToLower(m.disasmInst[m.disasmCur].Text), "badbeef") {
+		t.Fatalf("first hit = %q, want badbeef", m.disasmInst[m.disasmCur].Text)
+	}
+	runModelCmd(t, m, m.runSearch(true, false))
+	second := m.disasmInst[m.disasmCur].Addr
+	if second <= first {
+		t.Fatalf("second hit 0x%x should be after first 0x%x", second, first)
+	}
+	runModelCmd(t, m, m.runSearch(true, false))
+	if !m.searchResults.forwardExhausted {
+		t.Fatal("expected forward search to be exhausted after second badbeef hit")
+	}
+	cmd := m.runSearch(false, false)
+	if m.searchRunning {
+		t.Fatal("expected backward repeat after end to use cache")
+	}
+	runModelCmd(t, m, cmd)
+	if got := m.disasmInst[m.disasmCur].Addr; got != second {
+		t.Fatalf("first backward cached hit = 0x%x, want last hit 0x%x", got, second)
+	}
+	cmd = m.runSearch(false, false)
+	if m.searchRunning {
+		t.Fatal("expected second backward repeat after end to use cache")
+	}
+	runModelCmd(t, m, cmd)
+	if got := m.disasmInst[m.disasmCur].Addr; got != first {
+		t.Fatalf("second backward cached hit = 0x%x, want first hit 0x%x", got, first)
+	}
+	cmd = m.runSearch(false, false)
+	if m.searchRunning {
+		t.Fatal("expected backward repeat before first hit not to rescan fully covered search")
+	}
+	if cmd != nil {
+		runModelCmd(t, m, cmd)
+	}
+	if got := m.disasmInst[m.disasmCur].Addr; got != first {
+		t.Fatalf("backward repeat before first hit moved to 0x%x, want to stay at first hit 0x%x", got, first)
+	}
+}
+
+func TestDisasmAutoLoadsVisibleScreenOnChromiumBinary(t *testing.T) {
+	const path = "/usr/lib/chromium-browser/chromium-browser"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("chromium binary unavailable")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	m, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.disasmMaxBytes = 128 << 10
+	m.width, m.height = 120, 20
+
+	m.jumpDisasmBoundary(false)
+	m.disasmCur = len(m.disasmInst) - 1
+	oldLo, oldHi := m.disasmPosLo, m.disasmPosHi
+	out := m.renderDisasm()
+	if m.disasmPosHi <= oldHi {
+		t.Fatal("expected render to load more code below")
+	}
+	if strings.Contains(out, "scroll to load") {
+		t.Fatal("unexpected disasm load hint after auto-load")
+	}
+
+	m.jumpDisasmBoundary(true)
+	m.disasmCur = 0
+	oldLo, oldHi = m.disasmPosLo, m.disasmPosHi
+	out = m.renderDisasm()
+	if m.disasmPosLo >= oldLo {
+		t.Fatal("expected render to load more code above")
+	}
+	if strings.Contains(out, "scroll to load") {
+		t.Fatal("unexpected disasm load hint after auto-load")
+	}
+}
+
+func TestDisasmSearchShowsProgressAndCancels(t *testing.T) {
+	const path = "/usr/lib/chromium-browser/chromium-browser"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("chromium binary unavailable")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	m, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.disasmMaxBytes = 256 << 10
+	m.width, m.height = 120, 40
+	m.jumpDisasmBoundary(false)
+	m.searchQuery = "definitely-not-present-search-token"
+
+	cmd := m.runSearch(true, true)
+	if !m.searchRunning {
+		t.Fatal("expected async disasm search to start")
+	}
+	msg := cmd()
+	model, next := m.Update(msg)
+	mm := model.(*Model)
+	if !mm.searchRunning {
+		t.Fatal("expected search to continue after first chunk")
+	}
+	if next == nil {
+		t.Fatal("expected follow-up search command")
+	}
+	if !strings.Contains(mm.status, "searching disasm") || !strings.Contains(mm.status, "Esc cancels") {
+		t.Fatalf("unexpected search status: %q", mm.status)
+	}
+	mm.cancelSearch("search cancelled")
+	if mm.searchRunning {
+		t.Fatal("expected search cancellation to stop search")
+	}
+	if mm.status != "search cancelled" {
+		t.Fatalf("unexpected cancel status: %q", mm.status)
+	}
+	model, cmd = mm.Update(next())
+	mm = model.(*Model)
+	if mm.status != "search cancelled" {
+		t.Fatalf("stale search message changed status to %q", mm.status)
+	}
+	if cmd != nil {
+		t.Fatal("expected cancelled stale search message not to schedule more work")
+	}
+}
+
+func TestDisasmSearchWorkersAndBatchSizing(t *testing.T) {
+	m := &Model{disasmSearchWorkers: 3, disasmMaxBytes: 256 << 10}
+	if got := m.disasmSearchWorkersFor(10); got != 3 {
+		t.Fatalf("workers = %d, want 3", got)
+	}
+	if got := m.disasmSearchWorkersFor(2); got != 2 {
+		t.Fatalf("workers capped to chunks = %d, want 2", got)
+	}
+	if got := m.disasmSearchBatchChunks(); got < 2 {
+		t.Fatalf("batch chunks = %d, want >= 2", got)
+	}
+	m.disasmMaxBytes = 64 << 10
+	if got := m.disasmSearchBatchChunks(); got < 4 {
+		t.Fatalf("small-chunk batch = %d, want >= 4", got)
+	}
+}
+
 func keyType(s string) tea.KeyType {
 	switch s {
 	case "down":
@@ -194,6 +496,20 @@ func keyType(s string) tea.KeyType {
 		return tea.KeyEnter
 	}
 	return tea.KeyRunes
+}
+
+func runModelCmd(t *testing.T, m *Model, cmd tea.Cmd) {
+	t.Helper()
+	for cmd != nil {
+		msg := cmd()
+		var model tea.Model
+		model, cmd = m.Update(msg)
+		mm, ok := model.(*Model)
+		if !ok {
+			t.Fatal("expected *Model from Update")
+		}
+		m = mm
+	}
 }
 
 func firstExisting(paths ...string) string {

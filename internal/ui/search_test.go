@@ -16,6 +16,8 @@ func TestSearchPattern(t *testing.T) {
 		{"hello", []byte("hello")}, // not all hex → text
 		{"abc", []byte("abc")},     // odd length → text
 		{"DEAD", []byte{0xde, 0xad}},
+		{" hi ", []byte(" hi ")},
+		{"de ad ", []byte("de ad ")},
 	}
 	for _, c := range cases {
 		if got := searchPattern(c.in); !bytes.Equal(got, c.want) {

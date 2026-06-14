@@ -82,3 +82,8 @@ behavior:
   # a non-executable address): lowest, text, main, start, or entry. Defaults to
   # lowest (the lowest executable address). Unresolvable choices fall back.
   default_disasm_target: lowest
+  # Maximum executable bytes decoded into disassembly at once. Navigation and
+  # search slide this window through the executable image with overlap.
+  disasm_max_bytes: 2097152  # 2 MiB
+  # Parallel workers for background disasm search. 0 keeps the adaptive default.
+  disasm_search_workers: 0

@@ -91,3 +91,30 @@ func TestOpenAndProbeSampleBinary(t *testing.T) {
 		}
 	}
 }
+
+func TestImageWindowContainingBoundsAndPreservesTarget(t *testing.T) {
+	im := &Image{Data: []byte("abcdefghijklmnopqrstuvwxyz")}
+	im.Regions = []Region{{Addr: 0x1000, Size: uint64(len(im.Data)), Off: 0, Name: ".text"}}
+
+	win, ok := im.WindowContaining(0x1008, 10, 3)
+	if !ok {
+		t.Fatal("expected window containing target")
+	}
+	if win.Start != 5 || win.End != 15 {
+		t.Fatalf("window bounds = [%d,%d), want [5,15)", win.Start, win.End)
+	}
+	if win.Addr != 0x1005 {
+		t.Fatalf("window addr = 0x%x, want 0x1005", win.Addr)
+	}
+
+	win, ok = im.WindowContaining(0x1018, 10, 3)
+	if !ok {
+		t.Fatal("expected trailing window containing target")
+	}
+	if win.Start != 16 || win.End != 26 {
+		t.Fatalf("trailing bounds = [%d,%d), want [16,26)", win.Start, win.End)
+	}
+	if win.Addr > 0x1018 || win.Addr+uint64(len(win.Data)) <= 0x1018 {
+		t.Fatalf("window [0x%x,0x%x) does not contain target", win.Addr, win.Addr+uint64(len(win.Data)))
+	}
+}

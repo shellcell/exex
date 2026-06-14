@@ -33,6 +33,13 @@ type Behavior struct {
 	// Empty keeps the default (entry). Unresolvable choices fall back down the
 	// list automatically.
 	DefaultDisasmTarget string `yaml:"default_disasm_target"`
+	// Maximum executable bytes to decode into disassembly at once. Empty/zero
+	// keeps the built-in default (5 MiB). Global disasm navigation and search
+	// slide this window through the executable image with overlap.
+	DisasmMaxBytes int `yaml:"disasm_max_bytes"`
+	// Number of parallel workers used by background disassembly search. Empty/
+	// zero keeps the adaptive default.
+	DisasmSearchWorkers int `yaml:"disasm_search_workers"`
 }
 
 // Colors lists every visual element the user can re-skin. Empty strings mean

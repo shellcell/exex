@@ -128,7 +128,7 @@ type amd64 struct{}
 func (amd64) Name() string { return "x86-64" }
 func (amd64) Step() int    { return 1 }
 func (amd64) Decode(code []byte, addr uint64) (Inst, error) {
-	inst, err := x86asm.Decode(code, 64)
+	inst, err := decodeX86(code, 64)
 	if err != nil {
 		return Inst{}, err
 	}
@@ -141,12 +141,21 @@ type x86 struct{}
 func (x86) Name() string { return "x86" }
 func (x86) Step() int    { return 1 }
 func (x86) Decode(code []byte, addr uint64) (Inst, error) {
-	inst, err := x86asm.Decode(code, 32)
+	inst, err := decodeX86(code, 32)
 	if err != nil {
 		return Inst{}, err
 	}
 	text := x86asm.GNUSyntax(inst, addr, nil)
 	return Inst{Addr: addr, Bytes: code[:inst.Len], Text: text, Class: Classify(text)}, nil
+}
+
+func decodeX86(code []byte, mode int) (inst x86asm.Inst, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("x86 decode panic: %v", r)
+		}
+	}()
+	return x86asm.Decode(code, mode)
 }
 
 type arm64d struct{}

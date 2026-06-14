@@ -7,6 +7,7 @@ package ui
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,22 +23,215 @@ import (
 const historyCap = 10
 
 // disasmReadyMsg carries the finished decode from the background worker.
-type disasmReadyMsg struct{ insts []disasm.Inst }
+type disasmReadyMsg struct {
+	addr  uint64
+	posLo int
+	posHi int
+	insts []disasm.Inst
+}
 
-// decodeExecImage decodes *every* executable section in virtual-address order.
-// The whole-binary decode means the view can scroll across all code without
-// reloading windows, and jumps become a cursor move rather than a re-decode.
-func (m *Model) decodeExecImage() []disasm.Inst {
+type disasmCacheKey struct {
+	start       int
+	end         int
+	decodeStart int
+}
+
+type disasmCacheEntry struct {
+	insts []disasm.Inst
+}
+
+const disasmCacheCap = 24
+
+type disasmPrefetchMsg struct{}
+
+func (m *Model) disasmOverlapBytes() int {
+	overlap := m.disasmMaxBytes / 8
+	if overlap < 4<<10 {
+		overlap = 4 << 10
+	}
+	if overlap >= m.disasmMaxBytes {
+		overlap = max(1, m.disasmMaxBytes/2)
+	}
+	return overlap
+}
+
+func (m *Model) disasmLeadBytes() int {
+	lead := m.disasmMaxBytes / 4
+	if lead < m.disasmOverlapBytes() {
+		lead = m.disasmOverlapBytes()
+	}
+	if lead >= m.disasmMaxBytes {
+		lead = max(0, m.disasmMaxBytes-1)
+	}
+	return lead
+}
+
+func (m *Model) disasmSearchChunkBytes() int {
+	chunk := m.disasmMaxBytes / 8
+	if chunk < 64<<10 {
+		chunk = 64 << 10
+	}
+	if chunk > 512<<10 {
+		chunk = 512 << 10
+	}
+	if chunk > m.disasmMaxBytes {
+		chunk = m.disasmMaxBytes
+	}
+	return chunk
+}
+
+func (m *Model) disasmSearchBatchChunks() int {
+	n := m.disasmSearchWorkersFor(0)
+	if n < 2 {
+		n = 2
+	}
+	if m.disasmSearchChunkBytes() <= 128<<10 {
+		n *= 2
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n
+}
+
+func (m *Model) disasmSearchWorkersFor(chunks int) int {
+	workers := m.disasmSearchWorkers
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+		if workers > 6 {
+			workers = 6
+		}
+		if workers < 1 {
+			workers = 1
+		}
+	}
+	if chunks > 0 && workers > chunks {
+		workers = chunks
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	return workers
+}
+
+func (m *Model) prefetchDisasmAroundCmd(addr uint64) tea.Cmd {
 	if m.dis == nil {
 		return nil
 	}
 	img := m.file.ExecImage()
-	insts := make([]disasm.Inst, 0, img.Len()/4+16)
-	for _, r := range img.Regions {
-		seg := img.Data[r.Off : r.Off+int(r.Size)]
-		insts = append(insts, disasm.Range(m.dis, seg, r.Addr, 0)...)
+	if img.Len() == 0 {
+		return nil
 	}
+	pos, ok := img.PosForAddr(addr)
+	if !ok {
+		return nil
+	}
+	chunk := m.disasmSearchChunkBytes()
+	before := max(0, pos-chunk)
+	after := pos + chunk
+	if after > img.Len()-1 {
+		after = img.Len() - 1
+	}
+	return func() tea.Msg {
+		wins := []binfile.Window{
+			img.Window(before, min(chunk, img.Len()-before)),
+			img.Window(pos, min(chunk, img.Len()-pos)),
+		}
+		for _, win := range wins {
+			if len(win.Data) == 0 {
+				continue
+			}
+			m.disasmDecodeWindow(win)
+		}
+		if after > pos {
+			win := img.Window(after, min(chunk, img.Len()-after))
+			if len(win.Data) > 0 {
+				m.disasmDecodeWindow(win)
+			}
+		}
+		return disasmPrefetchMsg{}
+	}
+}
+
+func (m *Model) disasmCacheGet(key disasmCacheKey) ([]disasm.Inst, bool) {
+	m.disasmCacheMu.RLock()
+	entry, ok := m.disasmCache[key]
+	m.disasmCacheMu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	return entry.insts, true
+}
+
+func (m *Model) disasmCachePut(key disasmCacheKey, insts []disasm.Inst) {
+	m.disasmCacheMu.Lock()
+	defer m.disasmCacheMu.Unlock()
+	if _, ok := m.disasmCache[key]; !ok {
+		m.disasmCacheOrder = append(m.disasmCacheOrder, key)
+	}
+	m.disasmCache[key] = disasmCacheEntry{insts: insts}
+	for len(m.disasmCacheOrder) > disasmCacheCap {
+		old := m.disasmCacheOrder[0]
+		m.disasmCacheOrder = m.disasmCacheOrder[1:]
+		delete(m.disasmCache, old)
+	}
+}
+
+func (m *Model) decodeInstWindow(win binfile.Window, decodeStart int) []disasm.Inst {
+	if len(win.Data) == 0 || m.dis == nil {
+		return nil
+	}
+	key := disasmCacheKey{start: win.Start, end: win.End, decodeStart: decodeStart}
+	if insts, ok := m.disasmCacheGet(key); ok {
+		return insts
+	}
+	img := m.file.ExecImage()
+	decodeWin := img.Window(decodeStart, win.End-decodeStart)
+	insts := disasm.Range(m.dis, decodeWin.Data, decodeWin.Addr, 0)
+	lo := win.Addr
+	hi := win.Addr + uint64(len(win.Data))
+	keep := insts[:0]
+	for _, inst := range insts {
+		end := inst.Addr + uint64(len(inst.Bytes))
+		if end <= lo || inst.Addr >= hi {
+			continue
+		}
+		keep = append(keep, inst)
+	}
+	insts = append([]disasm.Inst(nil), keep...)
+	m.disasmCachePut(key, insts)
 	return insts
+}
+
+func (m *Model) disasmDecodeWindow(win binfile.Window) []disasm.Inst {
+	if len(win.Data) == 0 || m.dis == nil {
+		return nil
+	}
+	decodeStart := max(0, win.Start-m.disasmOverlapBytes())
+	return m.decodeInstWindow(win, decodeStart)
+}
+
+func (m *Model) decodeDisasmAt(addr uint64, before int) (binfile.Window, []disasm.Inst) {
+	if m.dis == nil {
+		return binfile.Window{}, nil
+	}
+	img := m.file.ExecImage()
+	win, ok := img.WindowContaining(addr, m.disasmMaxBytes, before)
+	if !ok {
+		return binfile.Window{}, nil
+	}
+	decodeStart := max(0, win.Start-m.disasmOverlapBytes())
+	if sym, ok := m.file.SymbolAt(addr); ok {
+		if pos, mapped := img.PosForAddr(sym.Addr); mapped && pos < win.End {
+			if sym.Addr == addr {
+				decodeStart = pos
+			} else if pos >= decodeStart {
+				decodeStart = pos
+			}
+		}
+	}
+	return win, m.decodeInstWindow(win, decodeStart)
+
 }
 
 // ensureDisasm decodes synchronously on first use. It's the path jumps take
@@ -50,26 +244,46 @@ func (m *Model) ensureDisasm() bool {
 	}
 	m.disasmBuilt = true
 	m.disasmDecoding = false
+	m.disasmPendingAddr = 0
 	if m.dis == nil {
 		return false
 	}
-	m.disasmInst = m.decodeExecImage()
+	target := m.disasmInitAddr
+	if target == 0 {
+		target = m.file.DefaultExecAddr(m.disasmTarget)
+	}
+	win, insts := m.decodeDisasmAt(target, m.disasmLeadBytes())
+	m.disasmPosLo, m.disasmPosHi, m.disasmInst = win.Start, win.End, insts
 	return len(m.disasmInst) > 0
 }
 
-// decodeDisasmCmd decodes the executable image off the main goroutine and
-// delivers it as a disasmReadyMsg. The image is built here (on the main
-// goroutine) so the worker only reads already-cached data.
-func (m *Model) decodeDisasmCmd() tea.Cmd {
-	img := m.file.ExecImage()
-	dis := m.dis
+// decodeDisasmCmd decodes a bounded executable span off the main goroutine and
+// delivers it as a disasmReadyMsg.
+func (m *Model) decodeDisasmCmd(addr uint64) tea.Cmd {
 	return func() tea.Msg {
-		insts := make([]disasm.Inst, 0, img.Len()/4+16)
-		for _, r := range img.Regions {
-			insts = append(insts, disasm.Range(dis, img.Data[r.Off:r.Off+int(r.Size)], r.Addr, 0)...)
-		}
-		return disasmReadyMsg{insts: insts}
+		win, insts := m.decodeDisasmAt(addr, m.disasmLeadBytes())
+		return disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts}
 	}
+}
+
+func (m *Model) disasmLoadedAddr(addr uint64) bool {
+	if len(m.disasmInst) == 0 {
+		return false
+	}
+	pos, ok := m.file.ExecImage().PosForAddr(addr)
+	if !ok || pos < m.disasmPosLo || pos >= m.disasmPosHi {
+		return false
+	}
+	_, ok = m.instIndexForAddr(addr)
+	return ok
+}
+
+func (m *Model) disasmHasExactInst(addr uint64) bool {
+	if len(m.disasmInst) == 0 {
+		return false
+	}
+	i := sort.Search(len(m.disasmInst), func(i int) bool { return m.disasmInst[i].Addr >= addr })
+	return i < len(m.disasmInst) && m.disasmInst[i].Addr == addr
 }
 
 // instIndexForAddr finds the instruction covering addr (or the nearest one at
@@ -90,6 +304,47 @@ func (m *Model) instIndexForAddr(addr uint64) (idx int, ok bool) {
 		return j, true
 	}
 	return j, in.Addr == addr
+}
+
+// instIndexAtOrAfterAddr returns the first instruction at or after addr, or the
+// last preceding instruction when there is no later one in the loaded window.
+func (m *Model) instIndexAtOrAfterAddr(addr uint64) int {
+	insts := m.disasmInst
+	if len(insts) == 0 {
+		return 0
+	}
+	idx, ok := m.instIndexForAddr(addr)
+	if ok {
+		return idx
+	}
+	i := sort.Search(len(insts), func(i int) bool { return insts[i].Addr >= addr })
+	if i < len(insts) {
+		return i
+	}
+	if idx >= 0 && idx < len(insts) {
+		return idx
+	}
+	return len(insts) - 1
+}
+
+func (m *Model) setDisasmWindow(win binfile.Window, insts []disasm.Inst) bool {
+	m.disasmInst = insts
+	m.disasmPosLo = win.Start
+	m.disasmPosHi = win.End
+	m.disasmBuilt = true
+	m.disasmDecoding = false
+	m.disasmPendingAddr = 0
+	return len(insts) > 0
+}
+
+func (m *Model) loadDisasmWindow(addr uint64, before int) bool {
+	win, insts := m.decodeDisasmAt(addr, before)
+	if !m.setDisasmWindow(win, insts) {
+		m.setStatus("no executable code to disassemble", true)
+		return false
+	}
+	m.mode = modeDisasm
+	return true
 }
 
 // loadDisasmAt moves the disasm cursor to addr and records the jump in the
@@ -126,12 +381,110 @@ func (m *Model) loadDisasmAtNoHistory(addr uint64) bool {
 	} else {
 		m.status = ""
 	}
-	idx, _ := m.instIndexForAddr(target)
+	reload := !m.disasmLoadedAddr(target)
+	if !reload {
+		if sym, ok := m.file.SymbolAt(target); ok && sym.Addr == target && !m.disasmHasExactInst(target) {
+			reload = true
+		}
+	}
+	if reload {
+		if !m.loadDisasmWindow(target, m.disasmLeadBytes()) {
+			return false
+		}
+	}
+	idx := m.instIndexAtOrAfterAddr(target)
 	m.disasmCur = idx
 	m.disasmTop = idx
 	m.disasmPositioned = true
 	m.mode = modeDisasm
 	return true
+}
+
+func (m *Model) loadDisasmWindowForStep(forward bool) bool {
+	if len(m.disasmInst) == 0 {
+		return false
+	}
+	img := m.file.ExecImage()
+	if forward {
+		last := m.disasmInst[len(m.disasmInst)-1]
+		nextAddr := last.Addr + uint64(len(last.Bytes))
+		if _, ok := img.PosForAddr(nextAddr); !ok {
+			m.setStatus("at end of executable code", false)
+			return false
+		}
+		if !m.loadDisasmWindow(nextAddr, m.disasmOverlapBytes()) {
+			return false
+		}
+		idx, _ := m.instIndexForAddr(nextAddr)
+		m.disasmCur = idx
+		m.scrollDisasmContext(3)
+		return true
+	}
+	firstAddr := m.disasmInst[0].Addr
+	pos, ok := img.PosForAddr(firstAddr)
+	if !ok || pos == 0 {
+		m.setStatus("at start of executable code", false)
+		return false
+	}
+	if !m.loadDisasmWindow(img.AddrAt(pos-1), m.disasmMaxBytes-m.disasmOverlapBytes()) {
+		return false
+	}
+	idx, found := m.instIndexForAddr(firstAddr)
+	if found && idx > 0 {
+		m.disasmCur = idx - 1
+	} else {
+		m.disasmCur = max(0, idx)
+	}
+	m.scrollDisasmContext(3)
+	return true
+}
+
+func (m *Model) stepDisasm(forward bool) bool {
+	if len(m.disasmInst) == 0 {
+		return false
+	}
+	if forward {
+		if m.disasmCur < len(m.disasmInst)-1 {
+			m.disasmCur++
+			return true
+		}
+		return m.loadDisasmWindowForStep(true)
+	}
+	if m.disasmCur > 0 {
+		m.disasmCur--
+		return true
+	}
+	return m.loadDisasmWindowForStep(false)
+}
+
+func (m *Model) moveDisasmPage(forward bool) {
+	steps := max(1, m.bodyHeight())
+	for i := 0; i < steps; i++ {
+		if !m.stepDisasm(forward) {
+			return
+		}
+	}
+}
+
+func (m *Model) jumpDisasmBoundary(forward bool) {
+	img := m.file.ExecImage()
+	if img.Len() == 0 {
+		return
+	}
+	if !forward {
+		if !m.loadDisasmWindow(img.AddrAt(0), 0) {
+			return
+		}
+		m.disasmCur = 0
+		m.disasmTop = 0
+		return
+	}
+	lastPos := img.Len() - 1
+	if !m.loadDisasmWindow(img.AddrAt(lastPos), m.disasmMaxBytes-1) {
+		return
+	}
+	m.disasmCur = len(m.disasmInst) - 1
+	m.scrollDisasmContext(m.bodyHeight() / 2)
 }
 
 // snapshotCursorToHistory updates the current history entry to the precise
@@ -271,27 +624,21 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		m.openSearch()
 		return m, nil
 	case "n":
-		m.runSearch(true, false)
-		return m, nil
+		return m, m.runSearch(true, false)
 	case "N":
-		m.runSearch(false, false)
-		return m, nil
+		return m, m.runSearch(false, false)
 	case "up", "k":
-		if m.disasmCur > 0 {
-			m.disasmCur--
-		}
+		m.stepDisasm(false)
 	case "down", "j":
-		if m.disasmCur < len(m.disasmInst)-1 {
-			m.disasmCur++
-		}
+		m.stepDisasm(true)
 	case "pgup":
-		m.disasmCur = max(0, m.disasmCur-m.bodyHeight())
+		m.moveDisasmPage(false)
 	case "pgdown":
-		m.disasmCur = min(len(m.disasmInst)-1, m.disasmCur+m.bodyHeight())
+		m.moveDisasmPage(true)
 	case "home":
-		m.disasmCur = 0
+		m.jumpDisasmBoundary(false)
 	case "end", "G":
-		m.disasmCur = len(m.disasmInst) - 1
+		m.jumpDisasmBoundary(true)
 	case "enter":
 		if len(m.disasmInst) == 0 {
 			return m, nil
@@ -482,6 +829,7 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 	if h < 1 {
 		h = 1
 	}
+	m.ensureDisasmViewport(h)
 	if m.disasmCur < m.disasmTop {
 		m.disasmTop = m.disasmCur
 	} else if m.disasmCur >= m.disasmTop+h {
@@ -527,6 +875,45 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 		emitted++
 	}
 	return padBody(b.String(), w, h)
+}
+
+func (m *Model) ensureDisasmViewport(h int) {
+	if len(m.disasmInst) == 0 || h < 1 {
+		return
+	}
+	img := m.file.ExecImage()
+	curAddr := m.disasmInst[m.disasmCur].Addr
+	for tries := 0; tries < 2; tries++ {
+		if m.disasmCur < m.disasmTop {
+			m.disasmTop = m.disasmCur
+		} else if m.disasmCur >= m.disasmTop+h {
+			m.disasmTop = m.disasmCur - h + 1
+		}
+		end := min(len(m.disasmInst), m.disasmTop+h)
+		needAbove := m.disasmTop == 0 && m.disasmPosLo > 0
+		needBelow := end == len(m.disasmInst) && m.disasmPosHi < img.Len()
+		if !needAbove && !needBelow {
+			return
+		}
+		if needAbove {
+			before := m.disasmMaxBytes - m.disasmOverlapBytes()
+			if !m.loadDisasmWindow(img.AddrAt(m.disasmPosLo-1), before) {
+				return
+			}
+		} else {
+			last := m.disasmInst[len(m.disasmInst)-1]
+			nextAddr := last.Addr + uint64(len(last.Bytes))
+			if _, ok := img.PosForAddr(nextAddr); !ok || !m.loadDisasmWindow(nextAddr, m.disasmOverlapBytes()) {
+				return
+			}
+		}
+		m.disasmCur = m.instIndexAtOrAfterAddr(curAddr)
+		if m.disasmCur >= h {
+			m.disasmTop = m.disasmCur - min(m.disasmCur, h/2)
+		} else {
+			m.disasmTop = 0
+		}
+	}
 }
 
 func (m *Model) renderSourcePane(w, h int) string {

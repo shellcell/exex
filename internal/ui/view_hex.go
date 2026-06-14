@@ -21,6 +21,34 @@ import (
 
 const bytesPerHexRow = 16
 
+// Hex row layout, shared by renderHexRow (drawing) and hexColumnToByte
+// (hit-testing) so the two never drift. A row is:
+//
+//	" " + "0x"<addrW digits> + "  " + bytes
+//
+// where each byte is two hex digits followed by a space, with one extra space
+// inserted after the middle byte.
+
+// hexBodyStart is the screen column of the first hex digit.
+func hexBodyStart(addrW int) int { return 1 + 2 + addrW + 2 }
+
+// hexColumnToByte maps a screen column x to a byte index [0, bytesPerHexRow).
+func hexColumnToByte(addrW, x int) int {
+	rel := x - hexBodyStart(addrW)
+	if rel < 0 {
+		return 0
+	}
+	col := rel / 3
+	// Bytes past the midpoint are shifted right by the extra separating space.
+	if rel >= (bytesPerHexRow/2)*3+1 {
+		col = (rel - 1) / 3
+	}
+	if col > bytesPerHexRow-1 {
+		col = bytesPerHexRow - 1
+	}
+	return col
+}
+
 // ensureHex builds the virtual-address image lazily.
 func (m *Model) ensureHex() {
 	if m.hexImg == nil {

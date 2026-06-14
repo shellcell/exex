@@ -39,7 +39,7 @@ func (f *File) computeOverview() {
 	in.MappedLo, in.MappedHi, in.CodeSize = lo, hi, code
 
 	for _, s := range f.Symbols {
-		if strings.Contains(s.Name, "stack_chk_fail") {
+		if strings.Contains(s.Name, "stack_chk_fail") || strings.Contains(s.Name, "security_cookie") {
 			in.Canary = true
 		}
 		if strings.HasSuffix(s.Name, "_chk") {

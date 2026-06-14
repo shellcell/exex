@@ -18,14 +18,14 @@ const doubleClickWindow = 350 * time.Millisecond
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		return m.routeNav("up")
+		return m.wheelScroll("up")
 	case tea.MouseButtonWheelDown:
-		return m.routeNav("down")
+		return m.wheelScroll("down")
 	}
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		if msg.Y == 0 { // the tab strip
 			if md, ok := m.tabHitTest(msg.X); ok {
-				m.switchMode(md)
+				return m, m.switchMode(md)
 			}
 			return m, nil
 		}
@@ -55,6 +55,15 @@ func (m *Model) followCurrentDisasm() {
 	} else {
 		m.setStatus("no in-file address to follow", true)
 	}
+}
+
+// wheelScroll moves a few lines per notch, which feels more natural than one.
+func (m *Model) wheelScroll(key string) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	for i := 0; i < 3; i++ {
+		_, cmd = m.routeNav(key)
+	}
+	return m, cmd
 }
 
 // routeNav feeds a navigation key to whichever view is active, so the wheel
@@ -123,8 +132,8 @@ func (m *Model) handleClick(x, y int) {
 
 // clickByte maps a click at (x, bodyRow) onto a byte position in a hex dump.
 // Body layout: row 0 is the banner, byte rows follow with bytesPerHexRow bytes
-// each. The column maths mirror renderHexRow's spacing (a single space between
-// bytes plus one extra space splitting the row in half).
+// each. The column→byte mapping lives in view_hex.go so it stays in sync with
+// the renderer.
 func (m *Model) clickByte(data []byte, top, cur, x, bodyRow int) int {
 	r := bodyRow - 1 // strip the banner row
 	if r < 0 {
@@ -134,21 +143,7 @@ func (m *Model) clickByte(data []byte, top, cur, x, bodyRow int) int {
 	if rowStart >= len(data) {
 		return cur
 	}
-	hexStart := m.file.AddrHexWidth() + 5 // " " + "0x" + addr digits + "  "
-	col := 0
-	if rel := x - hexStart; rel > 0 {
-		col = rel / 3
-		if rel >= 25 { // past the mid-row extra space, shift back by one column
-			col = (rel - 1) / 3
-		}
-	}
-	if col < 0 {
-		col = 0
-	}
-	if col > bytesPerHexRow-1 {
-		col = bytesPerHexRow - 1
-	}
-	pos := rowStart + col
+	pos := rowStart + hexColumnToByte(m.file.AddrHexWidth(), x)
 	if pos >= len(data) {
 		pos = len(data) - 1
 	}

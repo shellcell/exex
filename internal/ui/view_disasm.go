@@ -21,18 +21,15 @@ import (
 // historyCap caps the depth of the back/forward stack in the disasm view.
 const historyCap = 10
 
-// ensureDisasm decodes *every* executable section, in virtual-address order,
-// into m.disasmInst — once, on first use. The whole-binary decode means the
-// view can scroll across all code without reloading windows, and jumps become
-// a cursor move rather than a re-decode. Returns false when no disassembler is
-// available or there is no executable code.
-func (m *Model) ensureDisasm() bool {
-	if m.disasmBuilt {
-		return m.dis != nil && len(m.disasmInst) > 0
-	}
-	m.disasmBuilt = true
+// disasmReadyMsg carries the finished decode from the background worker.
+type disasmReadyMsg struct{ insts []disasm.Inst }
+
+// decodeExecImage decodes *every* executable section in virtual-address order.
+// The whole-binary decode means the view can scroll across all code without
+// reloading windows, and jumps become a cursor move rather than a re-decode.
+func (m *Model) decodeExecImage() []disasm.Inst {
 	if m.dis == nil {
-		return false
+		return nil
 	}
 	img := m.file.ExecImage()
 	insts := make([]disasm.Inst, 0, img.Len()/4+16)
@@ -40,8 +37,39 @@ func (m *Model) ensureDisasm() bool {
 		seg := img.Data[r.Off : r.Off+int(r.Size)]
 		insts = append(insts, disasm.Range(m.dis, seg, r.Addr, 0)...)
 	}
-	m.disasmInst = insts
-	return len(insts) > 0
+	return insts
+}
+
+// ensureDisasm decodes synchronously on first use. It's the path jumps take
+// (goto/follow/openSymbol): the user asked to land somewhere specific, so we
+// can't defer. Returns false when there's no disassembler or no code. The
+// view-switch path uses the asynchronous decodeDisasmCmd instead.
+func (m *Model) ensureDisasm() bool {
+	if m.disasmBuilt {
+		return m.dis != nil && len(m.disasmInst) > 0
+	}
+	m.disasmBuilt = true
+	m.disasmDecoding = false
+	if m.dis == nil {
+		return false
+	}
+	m.disasmInst = m.decodeExecImage()
+	return len(m.disasmInst) > 0
+}
+
+// decodeDisasmCmd decodes the executable image off the main goroutine and
+// delivers it as a disasmReadyMsg. The image is built here (on the main
+// goroutine) so the worker only reads already-cached data.
+func (m *Model) decodeDisasmCmd() tea.Cmd {
+	img := m.file.ExecImage()
+	dis := m.dis
+	return func() tea.Msg {
+		insts := make([]disasm.Inst, 0, img.Len()/4+16)
+		for _, r := range img.Regions {
+			insts = append(insts, disasm.Range(dis, img.Data[r.Off:r.Off+int(r.Size)], r.Addr, 0)...)
+		}
+		return disasmReadyMsg{insts: insts}
+	}
 }
 
 // instIndexForAddr finds the instruction covering addr (or the nearest one at
@@ -405,6 +433,9 @@ func (m *Model) targetAnnotation(addr uint64) string {
 
 func (m *Model) renderDisasm() string {
 	bodyH := m.bodyHeight()
+	if m.disasmDecoding {
+		return padBody("decoding instructions…\n", m.width, bodyH)
+	}
 	if len(m.disasmInst) == 0 {
 		msg := "no disassembly loaded — press g to go to an address, or pick a symbol from view 3"
 		return padBody(msg+"\n", m.width, bodyH)

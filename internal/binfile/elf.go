@@ -2,12 +2,59 @@ package binfile
 
 import (
 	"bytes"
+	"debug/dwarf"
 	"debug/elf"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/psimonen/elf-explorer/internal/disasm"
 )
+
+// elfDWARF returns DWARF for the binary: embedded, or from a separate debug
+// file referenced by .gnu_debuglink (the ELF analogue of macOS .dSYM).
+func (f *File) elfDWARF(ef *elf.File) *dwarf.Data {
+	if d, err := ef.DWARF(); err == nil {
+		return d
+	}
+	name := elfDebugLink(ef)
+	if name == "" {
+		return nil
+	}
+	dir := filepath.Dir(f.Path)
+	for _, c := range []string{
+		filepath.Join(dir, name),
+		filepath.Join(dir, ".debug", name),
+		filepath.Join("/usr/lib/debug", dir, name),
+	} {
+		de, err := elf.Open(c)
+		if err != nil {
+			continue
+		}
+		d, err := de.DWARF()
+		de.Close()
+		if err == nil {
+			return d
+		}
+	}
+	return nil
+}
+
+// elfDebugLink returns the filename stored in .gnu_debuglink, or "".
+func elfDebugLink(ef *elf.File) string {
+	sec := ef.Section(".gnu_debuglink")
+	if sec == nil {
+		return ""
+	}
+	data, err := sec.Data()
+	if err != nil {
+		return ""
+	}
+	if i := bytes.IndexByte(data, 0); i > 0 {
+		return string(data[:i])
+	}
+	return ""
+}
 
 // loadELF parses f.raw as an ELF object and populates the neutral model.
 func (f *File) loadELF() error {
@@ -74,7 +121,7 @@ func (f *File) loadELF() error {
 		add(s)
 	}
 
-	if d, err := ef.DWARF(); err == nil {
+	if d := f.elfDWARF(ef); d != nil {
 		f.dwarf = d
 		f.lines = loadLines(d)
 	}

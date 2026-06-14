@@ -29,7 +29,19 @@ func TestRenderAllViews(t *testing.T) {
 	}
 
 	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// pump applies a message and, if it kicked off the background disasm decode,
+	// completes that decode synchronously (other commands — e.g. the textinput
+	// cursor-blink tick — are discarded so the test stays fast).
+	pump := func(msg tea.Msg) {
+		t.Helper()
+		model, _ = model.Update(msg)
+		if mm, ok := model.(*Model); ok && mm.disasmDecoding {
+			model, _ = model.Update(disasmReadyMsg{insts: mm.decodeExecImage()})
+		}
+	}
+
+	pump(tea.WindowSizeMsg{Width: 120, Height: 40})
 
 	send := func(s string) {
 		t.Helper()
@@ -40,9 +52,8 @@ func TestRenderAllViews(t *testing.T) {
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 		}
-		model, _ = model.Update(msg)
-		out := model.View()
-		if strings.TrimSpace(out) == "" {
+		pump(msg)
+		if strings.TrimSpace(model.View()) == "" {
 			t.Fatalf("empty render after key %q", s)
 		}
 	}
@@ -84,7 +95,7 @@ func TestRenderAllViews(t *testing.T) {
 	// Mouse: wheel scroll and a left click in a few views.
 	mouse := func(b tea.MouseButton, action tea.MouseAction, x, y int) {
 		t.Helper()
-		model, _ = model.Update(tea.MouseMsg{Button: b, Action: action, X: x, Y: y})
+		pump(tea.MouseMsg{Button: b, Action: action, X: x, Y: y})
 		if strings.TrimSpace(model.View()) == "" {
 			t.Fatalf("empty render after mouse event")
 		}

@@ -153,6 +153,10 @@ type Keys struct {
 	CopyAddress StringOrSlice `yaml:"copy_address"`
 	// Copy current symbol name. (default: s)
 	CopySymbol StringOrSlice `yaml:"copy_symbol"`
+	// Next item: next symbol (disasm) / next non-zero byte (hex/raw). (default: ])
+	Next StringOrSlice `yaml:"next"`
+	// Previous item: prev symbol (disasm) / prev non-zero byte (hex/raw). (default: [)
+	Prev StringOrSlice `yaml:"prev"`
 }
 
 // StringOrSlice accepts either a YAML scalar ("q") or a sequence (["q",

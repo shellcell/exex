@@ -71,6 +71,8 @@ keys:
   toggle_source: tab
   copy_address: a
   copy_symbol: s
+  next: "]"   # next symbol (disasm) / next non-zero byte (hex/raw)
+  prev: "["   # previous symbol / previous non-zero byte
 
 behavior:
   # View to open on startup: info, sections, symbols, disasm, hex, libs, raw,

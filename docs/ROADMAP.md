@@ -57,17 +57,18 @@ Accumulate branch/call targets during `ensureDisasm` (we already extract them in
 the symbol/instruction under the cursor and add an xref-jump key. Turns the tool
 from a viewer into an explorer. **Effort:** medium.
 
-## 3. PE/COFF support
+## 3. PE/COFF support  ✅ done
 
-Add `internal/binfile/pe.go` using stdlib `debug/pe`, mapping sections/symbols
-onto the existing neutral model — rounds out ELF + Mach-O + PE. The abstraction
-already exists, so this is mostly a loader + arch mapping. **Effort:** medium.
+`internal/binfile/pe.go` via `debug/pe`: sections, symbols (COFF Value resolved
+to section-relative VAs), arch/entry, PIE/NX from DllCharacteristics, mapped onto
+the neutral model. A tab chip now shows the detected format (ELF/Mach-O/PE).
 
-## 4. Progressive / background disasm decode
+## 4. Progressive / background disasm decode  ✅ done
 
-Lazy decode (done) fixed startup, but the first open of a huge `.text` still
-blocks. Decode in a background `tea.Cmd` with a spinner, or decode incrementally
-around the cursor. **Effort:** medium.
+The first disasm open decodes the whole executable image in a background
+`tea.Cmd`, showing "decoding instructions…" until it lands (cursor then jumps to
+the entry). Jumps (goto/follow) still decode synchronously since they target a
+specific address.
 
 ## 5. Search  ✅ done
 
@@ -77,26 +78,20 @@ a live, selectable result list that updates as you type.
 
 ## 6. Refactors / hardening
 
-- **Split `app.go`** (~900 lines): move Sections/Symbols/Info into
-  `view_sections.go` / `view_symbols.go` / `view_info.go` to match the existing
-  per-view file layout.
-- **Centralize hex row layout.** `clickByte` in `mouse.go` re-derives column
-  maths owned by `renderHexRow`; factor the byte↔column mapping into one place
-  so clicks can't silently drift if the format changes.
+- ✅ **Split `app.go`**: Sections/Symbols/Info live in their own view_*.go files.
+- ✅ **Centralized hex row layout** (`hexBodyStart`/`hexColumnToByte` in
+  view_hex.go, used by both the renderer and click hit-testing).
 - **Unit tests for pure logic:** `image.go` (`AddrAt`/`PosForAddr` across region
-  boundaries and gaps) and the hex click-column mapping — no binary needed.
+  boundaries and gaps) — still worth adding.
 
-## 7. Smaller polish
+## 7. Smaller polish  ✅ done
 
-- Help overlay (`?`) listing all keys so footers can be trimmed.
-- Make `[`/`]` and copy keys configurable (currently hardcoded per view).
-- ELF split-debug: honour `.gnu_debuglink` / `.debug` sidecars, mirroring the
-  macOS `.dSYM` support just added.
-- Swift demangling fallback (`$s…` via `swift demangle`) — the Itanium/Rust
-  demangler doesn't cover Swift.
-- Wheel scrolls one line; 3 lines/notch feels more natural.
-- Honest naming: the title bar still reads `elf-explorer` though it's now
-  format-agnostic.
+- ✅ Help overlay (`?`) listing all keys; footers trimmed to essentials.
+- ✅ `[`/`]` and copy keys configurable (`keys.next`/`prev`/`copy_*`).
+- ✅ ELF split-debug via `.gnu_debuglink` sidecars, mirroring macOS `.dSYM`.
+- ✅ Swift demangling via `xcrun swift-demangle` (batched, best-effort).
+- ✅ Wheel scrolls 3 lines/notch.
+- ✅ Tab bar shows a format chip (ELF/Mach-O/PE) so it's honest about scope.
 
 ---
 

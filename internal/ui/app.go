@@ -87,6 +87,7 @@ type Model struct {
 	// disasmPositioned guards that one-time landing.
 	disasmInst       []disasm.Inst
 	disasmBuilt      bool
+	disasmDecoding   bool // background decode in flight
 	disasmInitAddr   uint64
 	disasmTarget     string // configured landing/redirect strategy
 	disasmPositioned bool
@@ -144,6 +145,12 @@ type Model struct {
 
 	// User-configurable keymap for the top-level dispatch.
 	keys keyMap
+	// keyAlias maps user-configured per-view keys (copy/next/prev) to their
+	// canonical tokens so the per-view handlers stay simple.
+	keyAlias map[string]string
+
+	// helpActive toggles the keybinding cheat-sheet overlay.
+	helpActive bool
 }
 
 func New(f *binfile.File) (*Model, error) {
@@ -162,6 +169,21 @@ func New(f *binfile.File) (*Model, error) {
 	ApplyColors(cfg.Colors)
 	keys := defaultKeyMap()
 	keys.applyConfig(cfg.Keys)
+
+	// Per-view copy/next/prev keys are configurable as aliases onto canonical
+	// tokens the per-view handlers understand.
+	keyAlias := map[string]string{}
+	addAlias := func(ks config.StringOrSlice, canonical string) {
+		for _, k := range ks {
+			if k != "" {
+				keyAlias[k] = canonical
+			}
+		}
+	}
+	addAlias(cfg.Keys.CopyAddress, "a")
+	addAlias(cfg.Keys.CopySymbol, "s")
+	addAlias(cfg.Keys.Next, "]")
+	addAlias(cfg.Keys.Prev, "[")
 
 	filter := textinput.New()
 	filter.Placeholder = "type to filter…"
@@ -194,6 +216,7 @@ func New(f *binfile.File) (*Model, error) {
 		searchInput:    searchInput,
 		showSource:     true,
 		keys:           keys,
+		keyAlias:       keyAlias,
 	}
 	m.headerVP = viewport.New(0, 0)
 	m.srcVP = viewport.New(0, 0)
@@ -235,7 +258,14 @@ func parseDefaultView(name string) mode {
 	return modeInfo
 }
 
-func (m *Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd {
+	// If the configured default view is Disasm, switchMode already flagged a
+	// decode; kick it off here (New can't return a Cmd).
+	if m.disasmDecoding && !m.disasmBuilt && m.dis != nil {
+		return m.decodeDisasmCmd()
+	}
+	return nil
+}
 
 func (m *Model) setStatus(s string, isError bool) {
 	m.status = s
@@ -258,12 +288,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+
+	case disasmReadyMsg:
+		// Ignore a late delivery if a synchronous decode already ran.
+		if !m.disasmDecoding {
+			return m, nil
+		}
+		m.disasmInst = msg.insts
+		m.disasmBuilt = true
+		m.disasmDecoding = false
+		if len(m.disasmInst) == 0 {
+			m.setStatus("no executable code to disassemble", true)
+			return m, nil
+		}
+		if !m.disasmPositioned && m.disasmInitAddr != 0 {
+			m.loadDisasmAt(m.disasmInitAddr)
+		}
+		return m, nil
 	}
 	return m, nil
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// The help overlay swallows the next keypress to dismiss itself.
+	if m.helpActive {
+		m.helpActive = false
+		return m, nil
+	}
 
 	// Modals own input while active.
 	if m.gotoActive {
@@ -345,33 +398,32 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// '?' toggles the keybinding cheat-sheet (after modal/filter capture, so it
+	// still types into inputs).
+	if key == "?" {
+		m.helpActive = true
+		return m, nil
+	}
+
 	switch m.keys[key] {
 	case actionQuit:
 		return m, tea.Quit
 	case actionViewInfo:
-		m.switchMode(modeInfo)
-		return m, nil
+		return m, m.switchMode(modeInfo)
 	case actionViewSections:
-		m.switchMode(modeSections)
-		return m, nil
+		return m, m.switchMode(modeSections)
 	case actionViewSymbols:
-		m.switchMode(modeSymbols)
-		return m, nil
+		return m, m.switchMode(modeSymbols)
 	case actionViewDisasm:
-		m.switchMode(modeDisasm)
-		return m, nil
+		return m, m.switchMode(modeDisasm)
 	case actionViewHex:
-		m.switchMode(modeHex)
-		return m, nil
+		return m, m.switchMode(modeHex)
 	case actionViewLibs:
-		m.switchMode(modeLibs)
-		return m, nil
+		return m, m.switchMode(modeLibs)
 	case actionViewRaw:
-		m.switchMode(modeRaw)
-		return m, nil
+		return m, m.switchMode(modeRaw)
 	case actionViewStrings:
-		m.switchMode(modeStrings)
-		return m, nil
+		return m, m.switchMode(modeStrings)
 	case actionGoto:
 		m.gotoActive = true
 		m.gotoInput.Focus()
@@ -392,6 +444,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		key = "home"
 	case "ctrl+e":
 		key = "end"
+	}
+	// Apply user key aliases (copy/next/prev) onto canonical tokens.
+	if c, ok := m.keyAlias[key]; ok {
+		key = c
 	}
 
 	switch m.mode {
@@ -577,12 +633,52 @@ func (m *Model) View() string {
 	parts = append(parts, body, m.renderFooter())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	switch {
+	case m.helpActive:
+		out = m.overlayCenter(out, m.renderHelpModal())
 	case m.gotoActive:
 		out = m.overlayCenter(out, m.renderGotoModal())
 	case m.searchActive:
 		out = m.overlayCenter(out, m.renderSearchModal())
 	}
 	return out
+}
+
+// renderHelpModal lists the keybindings, grouped by scope.
+func (m *Model) renderHelpModal() string {
+	row := func(keys, desc string) string {
+		return "  " + headerKey.Render(padKey(keys, 14)) + " " + desc
+	}
+	lines := []string{
+		titleStyle.Render(" Keybindings "),
+		"",
+		headerKey.Render("Global"),
+		row("1–8", "switch view"),
+		row("g", "go to address / symbol (live list)"),
+		row("q / ctrl+c", "quit"),
+		row("? / esc", "close this help"),
+		"",
+		headerKey.Render("Lists (sections / symbols / strings / libs)"),
+		row("↑/↓ j/k", "move    ·  PgUp/PgDn page"),
+		row("Home/End", "begin/end  (also ctrl+a / ctrl+e)"),
+		row("/", "filter (sections, symbols)"),
+		row("Enter", "open / jump"),
+		row("a / s", "copy address / name"),
+		"",
+		headerKey.Render("Disassembly"),
+		row("↑/↓", "scroll    ·  ←/→ history back/forward"),
+		row("[ / ]", "previous / next symbol"),
+		row("Enter / dbl-click", "follow address"),
+		row("/ , n/N", "search · next/prev match"),
+		row("Tab", "toggle source pane"),
+		"",
+		headerKey.Render("Hex / Raw"),
+		row("↑/↓/←/→", "move byte cursor"),
+		row("[ / ]", "previous / next non-zero byte"),
+		row("/ , n/N", "search (hex bytes, \"text\", 0x…)"),
+		"",
+		footerStyle.Render("  Mouse: wheel scrolls · click selects · click tabs · double-click follows"),
+	}
+	return modalStyle.Render(strings.Join(lines, "\n"))
 }
 
 // overlayCenter draws a pre-rendered modal centred over bg.
@@ -666,8 +762,18 @@ func (m *Model) tabSegment(label string, active bool) string {
 	return tabStyle.Render(label)
 }
 
+// tabLead is the non-clickable prefix of the tab row: the tool name and a chip
+// showing the detected container format (so the UI is honest that it isn't
+// ELF-only). Shared by renderTabs and tabHitTest so their geometry matches.
+func (m *Model) tabLead() []string {
+	return []string{
+		titleStyle.Render(" elf-explorer "),
+		tabStyle.Render(string(m.file.Format)),
+	}
+}
+
 func (m *Model) renderTabs() string {
-	segs := []string{titleStyle.Render(" elf-explorer ")}
+	segs := m.tabLead()
 	for _, t := range tabItems {
 		segs = append(segs, m.tabSegment(t.label, m.mode == t.mode))
 	}
@@ -681,7 +787,10 @@ func (m *Model) renderTabs() string {
 
 // tabHitTest maps an x column on the tab row to the tab the user clicked.
 func (m *Model) tabHitTest(x int) (mode, bool) {
-	pos := lipgloss.Width(titleStyle.Render(" elf-explorer "))
+	pos := 0
+	for _, s := range m.tabLead() {
+		pos += lipgloss.Width(s)
+	}
 	for _, t := range tabItems {
 		w := lipgloss.Width(m.tabSegment(t.label, m.mode == t.mode))
 		if x >= pos && x < pos+w {
@@ -693,19 +802,30 @@ func (m *Model) tabHitTest(x int) (mode, bool) {
 }
 
 // switchMode changes the active view, building the lazy state a view needs
-// before it can render. Shared by the keyboard dispatch and tab clicks.
-func (m *Model) switchMode(md mode) {
+// before it can render. Shared by the keyboard dispatch and tab clicks. It may
+// return a Cmd (the background disasm decode).
+func (m *Model) switchMode(md mode) tea.Cmd {
 	switch md {
 	case modeDisasm:
-		if !m.ensureDisasm() {
+		if m.dis == nil {
 			m.setStatus("no disassembler for this architecture", true)
-			return
+			return nil
 		}
-		// First time in: land on the entry point. loadDisasmAt sets the mode.
+		m.mode = modeDisasm
+		if !m.disasmBuilt {
+			// Decode in the background and show a spinner meanwhile; the cursor
+			// lands on the entry point when the decode lands (disasmReadyMsg).
+			if !m.disasmDecoding {
+				m.disasmDecoding = true
+				return m.decodeDisasmCmd()
+			}
+			return nil
+		}
+		// Already decoded: land on the entry the first time in.
 		if !m.disasmPositioned && m.disasmInitAddr != 0 {
 			m.loadDisasmAt(m.disasmInitAddr)
-			return
 		}
+		return nil
 	case modeHex:
 		m.ensureHex()
 	case modeRaw:
@@ -714,27 +834,29 @@ func (m *Model) switchMode(md mode) {
 		m.ensureStrings()
 	}
 	m.mode = md
+	return nil
 }
 
 func (m *Model) renderFooter() string {
+	// Footers stay short; the full cheat-sheet lives behind '?'.
 	var help string
 	switch m.mode {
 	case modeInfo:
-		help = "1-8 switch view · ↑/↓ scroll · Enter disasm entry · g goto · q quit"
+		help = "Enter disasm entry · g goto · ? help · q quit"
 	case modeStrings:
-		help = "↑/↓ move · / search · n/N next · Enter jump · a copy addr/off · s copy string · g goto · q quit"
+		help = "Enter jump · / search · g goto · ? help · q quit"
 	case modeSections:
-		help = "↑/↓ move · / filter · Enter view (disasm/hex/raw) · g goto · q quit"
+		help = "Enter open · / filter · g goto · ? help · q quit"
 	case modeSymbols:
-		help = "↑/↓ move · Home/End begin/end · / filter · Enter jump · g goto · q quit"
+		help = "Enter jump · / filter · g goto · ? help · q quit"
 	case modeDisasm:
-		help = "↑/↓ scroll · [ ] sym · / search · n/N next · ←/→ history · Enter follow · a/s copy · Tab src · g goto · q quit"
+		help = "Enter follow · [ ] sym · ←/→ history · / search · g goto · ? help · q quit"
 	case modeHex:
-		help = "↑/↓/←/→ move · [ ] non-zero · / search · n/N next · a copy addr · s copy sym · g goto · q quit"
+		help = "[ ] non-zero · / search · a/s copy · g goto · ? help · q quit"
 	case modeRaw:
-		help = "↑/↓/←/→ move · [ ] non-zero · / search · n/N next · a copy offset · s copy sec · g goto · q quit"
+		help = "[ ] non-zero · / search · a/s copy · g goto · ? help · q quit"
 	case modeLibs:
-		help = "↑/↓ move · Home/End begin/end · q quit"
+		help = "↑/↓ move · ? help · q quit"
 	}
 	left := footerStyle.Render(help)
 	right := ""

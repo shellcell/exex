@@ -21,6 +21,7 @@ type Format string
 const (
 	FormatELF   Format = "ELF"
 	FormatMachO Format = "Mach-O"
+	FormatPE    Format = "PE"
 )
 
 // SymKind is a format-neutral symbol category. Both ELF symbol types and the
@@ -153,8 +154,12 @@ func Open(path string) (*File, error) {
 		if err := f.loadMachO(); err != nil {
 			return nil, err
 		}
+	case len(raw) >= 2 && raw[0] == 'M' && raw[1] == 'Z':
+		if err := f.loadPE(); err != nil {
+			return nil, err
+		}
 	default:
-		return nil, fmt.Errorf("unrecognised file format (not ELF or Mach-O)")
+		return nil, fmt.Errorf("unrecognised file format (not ELF, Mach-O, or PE)")
 	}
 
 	f.finalizeSymbols()
@@ -171,6 +176,7 @@ func (f *File) finalizeSymbols() {
 	for i := range f.Symbols {
 		f.Symbols[i].Demangled = demangleName(f.Symbols[i].Name)
 	}
+	f.demangleSwift()
 	sort.Slice(f.Symbols, func(i, j int) bool { return f.Symbols[i].Name < f.Symbols[j].Name })
 
 	f.symByAddr = make([]Symbol, 0, len(f.Symbols))

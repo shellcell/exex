@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/psimonen/elf-explorer/internal/binfile"
 	"github.com/psimonen/elf-explorer/internal/config"
@@ -67,9 +68,11 @@ type Model struct {
 	headerVP viewport.Model
 
 	// Sections view.
-	sections    []binfile.Section
-	sectionsCur int
-	sectionsTop int
+	sections         []binfile.Section
+	sectionsFilter   textinput.Model
+	sectionsFiltered []int // indices into sections
+	sectionsCur      int
+	sectionsTop      int
 
 	// Symbols view.
 	symbolsFilter   textinput.Model
@@ -85,6 +88,7 @@ type Model struct {
 	disasmInst       []disasm.Inst
 	disasmBuilt      bool
 	disasmInitAddr   uint64
+	disasmTarget     string // configured landing/redirect strategy
 	disasmPositioned bool
 	disasmCur        int
 	disasmTop        int
@@ -127,6 +131,7 @@ type Model struct {
 	gotoActive  bool
 	gotoResults []gotoTarget
 	gotoSel     int
+	gotoTop     int // scroll offset into gotoResults
 
 	// Search prompt (hex / raw / disasm), with last query remembered for n/N.
 	searchInput  textinput.Model
@@ -163,6 +168,11 @@ func New(f *binfile.File) (*Model, error) {
 	filter.Prompt = "/ "
 	filter.CharLimit = 256
 
+	secFilter := textinput.New()
+	secFilter.Placeholder = "type to filter…"
+	secFilter.Prompt = "/ "
+	secFilter.CharLimit = 256
+
 	gotoInput := textinput.New()
 	gotoInput.Placeholder = "0x401000 or symbol name"
 	gotoInput.Prompt = "→ "
@@ -174,24 +184,55 @@ func New(f *binfile.File) (*Model, error) {
 	searchInput.CharLimit = 256
 
 	m := &Model{
-		file:          f,
-		dis:           d,
-		mode:          modeInfo,
-		sections:      f.Sections,
-		symbolsFilter: filter,
-		gotoInput:     gotoInput,
-		searchInput:   searchInput,
-		showSource:    true,
-		keys:          keys,
+		file:           f,
+		dis:            d,
+		mode:           modeInfo,
+		sections:       f.Sections,
+		symbolsFilter:  filter,
+		sectionsFilter: secFilter,
+		gotoInput:      gotoInput,
+		searchInput:    searchInput,
+		showSource:     true,
+		keys:           keys,
 	}
 	m.headerVP = viewport.New(0, 0)
 	m.srcVP = viewport.New(0, 0)
 	m.recomputeSymbols()
+	m.recomputeSections()
 
 	// The disassembly is decoded lazily on first open (it can be large); record
-	// where the cursor should land then — the entry point.
-	m.disasmInitAddr = f.Entry()
+	// where the cursor should land — a guaranteed-executable address chosen by
+	// the configured strategy (lowest executable address by default).
+	m.disasmTarget = cfg.Behavior.DefaultDisasmTarget
+	if m.disasmTarget == "" {
+		m.disasmTarget = "lowest"
+	}
+	m.disasmInitAddr = f.DefaultExecAddr(m.disasmTarget)
+
+	// Open the configured default view (info when unset).
+	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))
 	return m, nil
+}
+
+// parseDefaultView maps a config view name to a mode, defaulting to Info.
+func parseDefaultView(name string) mode {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "sections":
+		return modeSections
+	case "symbols":
+		return modeSymbols
+	case "disasm":
+		return modeDisasm
+	case "hex":
+		return modeHex
+	case "libs":
+		return modeLibs
+	case "raw":
+		return modeRaw
+	case "strings":
+		return modeStrings
+	}
+	return modeInfo
 }
 
 func (m *Model) Init() tea.Cmd { return nil }
@@ -209,6 +250,21 @@ func (m *Model) recomputeSymbols() {
 	}
 	if m.symbolsCur >= len(m.symbolsFiltered) {
 		m.symbolsCur = max(0, len(m.symbolsFiltered)-1)
+	}
+}
+
+// recomputeSections rebuilds sectionsFiltered from the current filter text,
+// matching on section name.
+func (m *Model) recomputeSections() {
+	needle := strings.ToLower(m.sectionsFilter.Value())
+	m.sectionsFiltered = m.sectionsFiltered[:0]
+	for i, s := range m.sections {
+		if needle == "" || strings.Contains(strings.ToLower(s.Name), needle) {
+			m.sectionsFiltered = append(m.sectionsFiltered, i)
+		}
+	}
+	if m.sectionsCur >= len(m.sectionsFiltered) {
+		m.sectionsCur = max(0, len(m.sectionsFiltered)-1)
 	}
 }
 
@@ -304,6 +360,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Filter input in sections view captures typing keys.
+	if m.mode == modeSections && m.sectionsFilter.Focused() {
+		switch key {
+		case "esc", "enter":
+			m.sectionsFilter.Blur()
+			return m, nil
+		case "up", "down", "pgup", "pgdown", "home", "end":
+			// Let navigation keys fall through.
+		default:
+			var cmd tea.Cmd
+			m.sectionsFilter, cmd = m.sectionsFilter.Update(msg)
+			m.recomputeSections()
+			return m, cmd
+		}
+	}
+
 	switch m.keys[key] {
 	case actionQuit:
 		return m, tea.Quit
@@ -343,6 +415,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// macOS keyboards often lack Home/End; accept the emacs-style ctrl+a /
+	// ctrl+e as begin/end everywhere (modals and filter inputs were handled
+	// above, so this only affects view navigation).
+	switch key {
+	case "ctrl+a":
+		key = "home"
+	case "ctrl+e":
+		key = "end"
+	}
+
 	switch m.mode {
 	case modeSections:
 		return m.updateSections(key)
@@ -366,6 +448,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "end", "G":
 			m.headerVP.GotoBottom()
 			return m, nil
+		case "enter":
+			if m.dis != nil && m.file.Entry() != 0 {
+				m.loadDisasmAt(m.file.Entry())
+			}
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.headerVP, cmd = m.headerVP.Update(msg)
@@ -375,25 +462,32 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
+	n := len(m.sectionsFiltered)
 	switch key {
+	case "/":
+		m.sectionsFilter.Focus()
+		return m, nil
 	case "up", "k":
 		if m.sectionsCur > 0 {
 			m.sectionsCur--
 		}
 	case "down", "j":
-		if m.sectionsCur < len(m.sections)-1 {
+		if m.sectionsCur < n-1 {
 			m.sectionsCur++
 		}
 	case "pgup":
 		m.sectionsCur = max(0, m.sectionsCur-m.bodyHeight())
 	case "pgdown":
-		m.sectionsCur = min(len(m.sections)-1, m.sectionsCur+m.bodyHeight())
-	case "home", "g g":
+		m.sectionsCur = min(n-1, m.sectionsCur+m.bodyHeight())
+	case "home":
 		m.sectionsCur = 0
 	case "end", "G":
-		m.sectionsCur = len(m.sections) - 1
+		m.sectionsCur = n - 1
 	case "enter":
-		sec := m.sections[m.sectionsCur]
+		sec, ok := m.currentSection()
+		if !ok {
+			return m, nil
+		}
 		switch {
 		case binfile.IsExecSection(&sec) && m.dis != nil:
 			m.loadDisasmAt(sec.Addr)
@@ -405,13 +499,23 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 			m.openRawAt(sec.Offset)
 		}
 	case "a":
-		sec := m.sections[m.sectionsCur]
-		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), sec.Addr), "address")
+		if sec, ok := m.currentSection(); ok {
+			m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), sec.Addr), "address")
+		}
 	case "s":
-		sec := m.sections[m.sectionsCur]
-		m.copyToClipboard(sec.Name, "section name")
+		if sec, ok := m.currentSection(); ok {
+			m.copyToClipboard(sec.Name, "section name")
+		}
 	}
 	return m, nil
+}
+
+// currentSection returns the selected section through the active filter.
+func (m *Model) currentSection() (binfile.Section, bool) {
+	if m.sectionsCur < 0 || m.sectionsCur >= len(m.sectionsFiltered) {
+		return binfile.Section{}, false
+	}
+	return m.sections[m.sectionsFiltered[m.sectionsCur]], true
 }
 
 func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
@@ -502,7 +606,12 @@ type gotoTarget struct {
 	isSym bool
 }
 
-const gotoMaxResults = 12
+// gotoMaxResults bounds how many matches we keep (the list scrolls);
+// gotoVisible is how many rows the modal shows at once.
+const (
+	gotoMaxResults = 500
+	gotoVisible    = 10
+)
 
 // recomputeGoto rebuilds the modal's result list from the current input. A
 // parseable address is always offered first; symbols are matched (raw name and
@@ -510,6 +619,7 @@ const gotoMaxResults = 12
 func (m *Model) recomputeGoto() {
 	m.gotoResults = m.gotoResults[:0]
 	m.gotoSel = 0
+	m.gotoTop = 0
 	val := strings.TrimSpace(m.gotoInput.Value())
 	if val == "" {
 		return
@@ -580,6 +690,7 @@ func (m *Model) closeGoto() {
 	m.gotoInput.SetValue("")
 	m.gotoResults = m.gotoResults[:0]
 	m.gotoSel = 0
+	m.gotoTop = 0
 }
 
 // gotoAddr jumps to a virtual address: disasm if it lands in executable code,
@@ -663,7 +774,18 @@ func (m *Model) renderGotoModal() string {
 	} else {
 		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
-		for i, t := range m.gotoResults {
+		// Scroll the window so the selection stays visible.
+		if m.gotoSel < m.gotoTop {
+			m.gotoTop = m.gotoSel
+		} else if m.gotoSel >= m.gotoTop+gotoVisible {
+			m.gotoTop = m.gotoSel - gotoVisible + 1
+		}
+		end := m.gotoTop + gotoVisible
+		if end > len(m.gotoResults) {
+			end = len(m.gotoResults)
+		}
+		for i := m.gotoTop; i < end; i++ {
+			t := m.gotoResults[i]
 			line := fmt.Sprintf(" 0x%0*x  %s", addrW, t.addr, truncate(t.label, 48))
 			line = padRight(line, 58)
 			if i == m.gotoSel {
@@ -672,7 +794,11 @@ func (m *Model) renderGotoModal() string {
 			sb.WriteString(line + "\n")
 		}
 	}
-	sb.WriteString("\n" + footerStyle.Render("↑/↓ select · Enter jump · Esc cancel"))
+	count := ""
+	if n := len(m.gotoResults); n > 0 {
+		count = fmt.Sprintf("  (%d/%d)", m.gotoSel+1, n)
+	}
+	sb.WriteString("\n" + footerStyle.Render("↑/↓ select · Enter jump · Esc cancel"+count))
 	return modalStyle.Render(sb.String())
 }
 
@@ -766,19 +892,19 @@ func (m *Model) renderFooter() string {
 	var help string
 	switch m.mode {
 	case modeInfo:
-		help = "1-8 switch view · ↑/↓ scroll · Home/End begin/end · g goto · q quit"
+		help = "1-8 switch view · ↑/↓ scroll · Enter disasm entry · g goto · q quit"
 	case modeStrings:
-		help = "↑/↓ move · Home/End begin/end · Enter jump (if mapped) · a copy addr/off · s copy string · q quit"
+		help = "↑/↓ move · / search · n/N next · Enter jump · a copy addr/off · s copy string · g goto · q quit"
 	case modeSections:
-		help = "↑/↓ move · Home/End begin/end · Enter view (disasm/hex/raw) · g goto · q quit"
+		help = "↑/↓ move · / filter · Enter view (disasm/hex/raw) · g goto · q quit"
 	case modeSymbols:
 		help = "↑/↓ move · Home/End begin/end · / filter · Enter jump · g goto · q quit"
 	case modeDisasm:
-		help = "↑/↓ scroll · [ ] prev/next sym · ←/→ history · Home/End begin/end · Enter follow · a/s copy · Tab src · g goto · q quit"
+		help = "↑/↓ scroll · [ ] sym · / search · n/N next · ←/→ history · Enter follow · a/s copy · Tab src · g goto · q quit"
 	case modeHex:
-		help = "↑/↓/←/→ move · [ ] prev/next non-zero · Home/End begin/end · a copy addr · s copy sym · g goto · q quit"
+		help = "↑/↓/←/→ move · [ ] non-zero · / search · n/N next · a copy addr · s copy sym · g goto · q quit"
 	case modeRaw:
-		help = "↑/↓/←/→ move · [ ] prev/next non-zero · Home/End begin/end · a copy offset · s copy sec · g goto · q quit"
+		help = "↑/↓/←/→ move · [ ] non-zero · / search · n/N next · a copy offset · s copy sec · g goto · q quit"
 	case modeLibs:
 		help = "↑/↓ move · Home/End begin/end · q quit"
 	}
@@ -809,28 +935,66 @@ func (m *Model) bodyHeight() int {
 func (m *Model) renderInfo() string {
 	var b strings.Builder
 	kv := func(k, v string) {
-		b.WriteString(headerKey.Render(padKey(k, 14)))
+		b.WriteString(headerKey.Render(padKey(k, 16)))
 		b.WriteString(" ")
 		b.WriteString(v)
 		b.WriteString("\n")
 	}
 
-	// Core ELF header.
+	// Identity block (from the format header), re-aligned through kv() so it
+	// shares one column with the rest of the page. The Entry line is special:
+	// it carries the entry symbol and is actionable (Enter follows it).
 	for _, l := range m.file.HeaderInfo() {
+		if strings.HasPrefix(l, "Entry:") {
+			kv("Entry:", m.entryValue())
+			continue
+		}
 		if idx := strings.IndexByte(l, ':'); idx >= 0 {
-			b.WriteString(headerKey.Render(l[:idx+1]))
-			b.WriteString(l[idx+1:])
+			kv(l[:idx+1], strings.TrimSpace(l[idx+1:]))
 		} else {
 			b.WriteString(l)
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
-
 	if m.dis != nil {
 		kv("Disassembler:", m.dis.Name())
 	}
 
-	if info := m.file.Info; info != nil {
+	info := m.file.Info
+	if info != nil {
+		// Overview.
+		b.WriteString("\n")
+		kv("File size:", fmt.Sprintf("%s  (%d bytes)", humanBytes(info.FileSize), info.FileSize))
+		if info.MappedHi > info.MappedLo {
+			kv("Mapped range:", fmt.Sprintf("0x%x – 0x%x  (%s)", info.MappedLo, info.MappedHi, humanBytes(info.MappedHi-info.MappedLo)))
+		}
+		if info.CodeSize > 0 {
+			kv("Code size:", humanBytes(info.CodeSize))
+		}
+		if info.WordBits != 0 {
+			kv("Word size:", fmt.Sprintf("%d-bit, %s", info.WordBits, info.ByteOrder))
+		}
+		if info.Segments > 0 {
+			kv(segmentLabel(m.file.Format)+":", fmt.Sprintf("%d", info.Segments))
+		}
+
+		// Hardening.
+		b.WriteString("\n")
+		kv("PIE:", info.PIE.String())
+		kv("NX stack:", info.NX.String())
+		if info.RELRO != "" {
+			kv("RELRO:", info.RELRO)
+		}
+		kv("Stack canary:", yesNo(info.Canary))
+		kv("FORTIFY:", yesNo(info.Fortify))
+		if m.file.Format == binfile.FormatMachO {
+			kv("Code signature:", yesNo(info.CodeSigned))
+			if info.Encrypted {
+				kv("Encrypted:", "yes")
+			}
+		}
+
+		// Dynamic linking.
 		b.WriteString("\n")
 		if info.Interp != "" {
 			kv("Interpreter:", info.Interp)
@@ -847,8 +1011,8 @@ func (m *Model) renderInfo() string {
 		if info.BuildID != "" {
 			kv("Build ID:", info.BuildID)
 		}
-		kv("Stripped:", fmt.Sprintf("%v", info.Stripped))
-		kv("Static-linked:", fmt.Sprintf("%v", info.StaticLinked))
+		kv("Stripped:", yesNo(info.Stripped))
+		kv("Static-linked:", yesNo(info.StaticLinked))
 		if info.Libc.Kind != "" {
 			val := info.Libc.Kind
 			if info.Libc.Version != "" {
@@ -862,9 +1026,88 @@ func (m *Model) renderInfo() string {
 		if len(info.DynamicLibs) > 0 {
 			kv("Needed libs:", fmt.Sprintf("%d (press 6 to view)", len(info.DynamicLibs)))
 		}
+
+		// Toolchain / provenance.
+		if info.SourceLang != "" || info.Compiler != "" || info.GoVersion != "" || info.MinOS != "" {
+			b.WriteString("\n")
+			if info.SourceLang != "" {
+				kv("Language:", info.SourceLang)
+			}
+			// For Go binaries the toolchain is shown as "Go:" below; a stray
+			// clang banner from cgo/deps would only mislead.
+			if info.Compiler != "" && info.GoVersion == "" {
+				kv("Compiler:", info.Compiler)
+			}
+			if info.GoVersion != "" {
+				kv("Go:", info.GoVersion)
+			}
+			if info.GoModule != "" {
+				kv("Go module:", info.GoModule)
+			}
+			if info.GoVCS != "" {
+				kv("VCS:", info.GoVCS)
+			}
+			if info.MinOS != "" {
+				v := info.MinOS
+				if info.SDK != "" {
+					v += "  (SDK " + info.SDK + ")"
+				}
+				kv("Min OS:", v)
+			}
+		}
 	}
 
-	return padBody(b.String(), m.width, m.bodyHeight())
+	m.headerVP.SetContent(strings.TrimRight(b.String(), "\n"))
+	return m.headerVP.View()
+}
+
+// entryValue renders the entry point value: its address, the entry symbol, and
+// a hint that Enter follows it into the disassembly.
+func (m *Model) entryValue() string {
+	entry := m.file.Entry()
+	val := fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), entry)
+	if sym, ok := m.file.SymbolAt(entry); ok {
+		name := sym.Display()
+		if off := entry - sym.Addr; off != 0 {
+			name = fmt.Sprintf("%s+0x%x", name, off)
+		}
+		val += "  " + symbolNameStyle.Render(name)
+	}
+	if m.dis != nil && entry != 0 {
+		val += "  " + footerStyle.Render("↵ disassemble")
+	}
+	return val
+}
+
+func segmentLabel(f binfile.Format) string {
+	switch f {
+	case binfile.FormatMachO:
+		return "Load commands"
+	case binfile.FormatELF:
+		return "Program headers"
+	}
+	return "Segments"
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// humanBytes formats a byte count with a binary unit suffix.
+func humanBytes(n uint64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := uint64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // padKey right-pads a key label to a fixed column, ignoring the trailing colon
@@ -878,17 +1121,24 @@ func padKey(s string, w int) string {
 
 func (m *Model) renderSections() string {
 	bodyH := m.bodyHeight()
+	if bodyH < 3 {
+		bodyH = 3
+	}
+
+	filterRow := m.sectionsFilter.View()
+	if !m.sectionsFilter.Focused() {
+		filterRow = footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)",
+			m.sectionsFilter.Value(), len(m.sectionsFiltered), len(m.sections)))
+	}
+
 	// columns: idx, name, type, addr, size, flags
 	addrW := m.file.AddrHexWidth() // hex digits in an address
 	addrCol := 2 + addrW           // "0x" + digits
 	hdr := fmt.Sprintf(" %3s  %-22s %-14s %-*s %-12s  %s",
 		"#", "Name", "Type", addrCol, "Addr", "Size", "Flags")
-	if len(hdr) > m.width {
-		hdr = hdr[:m.width]
-	}
 	header := tableHeaderStyle.Render(padRight(hdr, m.width))
 
-	visible := bodyH - 1
+	visible := bodyH - 2 // filter row + header
 	if visible < 1 {
 		visible = 1
 	}
@@ -898,17 +1148,20 @@ func (m *Model) renderSections() string {
 		m.sectionsTop = m.sectionsCur - visible + 1
 	}
 	end := m.sectionsTop + visible
-	if end > len(m.sections) {
-		end = len(m.sections)
+	if end > len(m.sectionsFiltered) {
+		end = len(m.sectionsFiltered)
 	}
 
 	var b strings.Builder
+	b.WriteString(filterRow)
+	b.WriteString("\n")
 	b.WriteString(header)
 	b.WriteString("\n")
 	for i := m.sectionsTop; i < end; i++ {
-		s := m.sections[i]
+		idx := m.sectionsFiltered[i]
+		s := m.sections[idx]
 		line := fmt.Sprintf(" %3d  %-22s %-14s 0x%0*x %-12d  %s",
-			i, truncate(s.Name, 22), truncate(s.TypeName, 14), addrW, s.Addr, s.Size, s.Flags)
+			idx, truncate(s.Name, 22), truncate(s.TypeName, 14), addrW, s.Addr, s.Size, s.Flags)
 		line = padRight(line, m.width)
 		if i == m.sectionsCur {
 			b.WriteString(tableSelStyle.Render(line))
@@ -1041,6 +1294,9 @@ func padBody(s string, w, h int) string {
 }
 
 // overlay places fg over bg at column x, row y. Both are pre-rendered strings.
+// It is ANSI- and width-aware: the background to the left and right of the
+// modal keeps its colours and lines up correctly even when those lines contain
+// styled or multi-byte content (e.g. the disasm source-pane border).
 func overlay(bg, fg string, x, y int) string {
 	if x < 0 {
 		x = 0
@@ -1056,23 +1312,17 @@ func overlay(bg, fg string, x, y int) string {
 			break
 		}
 		bgLine := bgLines[row]
-		// Convert to runes for width-safe slicing — assume printable.
-		plain := stripANSI(bgLine)
-		if x >= lipgloss.Width(plain) {
-			bgLines[row] = bgLine + strings.Repeat(" ", x-lipgloss.Width(plain)) + fl
-			continue
+		fw := ansi.StringWidth(fl)
+
+		// Left slice: the first x cells of the background, padded if short.
+		left := ansi.Truncate(bgLine, x, "")
+		if w := ansi.StringWidth(left); w < x {
+			left += strings.Repeat(" ", x-w)
 		}
-		// Best-effort overlay: just replace the whole row when fg width fits.
-		fw := lipgloss.Width(stripANSI(fl))
-		prefix := plain
-		if x < len(prefix) {
-			prefix = prefix[:x]
-		}
-		suffix := ""
-		if x+fw < lipgloss.Width(plain) {
-			suffix = plain[x+fw:]
-		}
-		bgLines[row] = prefix + fl + suffix
+		// Right slice: the background beyond the modal, with its style preserved.
+		right := ansi.TruncateLeft(bgLine, x+fw, "")
+
+		bgLines[row] = left + "\x1b[0m" + fl + "\x1b[0m" + right
 	}
 	return strings.Join(bgLines, "\n")
 }

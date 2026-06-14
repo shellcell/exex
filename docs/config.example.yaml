@@ -24,7 +24,7 @@ colors:
   instruction_mnemonic_default: "117"
 
   # ---- Disassembly: address columns + operand links ----------------------
-  address_column: "214"                      # left-most "0x401234" column
+  address_column: "245"                      # left-most "0x401234" column (grey so symbols pop)
   address_link_intra_function: "85"          # local jump targets
   address_link_inter_function: "51"          # cross-function calls / PLT
 
@@ -67,6 +67,16 @@ keys:
   view_hex: "5"
   view_libs: "6"
   view_raw: "7"
+  view_strings: "8"
   toggle_source: tab
   copy_address: a
   copy_symbol: s
+
+behavior:
+  # View to open on startup: info, sections, symbols, disasm, hex, libs, raw,
+  # strings. Defaults to info.
+  default_view: info
+  # Where the disasm view lands by default (and redirects to when asked to show
+  # a non-executable address): lowest, text, main, start, or entry. Defaults to
+  # lowest (the lowest executable address). Unresolvable choices fall back.
+  default_disasm_target: lowest

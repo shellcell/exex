@@ -49,6 +49,22 @@ func (m *Model) runSearch(forward, inclusive bool) {
 	case modeRaw:
 		m.ensureRaw()
 		m.rawCur = m.searchBytesAt(m.rawData, m.rawCur, forward, inclusive)
+	case modeStrings:
+		m.ensureStrings()
+		start := m.stringsCur
+		if !inclusive {
+			if forward {
+				start++
+			} else {
+				start--
+			}
+		}
+		if i := m.searchStrings(start, forward); i >= 0 {
+			m.stringsCur = i
+			m.setStatus("match: "+truncate(m.stringsList[i].Text, 40), false)
+		} else {
+			m.setStatus("not found: "+m.searchQuery, true)
+		}
 	default:
 		m.setStatus("search isn't available in this view", true)
 	}
@@ -83,10 +99,13 @@ func (m *Model) searchDisasm(start int, forward bool) int {
 		return -1
 	}
 	match := func(i int) bool {
+		addr := m.disasmInst[i].Addr
 		if strings.Contains(strings.ToLower(m.disasmInst[i].Text), q) {
 			return true
 		}
-		if sym, ok := m.file.SymbolAt(m.disasmInst[i].Addr); ok &&
+		// A symbol-name hit only counts at the symbol's first instruction, so
+		// searching a function name lands on its entry, not on every line of it.
+		if sym, ok := m.file.SymbolAt(addr); ok && sym.Addr == addr &&
 			strings.Contains(strings.ToLower(sym.Display()), q) {
 			return true
 		}

@@ -83,18 +83,26 @@ func (m *Model) loadDisasmAtNoHistory(addr uint64) bool {
 		m.setStatus("no disassembler / no executable code", true)
 		return false
 	}
-	idx, ok := m.instIndexForAddr(addr)
-	if !ok {
-		if _, mapped := m.file.ExecImage().PosForAddr(addr); !mapped {
-			m.setStatus(fmt.Sprintf("0x%x is not in an executable section", addr), true)
+	// Going to disasm must always succeed: if the requested address isn't in
+	// executable code, redirect to a sensible default (lowest exec address by
+	// default, or whatever the config chose) instead of refusing.
+	target := addr
+	if _, mapped := m.file.ExecImage().PosForAddr(target); !mapped {
+		def := m.file.DefaultExecAddr(m.disasmTarget)
+		if def == 0 {
+			m.setStatus("no executable code to disassemble", true)
 			return false
 		}
+		m.setStatus(fmt.Sprintf("0x%x isn't executable — showing 0x%x", target, def), false)
+		target = def
+	} else {
+		m.status = ""
 	}
+	idx, _ := m.instIndexForAddr(target)
 	m.disasmCur = idx
 	m.disasmTop = idx
 	m.disasmPositioned = true
 	m.mode = modeDisasm
-	m.status = ""
 	return true
 }
 
@@ -141,7 +149,9 @@ func (m *Model) goBack() {
 	}
 	m.snapshotCursorToHistory()
 	m.historyPos--
-	m.loadDisasmAtNoHistory(m.history[m.historyPos])
+	if m.loadDisasmAtNoHistory(m.history[m.historyPos]) {
+		m.scrollDisasmContext(10)
+	}
 	m.setStatus(fmt.Sprintf("back (%d/%d)", m.historyPos+1, len(m.history)), false)
 }
 
@@ -152,8 +162,38 @@ func (m *Model) goForward() {
 	}
 	m.snapshotCursorToHistory()
 	m.historyPos++
-	m.loadDisasmAtNoHistory(m.history[m.historyPos])
+	if m.loadDisasmAtNoHistory(m.history[m.historyPos]) {
+		m.scrollDisasmContext(10)
+	}
 	m.setStatus(fmt.Sprintf("forward (%d/%d)", m.historyPos+1, len(m.history)), false)
+}
+
+// scrollDisasmContext positions the scroll window so the cursor shows with
+// context above it: from the start of the containing symbol when that fits in
+// the viewport, otherwise linesAbove instructions above the cursor.
+func (m *Model) scrollDisasmContext(linesAbove int) {
+	n := len(m.disasmInst)
+	if n == 0 {
+		return
+	}
+	cur := m.disasmCur
+	h := m.bodyHeight() - 1 // disasm scroller height (minus the sticky row)
+	if h < 2 {
+		m.disasmTop = max(0, cur-linesAbove)
+		return
+	}
+	top := cur - linesAbove
+	if sym, ok := m.file.SymbolAt(m.disasmInst[cur].Addr); ok {
+		if si, found := m.instIndexForAddr(sym.Addr); found && si <= cur && cur-si <= h-2 {
+			// The symbol header line plus its instructions up to the cursor all
+			// fit above, so start the window at the symbol's first instruction.
+			top = si
+		}
+	}
+	if top < 0 {
+		top = 0
+	}
+	m.disasmTop = top
 }
 
 // jumpSymbol moves the cursor to the next (or previous) symbol that lives in

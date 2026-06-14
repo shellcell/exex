@@ -110,6 +110,55 @@ func TestRenderAllViews(t *testing.T) {
 	send("4")
 	mouse(tea.MouseButtonLeft, tea.MouseActionPress, 30, 5)
 	mouse(tea.MouseButtonLeft, tea.MouseActionPress, 30, 5)
+
+	// Goto modal: type, watch the live result list, select and jump.
+	send("g")
+	send("m")
+	send("a")
+	send("down")
+	send("enter")
+
+	// Search in the hex view, then repeat forward/backward.
+	send("5")
+	send("/")
+	send("0")
+	send("0")
+	send("enter")
+	send("n")
+	send("N")
+
+	// Search in disasm by mnemonic text.
+	send("4")
+	send("/")
+	send("m")
+	send("enter")
+	send("n")
+
+	// Sections filter.
+	send("2")
+	send("/")
+	send("t")
+	send("esc")
+	send("down")
+
+	// macOS-friendly begin/end via ctrl+a / ctrl+e.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+
+	// Strings search.
+	send("8")
+	send("/")
+	send("l")
+	send("s")
+	send("enter")
+	send("n")
+
+	// Info view: Enter follows the entry point into disasm.
+	send("1")
+	send("enter")
+	if strings.TrimSpace(model.View()) == "" {
+		t.Fatal("empty render at end")
+	}
 }
 
 func keyType(s string) tea.KeyType {

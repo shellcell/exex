@@ -158,6 +158,7 @@ func Open(path string) (*File, error) {
 	}
 
 	f.finalizeSymbols()
+	f.computeOverview()
 	return f, nil
 }
 
@@ -320,6 +321,85 @@ func (f *File) PrevSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
 		}
 	}
 	return Symbol{}, false
+}
+
+// DefaultExecAddr resolves a guaranteed-executable address to land the disasm
+// view on, honouring the requested strategy and falling back down a sensible
+// chain when the choice can't be resolved. Returns 0 only when the binary has
+// no executable code at all.
+//
+// Strategies: "entry" (the entry point), "main"/"start" (those symbols),
+// "text" (the .text/__text section), "lowest" (lowest executable address).
+func (f *File) DefaultExecAddr(strategy string) uint64 {
+	inExec := func(a uint64) bool {
+		_, ok := f.ExecImage().PosForAddr(a)
+		return ok
+	}
+	try := func(s string) (uint64, bool) {
+		switch s {
+		case "entry":
+			if f.entry != 0 && inExec(f.entry) {
+				return f.entry, true
+			}
+		case "main":
+			if a, ok := f.symbolAddr("main", "_main"); ok {
+				return a, true
+			}
+		case "start":
+			if a, ok := f.symbolAddr("_start", "start", "__start"); ok {
+				return a, true
+			}
+		case "text":
+			if a, ok := f.execSectionAddr(".text", "__text"); ok {
+				return a, true
+			}
+		case "lowest":
+			if im := f.ExecImage(); len(im.Regions) > 0 {
+				return im.Regions[0].Addr, true
+			}
+		}
+		return 0, false
+	}
+	for _, s := range []string{strategy, "entry", "main", "start", "text", "lowest"} {
+		if a, ok := try(s); ok {
+			return a
+		}
+	}
+	return 0
+}
+
+// symbolAddr returns the address of the first named symbol that lands in
+// executable code.
+func (f *File) symbolAddr(names ...string) (uint64, bool) {
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
+	}
+	for _, s := range f.symByAddr {
+		if want[s.Name] {
+			if _, ok := f.ExecImage().PosForAddr(s.Addr); ok {
+				return s.Addr, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// execSectionAddr returns the address of the first executable section matching
+// one of the given names.
+func (f *File) execSectionAddr(names ...string) (uint64, bool) {
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		if !s.Exec || s.Size == 0 {
+			continue
+		}
+		for _, n := range names {
+			if s.Name == n {
+				return s.Addr, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // SectionAt returns the mapped section whose VM range covers addr.

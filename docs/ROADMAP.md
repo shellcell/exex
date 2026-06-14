@@ -69,11 +69,11 @@ Lazy decode (done) fixed startup, but the first open of a huge `.text` still
 blocks. Decode in a background `tea.Cmd` with a spinner, or decode incrementally
 around the cursor. **Effort:** medium.
 
-## 5. Search
+## 5. Search  ✅ done
 
-In-view search: byte/string pattern in hex & raw, mnemonic/operand text in
-disasm — complements `goto`. A `/`-style prompt reusing the goto modal plumbing.
-**Effort:** small-medium.
+In-view search (`/`): hex-byte / "text" / `0x…` patterns in hex & raw, instruction
+text + symbol names in disasm, with `n` / `N` to repeat. The goto popup also gained
+a live, selectable result list that updates as you type.
 
 ## 6. Refactors / hardening
 

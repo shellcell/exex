@@ -33,13 +33,21 @@ const (
 
 // Mach-O load command + symbol constants we parse by hand.
 const (
-	lcMain   = 0x80000028
-	lcUUID   = 0x1b
-	nStab    = 0xe0
-	nType    = 0x0e
-	nSect    = 0x0e // N_TYPE value meaning "defined in section number n_sect"
-	nExt     = 0x01
-	nWeakDef = 0x0080 // n_desc bit
+	lcMain             = 0x80000028
+	lcUUID             = 0x1b
+	lcCodeSignature    = 0x1d
+	lcEncryptionInfo   = 0x21
+	lcEncryptionInfo64 = 0x2c
+	lcBuildVersion     = 0x32
+	lcVersionMinMacos  = 0x24
+	lcVersionMinIos    = 0x25
+	lcVersionMinTvos   = 0x2f
+	lcVersionMinWatch  = 0x30
+	nStab              = 0xe0
+	nType              = 0x0e
+	nSect              = 0x0e // N_TYPE value meaning "defined in section number n_sect"
+	nExt               = 0x01
+	nWeakDef           = 0x0080 // n_desc bit
 
 	// Section attribute bits (high 24 bits of a section's flags field).
 	machoAttrPureInstr = 0x80000000 // S_ATTR_PURE_INSTRUCTIONS
@@ -363,7 +371,138 @@ func (f *File) loadMachOInfo(mf *macho.File) {
 		in.Interp = "/usr/lib/dyld"
 	}
 	in.Libc = machoLibc(in)
+
+	// Layout.
+	in.WordBits = 32
+	if mf.Magic == macho.Magic64 {
+		in.WordBits = 64
+	}
+	in.ByteOrder = "little-endian"
+	if mf.ByteOrder == binary.BigEndian {
+		in.ByteOrder = "big-endian"
+	}
+	in.Segments = len(mf.Loads)
+
+	// Hardening from header flags.
+	in.PIE = TriNo
+	if mf.Flags&macho.FlagPIE != 0 {
+		in.PIE = TriYes
+	}
+	in.NX = TriYes
+	if mf.Flags&macho.FlagAllowStackExecution != 0 {
+		in.NX = TriNo
+	}
+
+	f.machoLoadInfo(mf, in)
+	in.Compiler = scanCompilerString(f.raw)
 	f.Info = in
+}
+
+// machoLoadInfo scans load commands for code signing, encryption, and the
+// build/min-OS version.
+func (f *File) machoLoadInfo(mf *macho.File, in *Info) {
+	bo := mf.ByteOrder
+	for _, l := range mf.Loads {
+		lb, ok := l.(macho.LoadBytes)
+		if !ok {
+			continue
+		}
+		raw := lb.Raw()
+		if len(raw) < 8 {
+			continue
+		}
+		switch bo.Uint32(raw) {
+		case lcCodeSignature:
+			in.CodeSigned = true
+		case lcEncryptionInfo, lcEncryptionInfo64:
+			if len(raw) >= 20 && bo.Uint32(raw[16:]) != 0 {
+				in.Encrypted = true
+			}
+		case lcBuildVersion:
+			if len(raw) >= 20 {
+				in.MinOS = strings.TrimSpace(machoPlatform(bo.Uint32(raw[8:])) + " " + machoVersion(bo.Uint32(raw[12:])))
+				in.SDK = machoVersion(bo.Uint32(raw[16:]))
+			}
+		case lcVersionMinMacos, lcVersionMinIos, lcVersionMinTvos, lcVersionMinWatch:
+			if in.MinOS == "" && len(raw) >= 16 {
+				in.MinOS = strings.TrimSpace(machoVersionMinName(bo.Uint32(raw)) + " " + machoVersion(bo.Uint32(raw[8:])))
+				in.SDK = machoVersion(bo.Uint32(raw[12:]))
+			}
+		}
+	}
+}
+
+func machoVersion(v uint32) string {
+	x, y, z := v>>16, (v>>8)&0xff, v&0xff
+	if z == 0 {
+		return fmt.Sprintf("%d.%d", x, y)
+	}
+	return fmt.Sprintf("%d.%d.%d", x, y, z)
+}
+
+func machoPlatform(p uint32) string {
+	switch p {
+	case 1:
+		return "macOS"
+	case 2:
+		return "iOS"
+	case 3:
+		return "tvOS"
+	case 4:
+		return "watchOS"
+	case 6:
+		return "Mac Catalyst"
+	}
+	return ""
+}
+
+func machoVersionMinName(cmd uint32) string {
+	switch cmd {
+	case lcVersionMinMacos:
+		return "macOS"
+	case lcVersionMinIos:
+		return "iOS"
+	case lcVersionMinTvos:
+		return "tvOS"
+	case lcVersionMinWatch:
+		return "watchOS"
+	}
+	return ""
+}
+
+// scanCompilerString pulls a compiler banner out of the raw image. It is
+// deliberately conservative: a real banner has a digit right after the version
+// word and ends at the "(clang-…)" parenthesis group, so we don't run off the
+// end into adjacent strings (Go string data isn't NUL-terminated).
+func scanCompilerString(raw []byte) string {
+	for _, needle := range []string{"Apple clang version ", "clang version ", "GCC "} {
+		from := 0
+		for {
+			rel := bytes.Index(raw[from:], []byte(needle))
+			if rel < 0 {
+				break
+			}
+			i := from + rel
+			vstart := i + len(needle)
+			from = vstart
+			if vstart >= len(raw) || raw[vstart] < '0' || raw[vstart] > '9' {
+				continue // not a real version banner
+			}
+			end := vstart
+			for end < len(raw) && end < i+100 {
+				c := raw[end]
+				if c < 0x20 || c > 0x7e {
+					break
+				}
+				end++
+				if c == ')' {
+					break // banners end with the "(clang-…)" group
+				}
+			}
+			return strings.TrimSpace(string(raw[i:end]))
+		}
+	}
+	return ""
 }
 
 func machoLibc(in *Info) LibcInfo {

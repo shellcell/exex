@@ -43,14 +43,17 @@ var (
 			Background(lipgloss.Color("63")).
 			Bold(true)
 
+	// Address columns are intentionally low-contrast (grey) so the symbol
+	// labels and instruction text read as the foreground.
 	addrStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214"))
+			Foreground(lipgloss.Color("245"))
 
 	mnemonicStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("117"))
 
 	symbolNameStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("180"))
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
 
 	srcLineNoStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244"))

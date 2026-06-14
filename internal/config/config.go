@@ -18,8 +18,21 @@ import (
 
 // Config is the on-disk schema.
 type Config struct {
-	Colors Colors `yaml:"colors"`
-	Keys   Keys   `yaml:"keys"`
+	Colors   Colors   `yaml:"colors"`
+	Keys     Keys     `yaml:"keys"`
+	Behavior Behavior `yaml:"behavior"`
+}
+
+// Behavior holds non-visual preferences.
+type Behavior struct {
+	// View to open on startup: one of info, sections, symbols, disasm, hex,
+	// libs, raw, strings. Empty keeps the default (info).
+	DefaultView string `yaml:"default_view"`
+	// Where the disasm view lands by default, and where it redirects when asked
+	// to show a non-executable address: one of entry, main, start, text, lowest.
+	// Empty keeps the default (entry). Unresolvable choices fall back down the
+	// list automatically.
+	DefaultDisasmTarget string `yaml:"default_disasm_target"`
 }
 
 // Colors lists every visual element the user can re-skin. Empty strings mean

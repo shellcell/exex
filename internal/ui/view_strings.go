@@ -10,6 +10,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/psimonen/elf-explorer/internal/binfile"
 )
 
 // ensureStrings extracts the file's printable strings lazily.
@@ -58,8 +61,37 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		m.copyToClipboard(m.stringsList[m.stringsCur].Text, "string")
+	case "/":
+		m.openSearch()
+	case "n":
+		m.runSearch(true, false)
+	case "N":
+		m.runSearch(false, false)
 	}
 	return m, nil
+}
+
+// searchStrings finds the next/previous string whose text contains the query.
+func (m *Model) searchStrings(start int, forward bool) int {
+	q := strings.ToLower(m.searchQuery)
+	n := len(m.stringsList)
+	if forward {
+		for i := start; i < n; i++ {
+			if i >= 0 && strings.Contains(strings.ToLower(m.stringsList[i].Text), q) {
+				return i
+			}
+		}
+		return -1
+	}
+	if start > n-1 {
+		start = n - 1
+	}
+	for i := start; i >= 0; i-- {
+		if strings.Contains(strings.ToLower(m.stringsList[i].Text), q) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *Model) renderStrings() string {
@@ -102,11 +134,20 @@ func (m *Model) renderStrings() string {
 		if i == m.stringsCur {
 			b.WriteString(tableSelStyle.Render(line))
 		} else {
-			b.WriteString(tableRowStyle.Render(line))
+			b.WriteString(m.stringRowStyle(s).Render(line))
 		}
 		b.WriteString("\n")
 	}
 	return padBody(b.String(), m.width, bodyH)
+}
+
+// stringRowStyle colours a string row by the category of its owning section
+// (matching the Sections and Hex views); unmapped strings render dim.
+func (m *Model) stringRowStyle(s binfile.StringEntry) lipgloss.Style {
+	if sec := m.sectionAtOffset(s.Offset); sec != nil {
+		return styleForSection(sec)
+	}
+	return footerStyle
 }
 
 // sanitizeString collapses control bytes (none should remain from extraction,

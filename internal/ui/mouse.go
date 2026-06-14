@@ -94,8 +94,8 @@ func (m *Model) handleClick(x, y int) {
 	}
 	switch m.mode {
 	case modeSections:
-		// Body layout: row 0 is the column header, data follows.
-		if idx := m.sectionsTop + bodyRow - 1; idx >= 0 && idx < len(m.sections) {
+		// Body layout: row 0 filter, row 1 header, data follows.
+		if idx := m.sectionsTop + bodyRow - 2; idx >= 0 && idx < len(m.sectionsFiltered) {
 			m.sectionsCur = idx
 		}
 	case modeSymbols:

@@ -234,7 +234,106 @@ func (f *File) loadELFInfo(ef *elf.File) {
 	in.Stripped = !hasSymtab
 	in.StaticLinked = in.Interp == "" && len(in.DynamicLibs) == 0
 	in.Libc = identifyLibc(ef, in)
+
+	// Layout.
+	in.WordBits = 32
+	if ef.Class == elf.ELFCLASS64 {
+		in.WordBits = 64
+	}
+	in.ByteOrder = "little-endian"
+	if ef.Data == elf.ELFDATA2MSB {
+		in.ByteOrder = "big-endian"
+	}
+	in.Segments = len(ef.Progs)
+
+	// PIE: an ET_DYN executable, confirmed by DF_1_PIE when present.
+	if ef.Type == elf.ET_DYN {
+		in.PIE = TriYes
+	} else {
+		in.PIE = TriNo
+	}
+	if vals, err := ef.DynValue(elf.DT_FLAGS_1); err == nil {
+		for _, v := range vals {
+			if v&uint64(elf.DF_1_PIE) != 0 {
+				in.PIE = TriYes
+			}
+		}
+	}
+
+	// NX: a PT_GNU_STACK without the executable flag.
+	in.NX = TriUnknown
+	for _, p := range ef.Progs {
+		if p.Type == elf.PT_GNU_STACK {
+			if p.Flags&elf.PF_X != 0 {
+				in.NX = TriNo
+			} else {
+				in.NX = TriYes
+			}
+		}
+	}
+
+	// RELRO: a PT_GNU_RELRO segment (partial), full when also BIND_NOW.
+	relro := false
+	for _, p := range ef.Progs {
+		if p.Type == elf.PT_GNU_RELRO {
+			relro = true
+		}
+	}
+	bindNow := false
+	if vals, err := ef.DynValue(elf.DT_FLAGS); err == nil {
+		for _, v := range vals {
+			if v&uint64(elf.DF_BIND_NOW) != 0 {
+				bindNow = true
+			}
+		}
+	}
+	if vals, err := ef.DynValue(elf.DT_FLAGS_1); err == nil {
+		for _, v := range vals {
+			if v&uint64(elf.DF_1_NOW) != 0 {
+				bindNow = true
+			}
+		}
+	}
+	if vals, err := ef.DynValue(elf.DT_BIND_NOW); err == nil && len(vals) > 0 {
+		bindNow = true
+	}
+	switch {
+	case relro && bindNow:
+		in.RELRO = "full"
+	case relro:
+		in.RELRO = "partial"
+	default:
+		in.RELRO = "none"
+	}
+
+	// Compiler from .comment.
+	if sec := ef.Section(".comment"); sec != nil {
+		if d, err := sec.Data(); err == nil {
+			in.Compiler = cleanComment(d)
+		}
+	}
+
 	f.Info = in
+}
+
+// cleanComment turns a NUL-separated .comment blob into a readable, deduped
+// one-liner.
+func cleanComment(b []byte) string {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range strings.Split(string(b), "\x00") {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	s := strings.Join(out, "; ")
+	if len(s) > 120 {
+		s = s[:119] + "…"
+	}
+	return s
 }
 
 // readBuildID parses .note.gnu.build-id and returns the descriptor as hex.

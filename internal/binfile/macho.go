@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // Mach-O magic numbers (thin, both byte orders, plus the fat headers).

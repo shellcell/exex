@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // TestOpenPE cross-compiles a tiny Go program to a Windows PE and opens it,

@@ -1,4 +1,4 @@
-// Package ui implements the Bubble Tea TUI for elf-explorer.
+// Package ui implements the Bubble Tea TUI for exex.
 package ui
 
 import (
@@ -15,9 +15,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/psimonen/elf-explorer/internal/binfile"
-	"github.com/psimonen/elf-explorer/internal/config"
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/config"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 type mode int
@@ -767,7 +767,7 @@ func (m *Model) tabSegment(label string, active bool) string {
 // ELF-only). Shared by renderTabs and tabHitTest so their geometry matches.
 func (m *Model) tabLead() []string {
 	return []string{
-		titleStyle.Render(" elf-explorer "),
+		titleStyle.Render(" exex "),
 		tabStyle.Render(string(m.file.Format)),
 	}
 }

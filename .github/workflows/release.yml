@@ -36,16 +36,16 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          out="elf-explorer"
+          out="exex"
           mkdir -p dist
           go build -trimpath -ldflags="-s -w" -o "$out" .
-          tarball="dist/elf-explorer-${tag}-${GOOS}-${GOARCH}.tar.gz"
+          tarball="dist/exex-${tag}-${GOOS}-${GOARCH}.tar.gz"
           tar -czf "$tarball" "$out" README.md LICENSE 2>/dev/null || tar -czf "$tarball" "$out"
           ( cd dist && sha256sum "$(basename "$tarball")" > "$(basename "$tarball").sha256" )
 
       - uses: actions/upload-artifact@v4
         with:
-          name: elf-explorer-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: exex-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
           if-no-files-found: error
 
@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: elf-explorer-*
+          pattern: exex-*
           path: dist
           merge-multiple: true
 

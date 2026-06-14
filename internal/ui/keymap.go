@@ -5,7 +5,7 @@ package ui
 // view's domain (filter input, list cursor, etc.) and not generally worth
 // remapping.
 
-import "github.com/psimonen/elf-explorer/internal/config"
+import "github.com/rabarbra/exex/internal/config"
 
 // action is what a key resolves to in the top-level dispatch. ActionNone
 // means "the key isn't a top-level command; let the per-view handler have

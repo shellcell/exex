@@ -1,7 +1,7 @@
-# elf-explorer configuration example.
+# exex configuration example.
 #
-# Save this to $XDG_CONFIG_HOME/elf-explorer/config.yaml (or
-# $HOME/.config/elf-explorer/config.yaml) and edit. Every field is optional —
+# Save this to $XDG_CONFIG_HOME/exex/config.yaml (or
+# $HOME/.config/exex/config.yaml) and edit. Every field is optional —
 # unset entries keep their built-in defaults, so you only need to include the
 # parts you want to override.
 #

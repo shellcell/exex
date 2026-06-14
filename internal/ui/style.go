@@ -3,14 +3,14 @@ package ui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/psimonen/elf-explorer/internal/config"
+	"github.com/rabarbra/exex/internal/config"
 )
 
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("231")).
-			Background(lipgloss.Color("63")).
+			Background(lipgloss.Color("66")).
 			Padding(0, 1)
 
 	tabStyle = lipgloss.NewStyle().

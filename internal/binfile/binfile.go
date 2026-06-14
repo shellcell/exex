@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // Format identifies the container the binary was loaded from.

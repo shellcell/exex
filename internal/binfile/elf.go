@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // elfDWARF returns DWARF for the binary: embedded, or from a separate debug

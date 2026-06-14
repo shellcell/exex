@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // PE section characteristics (not exported by debug/pe).

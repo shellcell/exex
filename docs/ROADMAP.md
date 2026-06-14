@@ -93,8 +93,13 @@ a live, selectable result list that updates as you type.
 - ✅ Wheel scrolls 3 lines/notch.
 - ✅ Tab bar shows a format chip (ELF/Mach-O/PE) so it's honest about scope.
 
----
+## 8. Command line options
 
-**Suggested order:** **1 (stack view)** and **2 (xrefs)** first — highest
-exploration value and they build on what's already decoded — then **3 (PE)**,
-with **6 (refactors/tests)** folded in alongside.
+ - address or string to pass to goto as third arg
+
+## 9. Sources view
+
+New view shouwing list of source files used in this binary (based on
+dwaef / dSYM info). Source files can be open - then mapping to disasm view on
+the right. Sources should be searchable (in current source file and across all
+the sources

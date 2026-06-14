@@ -1,4 +1,4 @@
-// Command elf-explorer is a terminal UI for exploring ELF and Mach-O binaries:
+// Command exex is a terminal UI for exploring ELF and Mach-O binaries:
 // header, sections, symbols, disassembly, and DWARF-driven source mapping.
 package main
 
@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/psimonen/elf-explorer/internal/binfile"
-	"github.com/psimonen/elf-explorer/internal/ui"
+	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui"
 )
 
 func main() {
@@ -21,19 +21,19 @@ func main() {
 
 	f, err := binfile.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "elf-explorer: %v\n", err)
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
 		os.Exit(1)
 	}
 
 	m, err := ui.New(f)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "elf-explorer: %v\n", err)
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
 		os.Exit(1)
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "elf-explorer: %v\n", err)
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
 		os.Exit(1)
 	}
 }

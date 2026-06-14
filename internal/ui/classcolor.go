@@ -3,8 +3,8 @@ package ui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/psimonen/elf-explorer/internal/binfile"
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // styleForClass picks the rendering style for an instruction's class. The

@@ -14,8 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/psimonen/elf-explorer/internal/binfile"
-	"github.com/psimonen/elf-explorer/internal/disasm"
+	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // historyCap caps the depth of the back/forward stack in the disasm view.

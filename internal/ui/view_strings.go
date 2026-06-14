@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/psimonen/elf-explorer/internal/binfile"
+	"github.com/rabarbra/exex/internal/binfile"
 )
 
 // ensureStrings extracts the file's printable strings lazily.

@@ -11,7 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/psimonen/elf-explorer/internal/binfile"
+	"github.com/rabarbra/exex/internal/binfile"
 )
 
 func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {

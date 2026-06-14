@@ -1,7 +1,7 @@
-// Package config loads user customisation for elf-explorer: colour palette
+// Package config loads user customisation for exex: colour palette
 // and top-level keybindings. The schema is YAML; the file lives at
-// $XDG_CONFIG_HOME/elf-explorer/config.yaml (falling back to
-// $HOME/.config/elf-explorer/config.yaml). Missing fields keep their
+// $XDG_CONFIG_HOME/exex/config.yaml (falling back to
+// $HOME/.config/exex/config.yaml). Missing fields keep their
 // built-in defaults, so a user can override a single entry without copying
 // the whole schema.
 package config
@@ -192,13 +192,13 @@ func Default() *Config { return &Config{} }
 // Honours XDG_CONFIG_HOME with $HOME/.config as the fallback.
 func Path() string {
 	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "elf-explorer", "config.yaml")
+		return filepath.Join(x, "exex", "config.yaml")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".config", "elf-explorer", "config.yaml")
+	return filepath.Join(home, ".config", "exex", "config.yaml")
 }
 
 // Load reads and parses the config file. A missing file is not an error: it

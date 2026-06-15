@@ -2,12 +2,17 @@ package binfile
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
 // TestOpenSystemMachO exercises the Mach-O path against a real (usually fat)
-// system binary. Skipped where the file isn't present.
+// system binary. /bin/ls is Mach-O only on macOS (it's ELF on Linux CI), so the
+// test is darwin-only; skipped elsewhere or when the file isn't present.
 func TestOpenSystemMachO(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("system Mach-O binary only available on macOS")
+	}
 	const path = "/bin/ls"
 	if _, err := os.Stat(path); err != nil {
 		t.Skipf("%s not present", path)

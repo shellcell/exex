@@ -107,6 +107,9 @@ func (m *Model) updateSources(key string) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 	n := len(m.sourcesFiltered)
+	if navKey(&m.sourcesCur, n, m.bodyHeight(), key) {
+		return m, nil
+	}
 	switch key {
 	case "/":
 		m.sourcesFilter.Focus()
@@ -120,24 +123,7 @@ func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 			m.copyToClipboard(m.sourcesFiles[m.sourcesFiltered[m.sourcesCur]], "source path")
 		}
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
-	case "up", "k":
-		if m.sourcesCur > 0 {
-			m.sourcesCur--
-		}
-	case "down", "j":
-		if m.sourcesCur < n-1 {
-			m.sourcesCur++
-		}
-	case "pgup":
-		m.sourcesCur = max(0, m.sourcesCur-m.bodyHeight())
-	case "pgdown":
-		m.sourcesCur = min(n-1, m.sourcesCur+m.bodyHeight())
-	case "home":
-		m.sourcesCur = 0
-	case "end", "G":
-		m.sourcesCur = n - 1
+		m.toggleWrap()
 	case "enter":
 		if m.sourcesCur >= 0 && m.sourcesCur < n {
 			m.openSourceFile(m.sourcesFiles[m.sourcesFiltered[m.sourcesCur]], 1)
@@ -170,8 +156,7 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 		m.copyToClipboard(m.srcFile, "source path")
 		return m, nil
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
+		m.toggleWrap()
 		return m, nil
 	case "n":
 		m.runSearch(true, false)

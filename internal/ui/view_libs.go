@@ -23,26 +23,12 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 	if n == 0 {
 		return m, nil
 	}
+	if navKey(&m.libsCur, n, m.bodyHeight(), key) {
+		return m, nil
+	}
 	switch key {
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
-	case "up", "k":
-		if m.libsCur > 0 {
-			m.libsCur--
-		}
-	case "down", "j":
-		if m.libsCur < n-1 {
-			m.libsCur++
-		}
-	case "pgup":
-		m.libsCur = max(0, m.libsCur-m.bodyHeight())
-	case "pgdown":
-		m.libsCur = min(n-1, m.libsCur+m.bodyHeight())
-	case "home":
-		m.libsCur = 0
-	case "end", "G":
-		m.libsCur = n - 1
+		m.toggleWrap()
 	case "c", "s":
 		if m.file.Info != nil && m.libsCur < len(m.file.Info.DynamicLibs) {
 			m.copyToClipboard(m.file.Info.DynamicLibs[m.libsCur], "library")

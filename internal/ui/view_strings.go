@@ -28,26 +28,12 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	if n == 0 {
 		return m, nil
 	}
+	if navKey(&m.stringsCur, n, m.bodyHeight(), key) {
+		return m, nil
+	}
 	switch key {
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
-	case "up", "k":
-		if m.stringsCur > 0 {
-			m.stringsCur--
-		}
-	case "down", "j":
-		if m.stringsCur < n-1 {
-			m.stringsCur++
-		}
-	case "pgup":
-		m.stringsCur = max(0, m.stringsCur-m.bodyHeight())
-	case "pgdown":
-		m.stringsCur = min(n-1, m.stringsCur+m.bodyHeight())
-	case "home":
-		m.stringsCur = 0
-	case "end", "G":
-		m.stringsCur = n - 1
+		m.toggleWrap()
 	case "enter":
 		s := m.stringsList[m.stringsCur]
 		if s.HasAddr {

@@ -30,26 +30,13 @@ func (m *Model) recomputeSections() {
 
 func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 	n := len(m.sectionsFiltered)
+	if navKey(&m.sectionsCur, n, m.bodyHeight(), key) {
+		return m, nil
+	}
 	switch key {
 	case "/":
 		m.sectionsFilter.Focus()
 		return m, nil
-	case "up", "k":
-		if m.sectionsCur > 0 {
-			m.sectionsCur--
-		}
-	case "down", "j":
-		if m.sectionsCur < n-1 {
-			m.sectionsCur++
-		}
-	case "pgup":
-		m.sectionsCur = max(0, m.sectionsCur-m.bodyHeight())
-	case "pgdown":
-		m.sectionsCur = min(n-1, m.sectionsCur+m.bodyHeight())
-	case "home":
-		m.sectionsCur = 0
-	case "end", "G":
-		m.sectionsCur = n - 1
 	case "enter":
 		sec, ok := m.currentSection()
 		if !ok {
@@ -71,8 +58,7 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 			m.setStatus("section is not executable", true)
 		}
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
+		m.toggleWrap()
 	case "a":
 		if sec, ok := m.currentSection(); ok {
 			m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), sec.Addr), "address")

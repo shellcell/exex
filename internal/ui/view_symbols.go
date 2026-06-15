@@ -37,6 +37,9 @@ func (m *Model) recomputeSymbols() {
 }
 
 func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
+	if navKey(&m.symbolsCur, len(m.symbolsFiltered), m.bodyHeight(), key) {
+		return m, nil
+	}
 	switch key {
 	case "/":
 		m.symbolsFilter.Focus()
@@ -54,25 +57,8 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 		m.recomputeSymbols()
 		return m, nil
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
+		m.toggleWrap()
 		return m, nil
-	case "up", "k":
-		if m.symbolsCur > 0 {
-			m.symbolsCur--
-		}
-	case "down", "j":
-		if m.symbolsCur < len(m.symbolsFiltered)-1 {
-			m.symbolsCur++
-		}
-	case "pgup":
-		m.symbolsCur = max(0, m.symbolsCur-m.bodyHeight())
-	case "pgdown":
-		m.symbolsCur = min(len(m.symbolsFiltered)-1, m.symbolsCur+m.bodyHeight())
-	case "home":
-		m.symbolsCur = 0
-	case "end", "G":
-		m.symbolsCur = len(m.symbolsFiltered) - 1
 	case "enter":
 		if len(m.symbolsFiltered) == 0 {
 			return m, nil

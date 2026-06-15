@@ -138,8 +138,7 @@ func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
 			m.setStatus("address is not executable", true)
 		}
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
+		m.toggleWrap()
 	case "a":
 		addr := m.hexImg.AddrAt(m.hexCur)
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
@@ -228,8 +227,7 @@ func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "w":
-		m.wrap = !m.wrap
-		m.setStatus(wrapStatus(m.wrap), false)
+		m.toggleWrap()
 	case "a":
 		m.copyToClipboard(fmt.Sprintf("0x%x", m.rawCur), "offset")
 	case "s":

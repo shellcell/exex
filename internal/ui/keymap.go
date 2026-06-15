@@ -82,10 +82,17 @@ func (m keyMap) applyConfig(k config.Keys) {
 	bind(actionViewStrings, k.ViewStrings)
 	bind(actionViewSources, k.ViewSources)
 	bind(actionToggleSource, k.ToggleSource)
-	// CopyAddress/CopySymbol are intentionally NOT in the top-level dispatch:
+	// Per-view actions are intentionally NOT in the top-level dispatch:
 	// they read the cursor context of the current view (disasm/hex/symbols/
 	// sections/libs), so the per-view handler owns them. We expose them in
 	// config for future per-view rebinding.
 	_ = k.CopyAddress
 	_ = k.CopySymbol
+	_ = k.CopyPath
+	_ = k.OpenDisasm
+	_ = k.Wrap
+	_ = k.FilterType
+	_ = k.SearchMode
+	_ = k.SearchDirection
+	_ = k.SearchOrigin
 }

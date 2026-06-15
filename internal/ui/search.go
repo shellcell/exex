@@ -67,11 +67,68 @@ const (
 	searchCursorBeforeStart
 )
 
-// openSearch opens the search prompt, pre-filled with the last query.
+const (
+	searchModeAuto = iota
+	searchModeText
+	searchModeHex
+)
+
+func searchModeName(mode int) string {
+	switch mode {
+	case searchModeText:
+		return "text"
+	case searchModeHex:
+		return "hex"
+	default:
+		return "auto"
+	}
+}
+
+func (m *Model) cycleSearchMode() {
+	m.searchMode = (m.searchMode + 1) % 3
+}
+
+// searchSwitch is one clickable toggle in the search popup.
+type searchSwitch struct {
+	label  string
+	toggle func()
+}
+
+// searchSwitchSep separates the switch segments; searchSwitchLine is the
+// 0-based content row the switch strip occupies inside the modal (hint, blank,
+// input, blank, switches, help).
+const (
+	searchSwitchSep  = "   "
+	searchSwitchLine = 4
+)
+
+// searchSwitches returns the mode / direction / origin toggles. The render and
+// the mouse hit-test both build from this, so they can't drift.
+func (m *Model) searchSwitches() []searchSwitch {
+	dir := "forward"
+	if !m.searchForward {
+		dir = "backward"
+	}
+	origin := "from cursor"
+	if !m.searchFromCursor {
+		if m.searchForward {
+			origin = "from start"
+		} else {
+			origin = "from end"
+		}
+	}
+	return []searchSwitch{
+		{"[ mode: " + searchModeName(m.searchMode) + " ]", m.cycleSearchMode},
+		{"[ dir: " + dir + " ]", func() { m.searchForward = !m.searchForward }},
+		{"[ origin: " + origin + " ]", func() { m.searchFromCursor = !m.searchFromCursor }},
+	}
+}
+
+// openSearch opens the search prompt. Repeat search still uses searchQuery via
+// n/N, but each new prompt starts empty so stale input is not accidentally reused.
 func (m *Model) openSearch() {
 	m.searchActive = true
-	m.searchInput.SetValue(m.searchQuery)
-	m.searchInput.CursorEnd()
+	m.searchInput.SetValue("")
 	m.searchInput.Focus()
 }
 
@@ -202,6 +259,10 @@ func (m *Model) runSearchWithOrigin(forward, inclusive bool, fromCursor bool) te
 	}
 	switch m.mode {
 	case modeDisasm:
+		if m.sourceFirst && m.srcFile != "" {
+			m.searchInSourceFile(forward, inclusive)
+			return nil
+		}
 		return m.startDisasmSearch(forward, inclusive, fromCursor)
 	case modeHex:
 		m.ensureHex()
@@ -406,7 +467,7 @@ func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) 
 }
 
 func (m *Model) searchBytesAt(data []byte, cur int, forward, inclusive bool) int {
-	pat := searchPattern(m.searchQuery)
+	pat := searchPattern(m.searchQuery, m.searchMode)
 	if len(pat) == 0 {
 		m.setStatus("empty search pattern", true)
 		return cur
@@ -604,8 +665,26 @@ func findBytes(data, pat []byte, start int, forward bool) int {
 //   - "quoted text"   → literal bytes of the text
 //   - hex digits / 0x → byte pattern (spaces allowed: "de ad be ef")
 //   - anything else   → literal text bytes
-func searchPattern(q string) []byte {
+func searchPattern(q string, mode int) []byte {
 	trimmed := strings.TrimSpace(q)
+	if mode == searchModeText {
+		if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
+			return []byte(trimmed[1 : len(trimmed)-1])
+		}
+		return []byte(q)
+	}
+	if mode == searchModeHex {
+		compact := strings.TrimPrefix(strings.ReplaceAll(trimmed, " ", ""), "0x")
+		if len(compact)%2 != 0 || !isHexStr(compact) {
+			return nil
+		}
+		b := make([]byte, len(compact)/2)
+		for i := range b {
+			v, _ := strconv.ParseUint(compact[2*i:2*i+2], 16, 8)
+			b[i] = byte(v)
+		}
+		return b
+	}
 	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
 		return []byte(trimmed[1 : len(trimmed)-1])
 	}

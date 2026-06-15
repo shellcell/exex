@@ -55,16 +55,24 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		switch {
-		case binfile.IsExecSection(&sec) && m.dis != nil:
-			m.loadDisasmAt(sec.Addr)
-		case sec.Alloc && sec.Addr != 0:
+		if sec.Alloc && sec.Addr != 0 {
 			m.openHexAt(sec.Addr)
-		default:
-			// No virtual address (debug, symbol tables, …): show its bytes in
-			// the raw file view at the section's file offset.
+		} else {
 			m.openRawAt(sec.Offset)
 		}
+	case "d":
+		sec, ok := m.currentSection()
+		if !ok {
+			return m, nil
+		}
+		if binfile.IsExecSection(&sec) && m.dis != nil {
+			m.loadDisasmAt(sec.Addr)
+		} else {
+			m.setStatus("section is not executable", true)
+		}
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 	case "a":
 		if sec, ok := m.currentSection(); ok {
 			m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), sec.Addr), "address")
@@ -108,33 +116,41 @@ func (m *Model) renderSections() string {
 	if visible < 1 {
 		visible = 1
 	}
-	if m.sectionsCur < m.sectionsTop {
-		m.sectionsTop = m.sectionsCur
-	} else if m.sectionsCur >= m.sectionsTop+visible {
-		m.sectionsTop = m.sectionsCur - visible + 1
+	rowHeight := func(i int) int {
+		return m.sectionRowHeight(i)
 	}
-	end := m.sectionsTop + visible
-	if end > len(m.sectionsFiltered) {
-		end = len(m.sectionsFiltered)
-	}
+	ensureVisualTop(m.sectionsCur, &m.sectionsTop, len(m.sectionsFiltered), visible, rowHeight)
 
-	var b strings.Builder
-	b.WriteString(filterRow)
-	b.WriteString("\n")
-	b.WriteString(header)
-	b.WriteString("\n")
-	for i := m.sectionsTop; i < end; i++ {
-		idx := m.sectionsFiltered[i]
-		s := m.sections[idx]
-		line := fmt.Sprintf(" %3d  %-22s %-14s 0x%0*x %-12d  %s",
-			idx, truncate(s.Name, 22), truncate(s.TypeName, 14), addrW, s.Addr, s.Size, s.Flags)
-		line = padRight(line, m.width)
-		if i == m.sectionsCur {
-			b.WriteString(tableSelStyle.Render(line))
-		} else {
-			b.WriteString(styleForSection(&s).Render(line))
+	rows := []string{padRight(filterRow, m.width), padRight(header, m.width)}
+	for i := m.sectionsTop; i < len(m.sectionsFiltered); i++ {
+		line := m.sectionRow(i, addrW, i == m.sectionsCur)
+		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, 6, bodyH) {
+			break
 		}
-		b.WriteString("\n")
 	}
-	return padBody(b.String(), m.width, bodyH)
+	return padBodyRows(rows, m.width, bodyH)
+}
+
+func (m *Model) sectionRowHeight(i int) int {
+	if i < 0 || i >= len(m.sectionsFiltered) {
+		return 1
+	}
+	return len(renderLineRowsIndented(m.sectionRow(i, m.file.AddrHexWidth(), false), m.width, m.wrap, 6))
+}
+
+func (m *Model) sectionRow(i, addrW int, selected bool) string {
+	idx := m.sectionsFiltered[i]
+	s := m.sections[idx]
+	name := s.Name
+	typeName := s.TypeName
+	if !m.wrap {
+		name = truncate(name, 22)
+		typeName = truncate(typeName, 14)
+	}
+	line := fmt.Sprintf(" %s  %-22s %-14s %s %-12d  %s",
+		addrStyle.Render(fmt.Sprintf("%3d", idx)), name, typeName, addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)), s.Size, s.Flags)
+	if selected {
+		return tableSelStyle.Render(stripANSI(line))
+	}
+	return styleForSection(&s).Render(line)
 }

@@ -85,6 +85,8 @@ type Model struct {
 	symbolsFiltered []int // indices into file.Symbols (sorted by name)
 	symbolsCur      int
 	symbolsTop      int
+	symbolsKind     binfile.SymKind
+	symbolsKindOn   bool
 
 	// Disasm view. disasmInst holds the currently loaded decode window only. The
 	// first window is loaded lazily on first open; later jumps replace it with a
@@ -107,6 +109,7 @@ type Model struct {
 	disasmCache         map[disasmCacheKey]disasmCacheEntry
 	disasmCacheOrder    []disasmCacheKey
 	showSource          bool
+	sourceFirst         bool
 	srcVP               viewport.Model
 	srcHL               map[string][]string // filename → per-line syntax-highlighted source
 
@@ -152,6 +155,10 @@ type Model struct {
 	srcSearchAll    bool // scope of the next search in this view
 	srcAsmLeft      bool // Sources open-file: disasm on the left, source on the right
 
+	// Per-view long-line wrapping toggles. Views default to truncating to preserve
+	// table geometry; the toggle lets source-heavy views show full rows when desired.
+	wrap bool // global long-line wrap toggle (applies to every view)
+
 	// Mouse double-click tracking (for follow-on-double-click in disasm).
 	lastClickY  int
 	lastClickAt time.Time
@@ -172,6 +179,7 @@ type Model struct {
 	searchCancelable bool
 	searchResults    disasmSearchCache
 	searchCursorMode int
+	searchMode       int
 	searchCursorAddr uint64
 	searchForward    bool
 	searchFromCursor bool
@@ -184,7 +192,8 @@ type Model struct {
 	keys keyMap
 	// keyAlias maps user-configured per-view keys (copy/next/prev) to their
 	// canonical tokens so the per-view handlers stay simple.
-	keyAlias map[string]string
+	keyAlias       map[string]string
+	searchKeyAlias map[string]string
 
 	// helpActive toggles the keybinding cheat-sheet overlay.
 	helpActive bool
@@ -221,6 +230,21 @@ func New(f *binfile.File) (*Model, error) {
 	addAlias(cfg.Keys.CopySymbol, "s")
 	addAlias(cfg.Keys.Next, "]")
 	addAlias(cfg.Keys.Prev, "[")
+	addAlias(cfg.Keys.CopyPath, "c")
+	addAlias(cfg.Keys.OpenDisasm, "d")
+	addAlias(cfg.Keys.Wrap, "w")
+	addAlias(cfg.Keys.FilterType, "t")
+	searchKeyAlias := map[string]string{}
+	addSearchAlias := func(ks config.StringOrSlice, canonical string) {
+		for _, k := range ks {
+			if k != "" {
+				searchKeyAlias[k] = canonical
+			}
+		}
+	}
+	addSearchAlias(cfg.Keys.SearchMode, "ctrl+m")
+	addSearchAlias(cfg.Keys.SearchDirection, "ctrl+r")
+	addSearchAlias(cfg.Keys.SearchOrigin, "ctrl+o")
 
 	filter := textinput.New()
 	filter.Placeholder = "type to filter…"
@@ -265,6 +289,7 @@ func New(f *binfile.File) (*Model, error) {
 		showSource:          true,
 		keys:                keys,
 		keyAlias:            keyAlias,
+		searchKeyAlias:      searchKeyAlias,
 	}
 	m.headerVP = viewport.New(0, 0)
 	m.srcVP = viewport.New(0, 0)
@@ -308,6 +333,8 @@ func parseDefaultView(name string) mode {
 		return modeRaw
 	case "strings":
 		return modeStrings
+	case "sources":
+		return modeSources
 	}
 	return modeInfo
 }
@@ -445,6 +472,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.searchActive {
+		if c, ok := m.searchKeyAlias[key]; ok {
+			key = c
+		}
 		switch key {
 		case "esc":
 			m.searchActive = false
@@ -554,7 +584,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case actionToggleSource:
 		switch m.mode {
 		case modeDisasm:
-			m.showSource = !m.showSource
+			switch {
+			case !m.showSource:
+				m.showSource = true
+				m.sourceFirst = false
+			case !m.sourceFirst && m.ensureSourceForDisasmCursor():
+				m.sourceFirst = true
+			default:
+				m.showSource = !m.showSource
+				m.sourceFirst = false
+			}
 		case modeSources:
 			// Swap which pane (source / disasm) is primary on the left.
 			if m.srcFile != "" {
@@ -564,14 +603,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// macOS keyboards often lack Home/End; accept the emacs-style ctrl+a /
-	// ctrl+e as begin/end everywhere (modals and filter inputs were handled
-	// above, so this only affects view navigation).
+	// macOS keyboards often lack Home/End and dedicated PgUp/PgDn; accept the
+	// emacs-style ctrl+a / ctrl+e as begin/end and Cmd+Up / Cmd+Down as page
+	// up / page down (modals and filter inputs were handled above, so this only
+	// affects view navigation).
 	switch key {
 	case "ctrl+a":
 		key = "home"
 	case "ctrl+e":
 		key = "end"
+	case "cmd+up", "super+up", "alt+up":
+		key = "pgup"
+	case "cmd+down", "super+down", "alt+down":
+		key = "pgdown"
 	}
 	// Apply user key aliases (copy/next/prev) onto canonical tokens.
 	if c, ok := m.keyAlias[key]; ok {
@@ -749,7 +793,8 @@ func (m *Model) gotoAddr(addr uint64) {
 		m.openHexAt(addr)
 		return
 	}
-	m.setStatus(fmt.Sprintf("0x%x is not in any mapped section", addr), true)
+	m.openRawAt(addr)
+	m.setStatus(fmt.Sprintf("0x%x is not mapped; showing raw offset", addr), false)
 }
 
 func parseAddr(s string) (uint64, error) {
@@ -815,10 +860,10 @@ func (m *Model) renderHelpModal() string {
 		titleStyle.Render(" Keybindings "),
 		"",
 		headerKey.Render("Global"),
-		row("1–8", "switch view"),
+		row("1–9", "switch view"),
 		row("g", "go to address / symbol (live list)"),
 		row("q / ctrl+c", "quit"),
-		row("? / esc", "close this help"),
+		row("? / any key", "close this help"),
 		"",
 		headerKey.Render("Lists (sections / symbols / strings / libs)"),
 		row("↑/↓ j/k", "move    ·  PgUp/PgDn page"),
@@ -826,6 +871,14 @@ func (m *Model) renderHelpModal() string {
 		row("/", "filter (sections, symbols)"),
 		row("Enter", "open / jump"),
 		row("a / s", "copy address / name"),
+		row("w", "toggle long-line wrap"),
+		"",
+		headerKey.Render("Sections"),
+		row("Enter", "open section in Hex"),
+		row("d", "disassemble executable section"),
+		"",
+		headerKey.Render("Symbols"),
+		row("t", "cycle symbol type filter"),
 		"",
 		headerKey.Render("Disassembly"),
 		row("↑/↓", "scroll    ·  ←/→ history back/forward"),
@@ -836,6 +889,7 @@ func (m *Model) renderHelpModal() string {
 		"",
 		headerKey.Render("Hex / Raw"),
 		row("↑/↓/←/→", "move byte cursor"),
+		row("d", "disassemble executable address"),
 		row("[ / ]", "previous / next non-zero byte"),
 		row("/ , n/N", "search (hex bytes, \"text\", 0x…)"),
 		"",
@@ -844,6 +898,7 @@ func (m *Model) renderHelpModal() string {
 		row("[ / ]", "previous / next mapped line"),
 		row("Tab", "swap source / disasm panes"),
 		row("/ , ^F", "find in file · grep all sources"),
+		row("c", "copy source path"),
 		row("g", "go to a symbol's source"),
 		"",
 		footerStyle.Render("  Mouse: wheel scrolls · click selects · click tabs · double-click follows"),
@@ -878,10 +933,12 @@ func (m *Model) renderGotoModal() string {
 		if end > len(m.gotoResults) {
 			end = len(m.gotoResults)
 		}
+		rowW := min(max(72, m.width-14), 120)
+		labelW := rowW - addrW - 6
 		for i := m.gotoTop; i < end; i++ {
 			t := m.gotoResults[i]
-			line := fmt.Sprintf(" 0x%0*x  %s", addrW, t.addr, truncate(t.label, 48))
-			line = padRight(line, 58)
+			line := fmt.Sprintf(" 0x%0*x  %s", addrW, t.addr, truncateMiddle(t.label, labelW))
+			line = padRight(line, rowW)
 			if i == m.gotoSel {
 				line = tableSelStyle.Render(line)
 			}
@@ -910,21 +967,15 @@ func (m *Model) renderSearchModal() string {
 			hint = "Search in this source file"
 		}
 	}
-	direction := "forward"
-	origin := "from current"
-	if !m.searchForward {
-		direction = "backward"
+	// Switch strip (content row searchSwitchLine) — clickable; geometry shared
+	// with handleSearchPopupClick via searchSwitches().
+	var segs []string
+	for _, sw := range m.searchSwitches() {
+		segs = append(segs, switchStyle.Render(sw.label))
 	}
-	if !m.searchFromCursor {
-		if m.searchForward {
-			origin = "from start"
-		} else {
-			origin = "from end"
-		}
-	}
-	body := hint + "\n\n" + m.searchInput.View() + "\n\n" +
-		footerStyle.Render(fmt.Sprintf("direction: %s · origin: %s", direction, origin)) + "\n" +
-		footerStyle.Render("Ctrl+R toggle direction · Ctrl+O toggle origin · Enter find · Esc cancel · then n/N for next/prev")
+	switches := strings.Join(segs, searchSwitchSep)
+	body := hint + "\n\n" + m.searchInput.View() + "\n\n" + switches + "\n" +
+		footerStyle.Render("click a switch · Ctrl+M mode · Ctrl+R direction · Ctrl+O origin · Enter find · Esc cancel")
 	return modalStyle.Render(body)
 }
 
@@ -1051,10 +1102,13 @@ func (m *Model) renderFooter() string {
 	case modeRaw:
 		help = "[ ] non-zero · / search · a/s copy · g goto · ? help · q quit"
 	case modeSources:
-		if m.srcFile == "" {
+		switch {
+		case m.srcFile == "":
 			help = "Enter open · / filter · ^F grep all · g goto · ? help · q quit"
-		} else {
-			help = "↑/↓ line · [ ] mapped · Tab swap · Enter disasm · / find · esc back · ? help · q quit"
+		case m.srcAsmLeft:
+			help = "↑/↓ instr · [ ] sym · Tab source · Enter follow · / find · esc back · ? help · q quit"
+		default:
+			help = "↑/↓ line · [ ] mapped · Tab disasm · Enter disasm · / find · esc back · ? help · q quit"
 		}
 	case modeLibs:
 		help = "↑/↓ move · ? help · q quit"
@@ -1134,6 +1188,59 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
+func truncateMiddle(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if lipgloss.Width(stripANSI(s)) <= n {
+		return s
+	}
+	if n <= 3 {
+		return truncateANSI(s, n)
+	}
+	plain := stripANSI(s)
+	left := (n - 1) / 2
+	right := n - 1 - left
+	if len(plain) <= n {
+		return plain
+	}
+	return plain[:left] + "…" + plain[len(plain)-right:]
+}
+
+func wrapStatus(on bool) string {
+	if on {
+		return "wrap: on"
+	}
+	return "wrap: off"
+}
+
+// colorPathByPrefix renders display in a single colour chosen from keyPath's
+// directory prefix, so paths sharing a directory share a colour. keyPath is the
+// full path (used only for the colour key); display is what's drawn — which may
+// be a middle-truncated form of the same path.
+func colorPathByPrefix(keyPath, display string) string {
+	if display == "" {
+		return display
+	}
+	key := keyPath
+	if i := strings.LastIndexByte(keyPath, '/'); i > 0 {
+		key = keyPath[:i] // the directory
+	}
+	return pathPrefixStyle(key).Render(display)
+}
+
+func pathPrefixStyle(prefix string) lipgloss.Style {
+	colors := []lipgloss.Color{"75", "114", "141", "173", "214", "213", "84", "39"}
+	h := 0
+	for i := 0; i < len(prefix); i++ {
+		h = h*33 + int(prefix[i])
+	}
+	if h < 0 {
+		h = -h
+	}
+	return lipgloss.NewStyle().Foreground(colors[h%len(colors)])
+}
+
 // padRight pads s to exactly w visible columns, truncating when it's longer so
 // an over-wide line (e.g. a long demangled symbol) can't wrap and shove the
 // layout down behind the status line.
@@ -1160,10 +1267,142 @@ func padBody(s string, w, h int) string {
 	if len(lines) > h {
 		lines = lines[:h]
 	}
+	// Clamp every line to exactly w columns so nothing wraps and shoves the
+	// layout (and the status line) down.
+	for i, l := range lines {
+		if lipgloss.Width(stripANSI(l)) != w {
+			lines[i] = padRight(l, w)
+		}
+	}
 	for len(lines) < h {
 		lines = append(lines, strings.Repeat(" ", w))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func padBodyRows(lines []string, w, h int) string {
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	for i, l := range lines {
+		lines[i] = padRight(l, w)
+	}
+	for len(lines) < h {
+		lines = append(lines, strings.Repeat(" ", w))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderLineRows(line string, w int, wrap bool) []string {
+	return renderLineRowsIndented(line, w, wrap, 0)
+}
+
+func renderLineRowsIndented(line string, w int, wrap bool, indent int) []string {
+	if !wrap {
+		return []string{padRight(line, w)}
+	}
+	if indent < 0 {
+		indent = 0
+	}
+	if indent >= w {
+		indent = max(0, w-1)
+	}
+	wrapped := ansi.Wrap(line, w, " \t/.-_:")
+	rows := strings.Split(strings.TrimRight(wrapped, "\n"), "\n")
+	if len(rows) == 0 {
+		return []string{strings.Repeat(" ", w)}
+	}
+	for i := 0; i < len(rows); i++ {
+		if lipgloss.Width(stripANSI(rows[i])) <= w {
+			continue
+		}
+		hard := ansi.Wrap(rows[i], w, "")
+		parts := strings.Split(strings.TrimRight(hard, "\n"), "\n")
+		rows = append(rows[:i], append(parts, rows[i+1:]...)...)
+		i += len(parts) - 1
+	}
+	if indent > 0 {
+		prefix := strings.Repeat(" ", indent)
+		contW := max(1, w-indent)
+		indented := rows[:1]
+		for _, row := range rows[1:] {
+			cont := strings.TrimLeft(row, " ")
+			if lipgloss.Width(stripANSI(cont)) > contW {
+				cont = ansi.Wrap(cont, contW, " \t/.-_:")
+			}
+			parts := strings.Split(strings.TrimRight(cont, "\n"), "\n")
+			if len(parts) == 0 {
+				parts = []string{""}
+			}
+			for _, part := range parts {
+				indented = append(indented, prefix+part)
+			}
+		}
+		rows = indented
+	}
+	for i, row := range rows {
+		rows[i] = padRight(row, w)
+	}
+	return rows
+}
+
+func appendRenderedRows(lines *[]string, line string, w int, wrap bool, limit int) bool {
+	return appendRenderedRowsIndented(lines, line, w, wrap, 0, limit)
+}
+
+func appendRenderedRowsIndented(lines *[]string, line string, w int, wrap bool, indent int, limit int) bool {
+	for _, row := range renderLineRowsIndented(line, w, wrap, indent) {
+		if len(*lines) >= limit {
+			return false
+		}
+		*lines = append(*lines, row)
+	}
+	return len(*lines) < limit
+}
+
+func ensureVisualTop(cur int, top *int, n, visible int, rowHeight func(int) int) {
+	if n <= 0 {
+		*top = 0
+		return
+	}
+	if cur < 0 {
+		cur = 0
+	}
+	if cur >= n {
+		cur = n - 1
+	}
+	if *top < 0 || cur < *top {
+		*top = cur
+	}
+	if *top >= n {
+		*top = n - 1
+	}
+	for *top < cur && visualRowsBetween(*top, cur, rowHeight)+rowHeight(cur) > visible {
+		*top++
+	}
+}
+
+func visualRowsBetween(start, end int, rowHeight func(int) int) int {
+	rows := 0
+	for i := start; i < end; i++ {
+		rows += max(1, rowHeight(i))
+	}
+	return rows
+}
+
+func visualItemAtRow(top, n, row int, rowHeight func(int) int) (int, bool) {
+	if row < 0 {
+		return 0, false
+	}
+	pos := 0
+	for i := top; i < n; i++ {
+		h := max(1, rowHeight(i))
+		if row >= pos && row < pos+h {
+			return i, true
+		}
+		pos += h
+	}
+	return 0, false
 }
 
 // overlay places fg over bg at column x, row y. Both are pre-rendered strings.

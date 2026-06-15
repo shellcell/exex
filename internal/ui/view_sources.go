@@ -7,7 +7,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,8 +45,39 @@ func (m *Model) ensureSources() {
 		if m.sourcesFiles == nil {
 			m.sourcesFiles = []string{}
 		}
+		sortSourcesForProject(m.sourcesFiles, m.file.Path)
 		m.recomputeSourceFiles()
 	}
+}
+
+func sortSourcesForProject(files []string, binPath string) {
+	root := filepath.Dir(binPath)
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		root = wd
+	}
+	sort.SliceStable(files, func(i, j int) bool {
+		ri, rj := sourceRank(files[i], root), sourceRank(files[j], root)
+		if ri != rj {
+			return ri < rj
+		}
+		return files[i] < files[j]
+	})
+}
+
+func sourceRank(file, root string) int {
+	if root != "" {
+		if rel, err := filepath.Rel(root, file); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+			return 0
+		}
+	}
+	base := filepath.Base(file)
+	if strings.HasPrefix(file, "/usr/") || strings.HasPrefix(file, "/System/") || strings.HasPrefix(file, "/Library/") || strings.Contains(file, "/.cargo/registry/") || strings.Contains(file, "/go/pkg/mod/") {
+		return 2
+	}
+	if !filepath.IsAbs(file) || !strings.Contains(base, ".") {
+		return 0
+	}
+	return 1
 }
 
 // recomputeSourceFiles rebuilds the filtered file list from the filter text.
@@ -82,6 +115,13 @@ func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 		m.srcSearchAll = true
 		m.openSearch()
 		return m, nil
+	case "c":
+		if m.sourcesCur >= 0 && m.sourcesCur < n {
+			m.copyToClipboard(m.sourcesFiles[m.sourcesFiltered[m.sourcesCur]], "source path")
+		}
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 	case "up", "k":
 		if m.sourcesCur > 0 {
 			m.sourcesCur--
@@ -101,12 +141,88 @@ func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.sourcesCur >= 0 && m.sourcesCur < n {
 			m.openSourceFile(m.sourcesFiles[m.sourcesFiltered[m.sourcesCur]], 1)
+			m.mode = modeDisasm
+			m.showSource = true
+			m.sourceFirst = true
 		}
 	}
 	return m, nil
 }
 
+// updateSourceOpen dispatches to the active pane: when the disasm pane is
+// primary (Tab → srcAsmLeft) navigation drives the disassembly and the source
+// follows; otherwise the source drives and the disasm follows.
 func (m *Model) updateSourceOpen(key string) (tea.Model, tea.Cmd) {
+	if m.srcAsmLeft {
+		return m.updateSourceOpenAsm(key)
+	}
+	return m.updateSourceOpenSrc(key)
+}
+
+// updateSourceOpenAsm navigates the disassembly pane (reusing the disasm view's
+// handler, so window loading / history / follow all work) and mirrors the
+// cursor into the source pane afterwards.
+func (m *Model) updateSourceOpenAsm(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "esc", "backspace":
+		m.srcFile = ""
+		return m, nil
+	case "/":
+		m.srcSearchAll = false
+		m.openSearch()
+		return m, nil
+	case "ctrl+f":
+		m.srcSearchAll = true
+		m.openSearch()
+		return m, nil
+	case "c":
+		m.copyToClipboard(m.srcFile, "source path")
+		return m, nil
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
+		return m, nil
+	case "n":
+		m.runSearch(true, false)
+		m.syncSourceAsm()
+		return m, nil
+	case "N":
+		m.runSearch(false, false)
+		m.syncSourceAsm()
+		return m, nil
+	}
+	// Delegate movement / [ ] symbol / Enter follow / history to the disasm
+	// handler. If it didn't drill out to the full disasm view, mirror the new
+	// instruction into the source pane.
+	prev := m.mode
+	model, cmd := m.updateDisasm(key)
+	if m.mode == prev {
+		m.followSourceFromAsm()
+	}
+	return model, cmd
+}
+
+// followSourceFromAsm points the source pane at the line mapped from the disasm
+// cursor, switching files when the cursor crosses into another (inlined) source.
+func (m *Model) followSourceFromAsm() {
+	if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
+		return
+	}
+	file, line := m.file.LookupAddr(m.disasmInst[m.disasmCur].Addr)
+	if file == "" || line == 0 {
+		return
+	}
+	if file != m.srcFile {
+		if m.file.SourceLines(file) == nil {
+			return // keep showing the current file we can actually display
+		}
+		m.srcFile = file
+		m.srcCodeLines = m.file.MappedLines(file)
+	}
+	m.srcCur = line
+}
+
+func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 	n := len(m.file.SourceLines(m.srcFile))
 	switch key {
 	case "esc", "backspace":
@@ -119,6 +235,13 @@ func (m *Model) updateSourceOpen(key string) (tea.Model, tea.Cmd) {
 	case "ctrl+f":
 		m.srcSearchAll = true
 		m.openSearch()
+		return m, nil
+	case "c":
+		m.copyToClipboard(m.srcFile, "source path")
+		return m, nil
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 		return m, nil
 	case "n":
 		m.runSearch(true, false)
@@ -154,6 +277,7 @@ func (m *Model) updateSourceOpen(key string) (tea.Model, tea.Cmd) {
 		// Jump into the main disasm view at the mapped address.
 		if addr, ok := m.file.LineToAddr(m.srcFile, m.srcCur); ok {
 			m.loadDisasmAt(addr)
+			m.sourceFirst = false
 		} else {
 			m.setStatus("no code maps to this line", true)
 		}
@@ -327,13 +451,16 @@ func (m *Model) renderSources() string {
 	if m.srcFile == "" {
 		return m.renderSourceList(bodyH)
 	}
-	// Split source + disassembly, orientation toggled by Tab (srcAsmLeft). The
-	// right pane carries the divider border.
+	// Split source + disassembly; Tab (srcAsmLeft) puts the active pane on the
+	// left. When disasm is active it's the real disasm scroller (with window
+	// loading + sticky symbol); when source is active the asm pane is the
+	// column-tinted follower. The right pane carries the divider border.
 	leftW := m.width / 2
 	rightW := m.width - leftW
 	var left, right string
 	if m.srcAsmLeft {
-		left = m.renderSourceAsm(leftW, bodyH)
+		sticky := m.renderStickySymbol(leftW)
+		left = sticky + "\n" + m.renderDisasmScroll(leftW, bodyH-1)
 		right = leftBorderPane(m.renderSourceText(rightW-1, bodyH))
 	} else {
 		left = m.renderSourceText(leftW, bodyH)
@@ -383,7 +510,9 @@ func (m *Model) renderSourceList(bodyH int) string {
 		return padBody(b.String(), m.width, bodyH)
 	}
 	for i := m.sourcesTop; i < end; i++ {
-		line := padRight(" "+m.sourcesFiles[m.sourcesFiltered[i]], m.width)
+		full := m.sourcesFiles[m.sourcesFiltered[i]]
+		name := colorPathByPrefix(full, truncateMiddle(full, max(16, m.width-2)))
+		line := padRight(" "+name, m.width)
 		if i == m.sourcesCur {
 			b.WriteString(tableSelStyle.Render(line))
 		} else {
@@ -409,17 +538,17 @@ func (m *Model) renderSourceText(w, h int) string {
 	if contentH < 1 {
 		contentH = 1
 	}
-	if m.srcTop < 1 {
-		m.srcTop = 1
+	top := max(0, m.srcTop-1)
+	rowHeight := func(i int) int {
+		ln := i + 1
+		h := m.sourceLineHeight(ln, w)
+		if ln == m.srcCur && len(m.file.LineColumns(m.srcFile, ln)) > 0 {
+			h++
+		}
+		return h
 	}
-	if m.srcCur < m.srcTop {
-		m.srcTop = m.srcCur
-	} else if m.srcCur >= m.srcTop+contentH {
-		m.srcTop = m.srcCur - contentH + 1
-	}
-	if m.srcTop < 1 {
-		m.srcTop = 1
-	}
+	ensureVisualTop(m.srcCur-1, &top, len(src), contentH, rowHeight)
+	m.srcTop = top + 1
 
 	var b strings.Builder
 	b.WriteString(infoStyle.Render(truncate(fmt.Sprintf("%s:%d", m.srcFile, m.srcCur), w)))
@@ -433,8 +562,6 @@ func (m *Model) renderSourceText(w, h int) string {
 		content := src[ln-1]
 		if hasCode && hl != nil && ln-1 < len(hl) {
 			content = hl[ln-1]
-		} else if !hasCode {
-			content = srcShadowStyle.Render(src[ln-1])
 		} else if hl != nil && ln-1 < len(hl) {
 			content = hl[ln-1]
 		}
@@ -451,9 +578,18 @@ func (m *Model) renderSourceText(w, h int) string {
 		}
 
 		avail := w - lipgloss.Width(stripANSI(prefix))
-		b.WriteString(prefix + fitANSIWidth(content, avail))
-		b.WriteString("\n")
-		rows++
+		line := prefix + fitANSIWidth(content, avail)
+		if m.wrap {
+			line = prefix + content
+		}
+		for _, row := range renderLineRowsIndented(line, w, m.wrap, gutterWidth) {
+			if rows >= contentH {
+				break
+			}
+			b.WriteString(row)
+			b.WriteString("\n")
+			rows++
+		}
 
 		// Beneath the cursor line, point carets at the exact columns code maps
 		// to (a source line can map at several positions).
@@ -466,6 +602,19 @@ func (m *Model) renderSourceText(w, h int) string {
 		}
 	}
 	return padBody(b.String(), w, h)
+}
+
+func (m *Model) sourceLineHeight(line, w int) int {
+	src := m.file.SourceLines(m.srcFile)
+	if line < 1 || line > len(src) {
+		return 1
+	}
+	plainPrefix := fmt.Sprintf("%5d   ", line)
+	content := src[line-1]
+	if !m.wrap {
+		return 1
+	}
+	return len(renderLineRowsIndented(plainPrefix+content, w, true, gutterWidth))
 }
 
 // coloredCaretRow renders a '^' under each mapped column, each in that column's
@@ -580,7 +729,7 @@ func (m *Model) renderSourceAsm(w, h int) string {
 			}
 			line = st.Render(padRight(stripANSI(line), w))
 		} else {
-			line = fitANSIWidth(line, w)
+			line = srcShadowStyle.Render(fitANSIWidth(stripANSI(line), w))
 		}
 		b.WriteString(line)
 		b.WriteString("\n")

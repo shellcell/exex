@@ -166,6 +166,20 @@ type Keys struct {
 	Next StringOrSlice `yaml:"next"`
 	// Previous item: prev symbol (disasm) / prev non-zero byte (hex/raw). (default: [)
 	Prev StringOrSlice `yaml:"prev"`
+	// Copy current path (sources/libs). (default: c)
+	CopyPath StringOrSlice `yaml:"copy_path"`
+	// Open selected address/section in disassembly when executable. (default: d)
+	OpenDisasm StringOrSlice `yaml:"open_disasm"`
+	// Toggle wrapping of long rows/lines. (default: w)
+	Wrap StringOrSlice `yaml:"wrap"`
+	// Cycle a view-specific type filter. (default: t)
+	FilterType StringOrSlice `yaml:"filter_type"`
+	// Cycle search popup mode (auto/text/hex where supported). (default: ctrl+m)
+	SearchMode StringOrSlice `yaml:"search_mode"`
+	// Toggle search popup direction. (default: ctrl+r)
+	SearchDirection StringOrSlice `yaml:"search_direction"`
+	// Toggle search popup origin. (default: ctrl+o)
+	SearchOrigin StringOrSlice `yaml:"search_origin"`
 }
 
 // StringOrSlice accepts either a YAML scalar ("q") or a sequence (["q",

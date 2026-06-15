@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"debug/dwarf"
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,9 @@ func (f *File) loadELF() error {
 	dynSyms, _ := ef.DynamicSymbols()
 	seen := map[string]bool{}
 	add := func(s elf.Symbol) {
+		if s.Name == "" || isELFMappingSymbol(s.Name) {
+			return
+		}
 		key := fmt.Sprintf("%s@%x", s.Name, s.Value)
 		if seen[key] {
 			return
@@ -120,6 +124,7 @@ func (f *File) loadELF() error {
 	for _, s := range dynSyms {
 		add(s)
 	}
+	f.appendELFImportSymbols(ef)
 
 	if d := f.elfDWARF(ef); d != nil {
 		f.dwarf = d
@@ -129,6 +134,109 @@ func (f *File) loadELF() error {
 	f.loadELFInfo(ef)
 	f.header = f.elfHeaderInfo(ef)
 	return nil
+}
+
+// decodeReloc extracts (offset, symbol index, type) from a relocation entry.
+func decodeReloc(data []byte, off int, is64 bool, bo binary.ByteOrder) (roff uint64, sym, rtype uint32) {
+	if is64 {
+		roff = bo.Uint64(data[off:])
+		info := bo.Uint64(data[off+8:])
+		return roff, uint32(info >> 32), uint32(info)
+	}
+	roff = uint64(bo.Uint32(data[off:]))
+	info := bo.Uint32(data[off+4:])
+	return roff, info >> 8, info & 0xff
+}
+
+// appendELFImportSymbols synthesises symbols for dynamic relocations: each GOT
+// slot (and, by pairing .rela.plt with .plt, each PLT stub) is named after the
+// imported dynamic symbol it binds to. This resolves calls/jumps to imported
+// functions in the disassembly for x86-64 and 386.
+func (f *File) appendELFImportSymbols(ef *elf.File) {
+	dyn, err := ef.DynamicSymbols()
+	if err != nil || len(dyn) == 0 {
+		return
+	}
+	is64 := ef.Class == elf.ELFCLASS64
+	bo := ef.ByteOrder
+
+	var jumpSlot, globDat uint32
+	switch ef.Machine {
+	case elf.EM_X86_64:
+		jumpSlot, globDat = uint32(elf.R_X86_64_JMP_SLOT), uint32(elf.R_X86_64_GLOB_DAT)
+	case elf.EM_386:
+		jumpSlot, globDat = uint32(elf.R_386_JMP_SLOT), uint32(elf.R_386_GLOB_DAT)
+	default:
+		return
+	}
+
+	add := func(addr uint64, name string, kind SymKind, sec string) {
+		f.Symbols = append(f.Symbols, Symbol{Name: name, Addr: addr, Kind: kind, Bind: BindGlobal, Section: sec})
+	}
+
+	var pltNames []string // imports from .rel(a).plt, in entry order, for PLT pairing
+	for _, s := range ef.Sections {
+		if s.Type != elf.SHT_RELA && s.Type != elf.SHT_REL {
+			continue
+		}
+		data, err := s.Data()
+		if err != nil {
+			continue
+		}
+		entSize := 8 // REL32
+		if s.Type == elf.SHT_RELA {
+			entSize = 24 // RELA64
+		}
+		isPlt := s.Name == ".rela.plt" || s.Name == ".rel.plt"
+		for off := 0; off+entSize <= len(data); off += entSize {
+			roff, sym, rtype := decodeReloc(data, off, is64, bo)
+			if sym == 0 || int(sym-1) >= len(dyn) {
+				continue
+			}
+			name := dyn[sym-1].Name
+			if name == "" {
+				continue
+			}
+			switch rtype {
+			case jumpSlot:
+				add(roff, name, SymObject, s.Name) // GOT slot
+				if isPlt {
+					pltNames = append(pltNames, name)
+				}
+			case globDat:
+				add(roff, name, SymObject, s.Name)
+			}
+		}
+	}
+
+	// Name the PLT stubs by pairing them with the JUMP_SLOT relocations in
+	// order. .plt.sec (CET/IBT) packs entries from index 0; classic .plt
+	// reserves entry 0 for the resolver.
+	if len(pltNames) > 0 {
+		if plt := ef.Section(".plt.sec"); plt != nil {
+			for i, name := range pltNames {
+				add(plt.Addr+uint64(i)*16, name, SymFunc, ".plt.sec")
+			}
+		} else if plt := ef.Section(".plt"); plt != nil {
+			for i, name := range pltNames {
+				add(plt.Addr+uint64(i+1)*16, name, SymFunc, ".plt")
+			}
+		}
+	}
+}
+
+// isELFMappingSymbol reports whether name is an ARM/AArch64 ELF mapping symbol
+// ($a/$d/$t/$x, optionally with a ".suffix"). These mark code/data boundaries
+// and would otherwise shadow real function names in disasm annotations.
+func isELFMappingSymbol(name string) bool {
+	if len(name) < 2 || name[0] != '$' {
+		return false
+	}
+	switch name[1] {
+	case 'a', 'd', 't', 'x':
+		return len(name) == 2 || name[2] == '.'
+	}
+	return false
 }
 
 func elfArch(m elf.Machine) disasm.Arch {

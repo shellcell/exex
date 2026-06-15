@@ -29,6 +29,9 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 	case "up", "k":
 		if m.stringsCur > 0 {
 			m.stringsCur--
@@ -109,36 +112,45 @@ func (m *Model) renderStrings() string {
 	if visible < 1 {
 		visible = 1
 	}
-	if m.stringsCur < m.stringsTop {
-		m.stringsTop = m.stringsCur
-	} else if m.stringsCur >= m.stringsTop+visible {
-		m.stringsTop = m.stringsCur - visible + 1
+	rowHeight := func(i int) int {
+		return m.stringRowHeight(i)
 	}
-	end := m.stringsTop + visible
-	if end > len(m.stringsList) {
-		end = len(m.stringsList)
-	}
+	ensureVisualTop(m.stringsCur, &m.stringsTop, len(m.stringsList), visible, rowHeight)
 
-	var b strings.Builder
-	b.WriteString(header)
-	b.WriteString("\n")
-	for i := m.stringsTop; i < end; i++ {
-		s := m.stringsList[i]
-		addr := strings.Repeat(" ", 2+addrW)
-		if s.HasAddr {
-			addr = fmt.Sprintf("0x%0*x", addrW, s.Addr)
+	rows := []string{padRight(header, m.width)}
+	for i := m.stringsTop; i < len(m.stringsList); i++ {
+		line := m.stringRow(i, addrW, i == m.stringsCur)
+		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, addrW+33, bodyH) {
+			break
 		}
-		line := fmt.Sprintf(" 0x%-8x %-*s %-16s  %s",
-			s.Offset, 2+addrW, addr, truncate(s.Section, 16), sanitizeString(s.Text))
-		line = padRight(line, m.width)
-		if i == m.stringsCur {
-			b.WriteString(tableSelStyle.Render(line))
-		} else {
-			b.WriteString(m.stringRowStyle(s).Render(line))
-		}
-		b.WriteString("\n")
 	}
-	return padBody(b.String(), m.width, bodyH)
+	return padBodyRows(rows, m.width, bodyH)
+}
+
+func (m *Model) stringRowHeight(i int) int {
+	if i < 0 || i >= len(m.stringsList) {
+		return 1
+	}
+	addrW := m.file.AddrHexWidth()
+	return len(renderLineRowsIndented(m.stringRow(i, addrW, false), m.width, m.wrap, addrW+33))
+}
+
+func (m *Model) stringRow(i, addrW int, selected bool) string {
+	s := m.stringsList[i]
+	addr := strings.Repeat(" ", 2+addrW)
+	if s.HasAddr {
+		addr = fmt.Sprintf("0x%0*x", addrW, s.Addr)
+	}
+	text := sanitizeString(s.Text)
+	if m.wrap {
+		text = s.Text
+	}
+	line := fmt.Sprintf(" %s %-*s %-16s  %s",
+		addrStyle.Render(fmt.Sprintf("0x%-8x", s.Offset)), 2+addrW, addrStyle.Render(addr), footerStyle.Render(truncate(s.Section, 16)), tableRowStyle.Render(text))
+	if selected {
+		return tableSelStyle.Render(stripANSI(line))
+	}
+	return line
 }
 
 // stringRowStyle colours a string row by the category of its owning section
@@ -147,7 +159,9 @@ func (m *Model) stringRowStyle(s binfile.StringEntry) lipgloss.Style {
 	if sec := m.sectionAtOffset(s.Offset); sec != nil {
 		return styleForSection(sec)
 	}
-	return footerStyle
+	// srcShadowStyle is dim like footerStyle but, unlike it, carries no
+	// horizontal padding (which would over-widen a full-width row and wrap).
+	return srcShadowStyle
 }
 
 // sanitizeString collapses control bytes (none should remain from extraction,

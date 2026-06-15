@@ -20,7 +20,7 @@ func TestSearchPattern(t *testing.T) {
 		{"de ad ", []byte("de ad ")},
 	}
 	for _, c := range cases {
-		if got := searchPattern(c.in); !bytes.Equal(got, c.want) {
+		if got := searchPattern(c.in, searchModeAuto); !bytes.Equal(got, c.want) {
 			t.Errorf("searchPattern(%q) = % x, want % x", c.in, got, c.want)
 		}
 	}

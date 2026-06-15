@@ -89,6 +89,9 @@ func Classify(text string) InstClass {
 	case "beq", "bne", "blt", "bge", "bltu", "bgeu",
 		"beqz", "bnez", "bltz", "bgez", "bgtz", "blez":
 		return ClassJumpCond
+	// ARM64 compare/test-and-branch.
+	case "cbz", "cbnz", "tbz", "tbnz":
+		return ClassJumpCond
 	}
 	if len(op) == 3 && op[0] == 'b' {
 		switch op[1:] {

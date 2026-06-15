@@ -82,6 +82,18 @@ var (
 			BorderForeground(lipgloss.Color("63")).
 			Padding(1, 2)
 
+	// switchStyle renders the clickable toggles in the search popup as buttons.
+	switchStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("231")).
+			Background(lipgloss.Color("238")).
+			Bold(true)
+
+	// Help overlay: a bright key column, a readable description, and section
+	// headings.
+	helpKeyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	helpDescStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	helpHeadStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
+
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("203"))
 

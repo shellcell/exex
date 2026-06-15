@@ -169,6 +169,8 @@ func (f *File) loadMachO() error {
 		}
 	}
 
+	f.Symbols = append(f.Symbols, machoImportSymbols(mf, f.raw, base)...)
+
 	if d := f.machoDWARF(mf); d != nil {
 		f.dwarf = d
 		f.lines = loadLines(d)
@@ -483,6 +485,154 @@ func machoVersionMinName(cmd uint32) string {
 		return "watchOS"
 	}
 	return ""
+}
+
+// Mach-O section types (low byte of flags) and indirect-symbol sentinels.
+const (
+	lcSegment   = 0x1
+	lcSegment64 = 0x19
+
+	sTypeNonLazyPtr = 0x6 // S_NON_LAZY_SYMBOL_POINTERS
+	sTypeLazyPtr    = 0x7 // S_LAZY_SYMBOL_POINTERS
+	sTypeStubs      = 0x8 // S_SYMBOL_STUBS
+
+	indirectSymLocal = 0x80000000
+	indirectSymAbs   = 0x40000000
+)
+
+type machoSecHdr struct {
+	name      string
+	addr      uint64
+	size      uint64
+	secType   uint32
+	reserved1 uint32
+	reserved2 uint32
+}
+
+// machoImportSymbols synthesises symbols at the addresses of the dyld stubs and
+// lazy/non-lazy symbol pointers (__stubs, __got, __la_symbol_ptr, …), named
+// after the imported symbol they resolve to. This is what turns a
+// "bl 0x… (__stubs)" into "bl 0x… (_malloc)" and lets the user follow imports.
+func machoImportSymbols(mf *macho.File, raw []byte, base uint64) []Symbol {
+	if mf.Dysymtab == nil || mf.Symtab == nil || len(mf.Dysymtab.IndirectSyms) == 0 {
+		return nil
+	}
+	is64 := mf.Magic == macho.Magic64
+	ptrSize := uint64(4)
+	if is64 {
+		ptrSize = 8
+	}
+	indirect := mf.Dysymtab.IndirectSyms
+	syms := mf.Symtab.Syms
+
+	var out []Symbol
+	for _, s := range parseMachoSectionHeaders(raw, base, is64, mf.ByteOrder) {
+		var stride uint64
+		kind := SymObject
+		switch s.secType {
+		case sTypeStubs:
+			stride = uint64(s.reserved2)
+			kind = SymFunc
+		case sTypeLazyPtr, sTypeNonLazyPtr:
+			stride = ptrSize
+		default:
+			continue
+		}
+		if stride == 0 {
+			continue
+		}
+		for j := uint64(0); j*stride < s.size; j++ {
+			idx := uint64(s.reserved1) + j
+			if idx >= uint64(len(indirect)) {
+				break
+			}
+			symIdx := indirect[idx]
+			if symIdx&(indirectSymLocal|indirectSymAbs) != 0 || int(symIdx) >= len(syms) {
+				continue
+			}
+			name := syms[symIdx].Name
+			if name == "" {
+				continue
+			}
+			out = append(out, Symbol{
+				Name:    name,
+				Addr:    s.addr + j*stride,
+				Kind:    kind,
+				Bind:    BindGlobal,
+				Section: s.name,
+			})
+		}
+	}
+	return out
+}
+
+// parseMachoSectionHeaders re-reads the segment/section load commands from the
+// raw image to recover each section's reserved1/reserved2 (the indirect-symbol
+// index and stub size), which debug/macho doesn't expose.
+func parseMachoSectionHeaders(raw []byte, base uint64, is64 bool, bo binary.ByteOrder) []machoSecHdr {
+	hdrSize := uint64(28)
+	if is64 {
+		hdrSize = 32
+	}
+	if base+hdrSize > uint64(len(raw)) {
+		return nil
+	}
+	ncmds := bo.Uint32(raw[base+16:])
+	p := base + hdrSize
+	var out []machoSecHdr
+	for c := uint32(0); c < ncmds; c++ {
+		if p+8 > uint64(len(raw)) {
+			break
+		}
+		cmd := bo.Uint32(raw[p:])
+		cmdsize := uint64(bo.Uint32(raw[p+4:]))
+		if cmdsize < 8 || p+cmdsize > uint64(len(raw)) {
+			break
+		}
+		var segCmdSize, secSize uint64
+		if cmd == lcSegment64 {
+			segCmdSize, secSize = 72, 80
+		} else if cmd == lcSegment {
+			segCmdSize, secSize = 56, 68
+		} else {
+			p += cmdsize
+			continue
+		}
+		nsects := uint64(bo.Uint32(raw[p+segCmdSize-8:])) // nsects is the 2nd-to-last field
+		sp := p + segCmdSize
+		for s := uint64(0); s < nsects && sp+secSize <= p+cmdsize; s++ {
+			b := raw[sp : sp+secSize]
+			var addr, size uint64
+			var flagsOff int
+			if is64 {
+				addr = bo.Uint64(b[32:])
+				size = bo.Uint64(b[40:])
+				flagsOff = 64
+			} else {
+				addr = uint64(bo.Uint32(b[32:]))
+				size = uint64(bo.Uint32(b[36:]))
+				flagsOff = 56
+			}
+			out = append(out, machoSecHdr{
+				name:      cstr(b[0:16]),
+				addr:      addr,
+				size:      size,
+				secType:   bo.Uint32(b[flagsOff:]) & 0xff,
+				reserved1: bo.Uint32(b[flagsOff+4:]),
+				reserved2: bo.Uint32(b[flagsOff+8:]),
+			})
+			sp += secSize
+		}
+		p += cmdsize
+	}
+	return out
+}
+
+func cstr(b []byte) string {
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		return string(b[:i])
+	}
+	return string(b)
 }
 
 // scanCompilerString pulls a compiler banner out of the raw image. It is

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // doubleClickWindow is how close two clicks must be (in time, on the same row)
@@ -16,6 +17,10 @@ import (
 const doubleClickWindow = 350 * time.Millisecond
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.searchActive && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		m.handleSearchPopupClick(msg.X, msg.Y)
+		return m, nil
+	}
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
 		return m.wheelScroll("up")
@@ -41,6 +46,31 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) handleSearchPopupClick(x, y int) {
+	modal := m.renderSearchModal()
+	mw := lipgloss.Width(modal)
+	mh := lipgloss.Height(modal)
+	left := (m.width - mw) / 2
+	top := (m.height - mh) / 2
+	// Translate to content coordinates inside modalStyle's RoundedBorder (1) +
+	// Padding(1,2): x offset 3, y offset 2.
+	cx := x - (left + 3)
+	cy := y - (top + 2)
+	if cy != searchSwitchLine || cx < 0 {
+		return
+	}
+	pos := 0
+	sepW := lipgloss.Width(searchSwitchSep)
+	for _, sw := range m.searchSwitches() {
+		w := lipgloss.Width(sw.label)
+		if cx >= pos && cx < pos+w {
+			sw.toggle()
+			return
+		}
+		pos += w + sepW
+	}
 }
 
 // followCurrentDisasm follows the first in-file address on the current disasm
@@ -106,23 +136,23 @@ func (m *Model) handleClick(x, y int) {
 	switch m.mode {
 	case modeSections:
 		// Body layout: row 0 filter, row 1 header, data follows.
-		if idx := m.sectionsTop + bodyRow - 2; idx >= 0 && idx < len(m.sectionsFiltered) {
+		if idx, ok := visualItemAtRow(m.sectionsTop, len(m.sectionsFiltered), bodyRow-2, m.sectionRowHeight); ok {
 			m.sectionsCur = idx
 		}
 	case modeSymbols:
 		// Body layout: row 0 filter, row 1 header, data follows.
-		if idx := m.symbolsTop + bodyRow - 2; idx >= 0 && idx < len(m.symbolsFiltered) {
+		if idx, ok := visualItemAtRow(m.symbolsTop, len(m.symbolsFiltered), bodyRow-2, m.symbolRowHeight); ok {
 			m.symbolsCur = idx
 		}
 	case modeHex:
 		m.ensureHex()
-		m.hexCur = m.clickByte(m.hexImg.Data, m.hexTop, m.hexCur, x, bodyRow)
+		m.hexCur = m.clickByte(modeHex, m.hexImg.Data, m.hexTop, m.hexCur, x, bodyRow, m.hexImg.AddrAt)
 	case modeRaw:
 		m.ensureRaw()
-		m.rawCur = m.clickByte(m.rawData, m.rawTop, m.rawCur, x, bodyRow)
+		m.rawCur = m.clickByte(modeRaw, m.rawData, m.rawTop, m.rawCur, x, bodyRow, func(pos int) uint64 { return uint64(pos) })
 	case modeStrings:
 		// Body layout: row 0 is the column header, data follows.
-		if idx := m.stringsTop + bodyRow - 1; idx >= 0 && idx < len(m.stringsList) {
+		if idx, ok := visualItemAtRow(m.stringsTop, len(m.stringsList), bodyRow-1, m.stringRowHeight); ok {
 			m.stringsCur = idx
 		}
 	case modeSources:
@@ -131,40 +161,100 @@ func (m *Model) handleClick(x, y int) {
 			if idx := m.sourcesTop + bodyRow - 1; idx >= 0 && idx < len(m.sourcesFiltered) {
 				m.sourcesCur = idx
 			}
-		} else if x < m.width/2 {
-			// Source pane: row 0 is the file:line header, lines follow.
-			if ln := m.srcTop + bodyRow - 1; ln >= 1 {
-				if n := len(m.file.SourceLines(m.srcFile)); ln <= n {
-					m.srcCur = ln
-					m.syncSourceAsm()
-				}
+		} else if m.clickInSourcePane(x) {
+			if ln, ok := m.sourceLineAtBodyRow(bodyRow, m.sourcePaneWidth()); ok {
+				m.srcCur = ln
+				m.syncSourceAsm()
 			}
 		}
 	case modeDisasm:
-		if i, ok := m.instAtBodyRow(bodyRow); ok {
+		if m.sourceFirst && m.srcFile != "" && m.clickInSourcePane(x) {
+			if ln, ok := m.sourceLineAtBodyRow(bodyRow, m.sourcePaneWidth()); ok {
+				m.srcCur = ln
+				m.syncSourceAsm()
+			}
+		} else if i, ok := m.instAtBodyRow(bodyRow); ok {
 			m.disasmCur = i
 		}
+	case modeLibs:
+		headerRows := m.libsHeaderRows()
+		if m.file.Info != nil {
+			if idx, ok := visualItemAtRow(m.libsTop, len(m.file.Info.DynamicLibs), bodyRow-headerRows, m.libRowHeight); ok {
+				m.libsCur = idx
+			}
+		}
 	}
+}
+
+func (m *Model) clickInSourcePane(x int) bool {
+	if m.mode == modeDisasm && m.sourceFirst {
+		return x < m.width/2
+	}
+	if m.mode == modeSources && m.srcAsmLeft {
+		return x >= m.width/2
+	}
+	return x < m.width/2
+}
+
+func (m *Model) sourcePaneWidth() int {
+	if m.width <= 1 {
+		return m.width
+	}
+	return m.width / 2
+}
+
+func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
+	r := bodyRow - 1 // strip source header row
+	if r < 0 {
+		return 0, false
+	}
+	src := m.file.SourceLines(m.srcFile)
+	rowHeight := func(i int) int {
+		ln := i + 1
+		h := m.sourceLineHeight(ln, paneW)
+		if ln == m.srcCur && len(m.file.LineColumns(m.srcFile, ln)) > 0 {
+			h++
+		}
+		return h
+	}
+	idx, ok := visualItemAtRow(max(0, m.srcTop-1), len(src), r, rowHeight)
+	return idx + 1, ok
 }
 
 // clickByte maps a click at (x, bodyRow) onto a byte position in a hex dump.
 // Body layout: row 0 is the banner, byte rows follow with bytesPerHexRow bytes
 // each. The column→byte mapping lives in view_hex.go so it stays in sync with
 // the renderer.
-func (m *Model) clickByte(data []byte, top, cur, x, bodyRow int) int {
+func (m *Model) clickByte(md mode, data []byte, top, cur, x, bodyRow int, addrAt func(pos int) uint64) int {
 	r := bodyRow - 1 // strip the banner row
 	if r < 0 {
 		return cur
 	}
-	rowStart := top + r*bytesPerHexRow
-	if rowStart >= len(data) {
-		return cur
+	emitted := 0
+	prevSec := ""
+	if top >= bytesPerHexRow {
+		prevSec = m.hexSectionName(md, top-bytesPerHexRow, addrAt)
 	}
-	pos := rowStart + hexColumnToByte(m.file.AddrHexWidth(), x)
-	if pos >= len(data) {
-		pos = len(data) - 1
+	for rowStart := top; rowStart < len(data); rowStart += bytesPerHexRow {
+		if sec := m.hexSectionName(md, rowStart, addrAt); sec != "" && sec != prevSec {
+			if emitted == r {
+				return cur // clicked a section-separator row
+			}
+			emitted++
+			prevSec = sec
+		} else {
+			prevSec = sec
+		}
+		if emitted == r {
+			pos := rowStart + hexColumnToByte(m.file.AddrHexWidth(), x)
+			if pos >= len(data) {
+				pos = len(data) - 1
+			}
+			return pos
+		}
+		emitted++
 	}
-	return pos
+	return cur
 }
 
 // instAtBodyRow maps a click in the disasm scroller to an instruction index.
@@ -175,23 +265,7 @@ func (m *Model) instAtBodyRow(bodyRow int) (int, bool) {
 	if r < 0 {
 		return 0, false
 	}
-	h := m.bodyHeight() - 1
-	emitted := 0
-	for i := m.disasmTop; i < len(m.disasmInst) && emitted < h; i++ {
-		inst := m.disasmInst[i]
-		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			if emitted == r {
-				return i, true // clicked the label → select its instruction
-			}
-			emitted++
-			if emitted >= h {
-				break
-			}
-		}
-		if emitted == r {
-			return i, true
-		}
-		emitted++
-	}
-	return 0, false
+	return visualItemAtRow(m.disasmTop, len(m.disasmInst), r, func(i int) int {
+		return m.disasmInstVisualHeight(i, m.disasmRenderWidth())
+	})
 }

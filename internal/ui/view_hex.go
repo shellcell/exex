@@ -130,6 +130,16 @@ func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "d":
+		addr := m.hexImg.AddrAt(m.hexCur)
+		if _, ok := m.file.ExecImage().PosForAddr(addr); ok && m.dis != nil {
+			m.loadDisasmAt(addr)
+		} else {
+			m.setStatus("address is not executable", true)
+		}
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 	case "a":
 		addr := m.hexImg.AddrAt(m.hexCur)
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
@@ -182,6 +192,9 @@ func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 	case "a":
 		m.copyToClipboard(fmt.Sprintf("0x%x", m.rawCur), "offset")
 	case "s":
@@ -231,7 +244,7 @@ func (m *Model) renderHex() string {
 		banner = fmt.Sprintf(" %s   @ 0x%0*x   ·   %d bytes across %d mapped sections",
 			r.Name, m.file.AddrHexWidth(), m.hexImg.AddrAt(m.hexCur), m.hexImg.Len(), len(m.hexImg.Regions))
 	}
-	return m.renderHexDump(m.hexImg.Data, m.hexCur, &m.hexTop, m.hexImg.AddrAt, banner)
+	return m.renderHexDump(modeHex, m.hexImg.Data, m.hexCur, &m.hexTop, m.hexImg.AddrAt, banner)
 }
 
 func (m *Model) renderRaw() string {
@@ -244,13 +257,13 @@ func (m *Model) renderRaw() string {
 		banner = fmt.Sprintf(" raw file · offset 0x%x · in %s · %d bytes total",
 			m.rawCur, sec.Name, len(m.rawData))
 	}
-	return m.renderHexDump(m.rawData, m.rawCur, &m.rawTop, func(pos int) uint64 { return uint64(pos) }, banner)
+	return m.renderHexDump(modeRaw, m.rawData, m.rawCur, &m.rawTop, func(pos int) uint64 { return uint64(pos) }, banner)
 }
 
 // renderHexDump draws a classic offset|hex|ascii table. addrAt maps a byte
 // position to the address shown at the start of its row, so the same renderer
 // serves both the VA image and the raw file view.
-func (m *Model) renderHexDump(data []byte, cur int, topPtr *int, addrAt func(pos int) uint64, banner string) string {
+func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt func(pos int) uint64, banner string) string {
 	bodyH := m.bodyHeight()
 	row := bytesPerHexRow
 	addrW := m.file.AddrHexWidth()
@@ -268,18 +281,48 @@ func (m *Model) renderHexDump(data []byte, cur int, topPtr *int, addrAt func(pos
 	}
 	*topPtr = topRow * row
 
-	out := stickySymStyle.Render(padRight(banner, m.width)) + "\n"
+	rows := []string{stickySymStyle.Render(padRight(banner, m.width))}
 	end := *topPtr + visible*row
 	if end > len(data) {
 		end = len(data)
 	}
-	for off := *topPtr; off < end; off += row {
-		out += m.renderHexRow(data, cur, off, addrW, addrAt) + "\n"
+	// Emit a "── section ──" separator whenever the section covering a row
+	// changes. Section starts rarely land on a 16-byte row boundary, so keying
+	// off equality would miss almost all of them. Seed with the section of the
+	// row above the window so the first visible row only splits when it's new.
+	prevSec := ""
+	if *topPtr >= row {
+		prevSec = m.hexSectionName(md, *topPtr-row, addrAt)
 	}
-	return padBody(out, m.width, bodyH)
+	for off := *topPtr; off < end; off += row {
+		sec := m.hexSectionName(md, off, addrAt)
+		if sec != "" && sec != prevSec {
+			appendRenderedRows(&rows, footerStyle.Render("── "+sec+" ──"), m.width, m.wrap, bodyH)
+		}
+		prevSec = sec
+		if !appendRenderedRowsIndented(&rows, m.renderHexRow(md, data, cur, off, addrW, addrAt), m.width, m.wrap, addrW+75, bodyH) {
+			break
+		}
+	}
+	return padBodyRows(rows, m.width, bodyH)
 }
 
-func (m *Model) renderHexRow(data []byte, cur, off, addrW int, addrAt func(pos int) uint64) string {
+// hexSectionName returns the name of the section covering the byte at off (a VA
+// for the hex view, a file offset for the raw view), or "" if none.
+func (m *Model) hexSectionName(md mode, off int, addrAt func(pos int) uint64) string {
+	if md == modeHex {
+		if sec := m.file.SectionAt(addrAt(off)); sec != nil {
+			return sec.Name
+		}
+		return ""
+	}
+	if sec := m.sectionAtOffset(uint64(off)); sec != nil {
+		return sec.Name
+	}
+	return ""
+}
+
+func (m *Model) renderHexRow(md mode, data []byte, cur, off, addrW int, addrAt func(pos int) uint64) string {
 	row := bytesPerHexRow
 	end := off + row
 	if end > len(data) {
@@ -317,5 +360,16 @@ func (m *Model) renderHexRow(data []byte, cur, off, addrW int, addrAt func(pos i
 		hexCol.String(),
 		"|"+asciiCol.String()+"|",
 	)
-	return padRight(line, m.width)
+	if sym, ok := m.file.SymbolAt(addr); ok && sym.Addr == addr {
+		line += "  " + addrStyle.Render(sym.Display())
+	} else if sec := m.file.SectionAt(addr); sec != nil && sec.Addr == addr {
+		line += "  " + addrStyle.Render(sec.Name)
+	} else if md == modeRaw {
+		if sec := m.sectionAtOffset(uint64(off)); sec != nil {
+			line += "  " + addrStyle.Render(sec.Name)
+		}
+	} else if sec := m.sectionAtOffset(addr); sec != nil && sec.Offset == addr {
+		line += "  " + addrStyle.Render(sec.Name)
+	}
+	return line
 }

@@ -14,13 +14,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 )
 
 // historyCap caps the depth of the back/forward stack in the disasm view.
-const historyCap = 10
+const historyCap = 30
 
 // disasmReadyMsg carries the finished decode from the background worker.
 type disasmReadyMsg struct {
@@ -328,6 +329,11 @@ func (m *Model) instIndexAtOrAfterAddr(addr uint64) int {
 }
 
 func (m *Model) setDisasmWindow(win binfile.Window, insts []disasm.Inst) bool {
+	// Never clobber a good window with an empty decode (e.g. a step that ran off
+	// the end): keep what we have so the cursor stays valid.
+	if len(insts) == 0 && len(m.disasmInst) > 0 {
+		return false
+	}
 	m.disasmInst = insts
 	m.disasmPosLo = win.Start
 	m.disasmPosHi = win.End
@@ -607,6 +613,17 @@ func (m *Model) jumpSymbol(forward bool) {
 }
 
 func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
+	if m.sourceFirst && m.srcFile != "" {
+		switch key {
+		case "esc", "backspace":
+			m.sourceFirst = false
+			return m, nil
+		case "tab":
+			m.sourceFirst = false
+			return m, nil
+		}
+		return m.updateSourceOpenSrc(key)
+	}
 	switch key {
 	case "left":
 		m.goBack()
@@ -622,6 +639,10 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/":
 		m.openSearch()
+		return m, nil
+	case "w":
+		m.wrap = !m.wrap
+		m.setStatus(wrapStatus(m.wrap), false)
 		return m, nil
 	case "n":
 		return m, m.runSearch(true, false)
@@ -726,8 +747,6 @@ func (m *Model) followableAddr(text string) (uint64, bool) {
 // the disasm view.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
 	classSt := styleForClass(class)
-	annotate := class == disasm.ClassCall || class == disasm.ClassJumpUnc || class == disasm.ClassJumpCond
-
 	// Determine the symbol that contains the instruction we're rendering.
 	curSym, hasCur := m.file.SymbolAt(instAddr)
 
@@ -752,13 +771,57 @@ func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uin
 		}
 		b.WriteString(classSt.Render(text[from:start]))
 		b.WriteString(linkSt.Render(text[start:end]))
-		if annotate && !isIntra {
-			if note := m.targetAnnotation(addr); note != "" {
-				b.WriteString(footerStyle.Render(" (" + note + ")"))
+		from = end
+	}
+}
+
+func (m *Model) instAnnotation(text string, class disasm.InstClass) string {
+	annotate := class == disasm.ClassCall || class == disasm.ClassJumpUnc ||
+		class == disasm.ClassJumpCond || isAddrLoadOp(firstToken(text))
+	from := 0
+	var notes []string
+	seen := map[string]bool{}
+	add := func(note string) {
+		if note == "" || seen[note] {
+			return
+		}
+		seen[note] = true
+		notes = append(notes, note)
+	}
+	for {
+		addr, _, end, ok := extractTargetAt(text, from)
+		if !ok {
+			break
+		}
+		if m.file.IsMapped(addr) {
+			if annotate {
+				add(m.targetAnnotation(addr))
+			} else if sym, ok := m.file.SymbolAt(addr); ok && (sym.Kind == binfile.SymObject || sym.Kind == binfile.SymTLS || sym.Kind == binfile.SymCommon) {
+				add(m.targetAnnotation(addr))
 			}
 		}
 		from = end
 	}
+	return strings.Join(notes, ", ")
+}
+
+// firstToken returns the mnemonic (first whitespace-delimited token), lowered.
+func firstToken(text string) string {
+	text = strings.TrimSpace(text)
+	if i := strings.IndexAny(text, " \t"); i >= 0 {
+		text = text[:i]
+	}
+	return strings.ToLower(text)
+}
+
+// isAddrLoadOp reports whether op materialises an address (so its operand is
+// worth annotating with the symbol/section it points at).
+func isAddrLoadOp(op string) bool {
+	switch op {
+	case "lea", "leaq", "leal", "leaw", "adr", "adrp":
+		return true
+	}
+	return false
 }
 
 // targetAnnotation labels a follow-able address with whatever the reader is
@@ -786,6 +849,13 @@ func (m *Model) renderDisasm() string {
 	if len(m.disasmInst) == 0 {
 		msg := "no disassembly loaded — press g to go to an address, or pick a symbol from view 3"
 		return padBody(msg+"\n", m.width, bodyH)
+	}
+	if m.showSource && m.sourceFirst && m.ensureSourceForDisasmCursor() {
+		leftW := m.width / 2
+		rightW := m.width - leftW
+		left := m.renderSourceText(leftW, bodyH)
+		right := leftBorderPane(m.renderSourceAsm(rightW-1, bodyH))
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	leftW := m.width
 	rightW := 0
@@ -830,51 +900,238 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 		h = 1
 	}
 	m.ensureDisasmViewport(h)
-	if m.disasmCur < m.disasmTop {
-		m.disasmTop = m.disasmCur
-	} else if m.disasmCur >= m.disasmTop+h {
-		m.disasmTop = m.disasmCur - h + 1
-	}
-	end := m.disasmTop + h
-	if end > len(m.disasmInst) {
-		end = len(m.disasmInst)
-	}
+	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
+	ensureVisualTop(m.disasmCur, &m.disasmTop, len(m.disasmInst), h, rowHeight)
 
-	var b strings.Builder
-	emitted := 0
-	for i := m.disasmTop; i < end && emitted < h; i++ {
+	jumpTargets := m.currentIntraJumpTargets()
+	var rows []string
+	for i := m.disasmTop; i < len(m.disasmInst) && len(rows) < h; i++ {
 		inst := m.disasmInst[i]
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			tag := symbolNameStyle.Render("<" + sym.Display() + ">:")
-			b.WriteString(padRight(" "+tag, w))
-			b.WriteString("\n")
-			emitted++
-			if emitted >= h {
+			for _, row := range m.disasmLabelRows(sym.Display(), w) {
+				if len(rows) >= h {
+					break
+				}
+				rows = append(rows, row)
+			}
+			if len(rows) >= h {
 				break
 			}
 		}
-		line := fmt.Sprintf(" %s  %s  %s",
-			addrStyle.Render(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), inst.Addr)),
-			bytesHex(inst.Bytes, 8),
-			m.renderInstText(inst.Text, inst.Class, inst.Addr),
-		)
-		plain := stripANSI(line)
-		if lipgloss.Width(plain) < w {
-			line += strings.Repeat(" ", w-lipgloss.Width(plain))
-		} else if lipgloss.Width(plain) > w {
-			line = truncateANSI(line, w)
+		var targetStyle *lipgloss.Style
+		if st, ok := jumpTargets[inst.Addr]; ok {
+			targetStyle = &st
 		}
-		if i == m.disasmCur {
-			line = tableSelStyle.Render(stripANSI(line))
-			if lipgloss.Width(line) < w {
-				line += strings.Repeat(" ", w-lipgloss.Width(line))
+		for _, row := range m.disasmInstRows(inst, w, i == m.disasmCur, targetStyle) {
+			if len(rows) >= h {
+				break
+			}
+			rows = append(rows, row)
+		}
+	}
+	return padBodyRows(rows, w, h)
+}
+
+func (m *Model) disasmRenderWidth() int {
+	if m.mode == modeDisasm && m.showSource && !m.sourceFirst {
+		return m.width / 2
+	}
+	if m.mode == modeSources && m.srcFile != "" && m.srcAsmLeft {
+		return m.width / 2
+	}
+	return m.width
+}
+
+func (m *Model) disasmInstVisualHeight(i, w int) int {
+	if i < 0 || i >= len(m.disasmInst) {
+		return 1
+	}
+	inst := m.disasmInst[i]
+	h := len(m.disasmInstRows(inst, w, false, nil))
+	if m.disasmIsSymbolStart(i) {
+		inst := m.disasmInst[i]
+		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
+			h += len(m.disasmLabelRows(sym.Display(), w))
+		} else {
+			h++
+		}
+	}
+	return h
+}
+
+func (m *Model) disasmAsmColumn() int {
+	return 1 + 2 + m.file.AddrHexWidth() + 2 + (8*3 - 1) + 2
+}
+
+func (m *Model) disasmAnnotationColumn(w int) int {
+	return min(max(m.disasmAsmColumn()+24, w/2), max(m.disasmAsmColumn()+12, w-12))
+}
+
+func (m *Model) disasmLabelRows(name string, w int) []string {
+	label := "<" + name + ">:"
+	if !m.wrap {
+		return []string{padRight(" "+symbolNameStyle.Render(truncateANSI(label, max(1, w-1))), w)}
+	}
+	parts := strings.Split(strings.TrimRight(ansi.Wrap(label, max(1, w-1), " \t/.-_:$@<>"), "\n"), "\n")
+	if len(parts) == 0 {
+		parts = []string{""}
+	}
+	rows := make([]string, 0, len(parts))
+	for _, part := range parts {
+		rows = append(rows, padRight(" "+symbolNameStyle.Render(part), w))
+	}
+	return rows
+}
+
+func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {
+	addrText := fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), inst.Addr)
+	addrCol := addrStyle.Render(addrText)
+	if targetStyle != nil {
+		addrCol = targetStyle.Render(addrText)
+	}
+	asmCol := m.disasmAsmColumn()
+	annCol := m.disasmAnnotationColumn(w)
+	asmW := max(1, annCol-asmCol-2)
+	noteW := max(1, w-annCol)
+	asm := m.renderInstText(inst.Text, inst.Class, inst.Addr)
+	note := m.instAnnotation(inst.Text, inst.Class)
+	asmParts := []string{asm}
+	if m.wrap {
+		asmParts = strings.Split(strings.TrimRight(ansi.Wrap(asm, asmW, " \t,.-_+*()[]"), "\n"), "\n")
+	} else {
+		asmParts = []string{fitANSIWidth(asm, asmW)}
+	}
+	if len(asmParts) == 0 {
+		asmParts = []string{""}
+	}
+	noteParts := []string{}
+	if note != "" {
+		if m.wrap {
+			noteParts = strings.Split(strings.TrimRight(ansi.Wrap(note, noteW, " \t/.-_:$@<>,"), "\n"), "\n")
+		} else {
+			noteParts = []string{truncateANSI(note, noteW)}
+		}
+		for i, part := range noteParts {
+			// Style each physical annotation row independently. Wrapping an
+			// already-styled string can leave continuation rows outside the SGR span.
+			noteParts[i] = addrStyle.Render(part)
+		}
+	}
+	n := max(len(asmParts), len(noteParts))
+	rows := make([]string, 0, n)
+	firstPrefix := fmt.Sprintf(" %s  %s  ", addrCol, bytesHex(inst.Bytes, 8))
+	contPrefix := strings.Repeat(" ", asmCol)
+	for i := 0; i < n; i++ {
+		prefix := contPrefix
+		if i == 0 {
+			prefix = firstPrefix
+		}
+		asmPart := ""
+		if i < len(asmParts) {
+			asmPart = asmParts[i]
+		}
+		line := prefix + asmPart
+		selectionEnd := lipgloss.Width(stripANSI(line))
+		if i < len(noteParts) {
+			pad := annCol - lipgloss.Width(stripANSI(line))
+			if pad < 1 {
+				pad = 1
+			}
+			line += strings.Repeat(" ", pad) + noteParts[i]
+		}
+		if selected {
+			plain := stripANSI(line)
+			if selectionEnd > len(plain) {
+				selectionEnd = len(plain)
+			}
+			line = tableSelStyle.Render(plain[:selectionEnd])
+			if selectionEnd < len(plain) {
+				gapEnd := min(annCol, len(plain))
+				if gapEnd > selectionEnd {
+					line += plain[selectionEnd:gapEnd]
+				}
+				if i < len(noteParts) {
+					line += noteParts[i]
+				}
 			}
 		}
-		b.WriteString(line)
-		b.WriteString("\n")
-		emitted++
+		rows = append(rows, padRight(line, w))
 	}
-	return padBody(b.String(), w, h)
+	return rows
+}
+
+func (m *Model) renderDisasmColumns(inst disasm.Inst, w int) string {
+	asm := m.renderInstText(inst.Text, inst.Class, inst.Addr)
+	note := m.instAnnotation(inst.Text, inst.Class)
+	if note == "" {
+		return asm
+	}
+	asmCol := m.disasmAsmColumn()
+	annCol := max(asmCol+24, w/2)
+	asmW := annCol - asmCol - 2
+	if asmW < 12 {
+		asmW = 12
+	}
+	if !m.wrap {
+		asm = fitANSIWidth(asm, asmW)
+	}
+	pad := annCol - asmCol - lipgloss.Width(stripANSI(asm))
+	if pad < 2 {
+		pad = 2
+	}
+	return asm + strings.Repeat(" ", pad) + addrStyle.Render(note)
+}
+
+func (m *Model) currentIntraJumpTargets() map[uint64]lipgloss.Style {
+	out := map[uint64]lipgloss.Style{}
+	if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
+		return out
+	}
+	cur := m.disasmInst[m.disasmCur]
+	if cur.Class != disasm.ClassJumpUnc && cur.Class != disasm.ClassJumpCond {
+		return out
+	}
+	curSym, ok := m.file.SymbolAt(cur.Addr)
+	if !ok || curSym.Size == 0 {
+		return out
+	}
+	from := 0
+	for {
+		addr, _, end, ok := extractTargetAt(cur.Text, from)
+		if !ok {
+			return out
+		}
+		if addr >= curSym.Addr && addr < curSym.Addr+curSym.Size {
+			out[addr] = linkAddrIntraStyle
+		}
+		from = end
+	}
+}
+
+func (m *Model) ensureSourceForDisasmCursor() bool {
+	if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
+		return false
+	}
+	file, line := m.file.LookupAddr(m.disasmInst[m.disasmCur].Addr)
+	if file == "" || line == 0 || m.file.SourceLines(file) == nil {
+		return m.srcFile != "" && m.file.SourceLines(m.srcFile) != nil
+	}
+	if m.srcFile != file {
+		m.srcFile = file
+		m.srcCodeLines = m.file.MappedLines(file)
+	}
+	m.srcCur = line
+	return true
+}
+
+// disasmIsSymbolStart reports whether instruction i begins a symbol (and so is
+// preceded by a "<name>:" label line in the scroller).
+func (m *Model) disasmIsSymbolStart(i int) bool {
+	if i < 0 || i >= len(m.disasmInst) {
+		return false
+	}
+	sym, ok := m.file.SymbolAt(m.disasmInst[i].Addr)
+	return ok && sym.Addr == m.disasmInst[i].Addr
 }
 
 func (m *Model) ensureDisasmViewport(h int) {

@@ -72,12 +72,19 @@ keys:
   toggle_source: tab
   copy_address: a
   copy_symbol: s
+  copy_path: c
+  open_disasm: d
+  wrap: w
+  filter_type: t
+  search_mode: ctrl+m
+  search_direction: ctrl+r
+  search_origin: ctrl+o
   next: "]"   # next symbol (disasm) / next non-zero byte (hex/raw)
   prev: "["   # previous symbol / previous non-zero byte
 
 behavior:
   # View to open on startup: info, sections, symbols, disasm, hex, libs, raw,
-  # strings. Defaults to info.
+  # strings, sources. Defaults to info.
   default_view: info
   # Where the disasm view lands by default (and redirects to when asked to show
   # a non-executable address): lowest, text, main, start, or entry. Defaults to

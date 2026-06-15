@@ -75,3 +75,15 @@ func TestAMD64RangeRecoversFromDecoderPanic(t *testing.T) {
 		t.Fatalf("first instruction = %q, want (bad)", insts[0].Text)
 	}
 }
+
+func TestClassifyBranches(t *testing.T) {
+	cond := []string{"cbz x0, 0x100", "cbnz w1, 0x100", "tbz x0, #1, 0x100", "tbnz x0, #1, 0x100", "b.gt 0x100", "je 0x100"}
+	for _, s := range cond {
+		if c := Classify(s); c != ClassJumpCond {
+			t.Errorf("Classify(%q)=%v, want ClassJumpCond", s, c)
+		}
+	}
+	if c := Classify("b 0x100"); c != ClassJumpUnc {
+		t.Errorf("Classify(b)=%v, want ClassJumpUnc", c)
+	}
+}

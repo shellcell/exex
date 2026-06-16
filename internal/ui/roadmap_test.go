@@ -12,11 +12,14 @@ import (
 )
 
 func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
-	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
-		{Name: "data", Kind: binfile.SymObject},
-		{Name: "fn", Kind: binfile.SymFunc},
-		{Name: "sec", Kind: binfile.SymSection},
-	}}}
+	m := &Model{
+		theme: DefaultTheme(),
+		file: &binfile.File{Symbols: []binfile.Symbol{
+			{Name: "data", Kind: binfile.SymObject},
+			{Name: "fn", Kind: binfile.SymFunc},
+			{Name: "sec", Kind: binfile.SymSection},
+		}},
+	}
 	m.symbolsFilter = textinput.New()
 	m.recomputeSymbols()
 	if got := len(m.symbolsFiltered); got != 3 {
@@ -33,7 +36,7 @@ func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
 }
 
 func TestOpenSearchClearsInputButKeepsRepeatQuery(t *testing.T) {
-	m := &Model{searchQuery: "old"}
+	m := &Model{searchState: searchState{searchQuery: "old"}}
 	m.searchInput = textinput.New()
 	m.searchInput.SetValue("stale")
 	m.openSearch()
@@ -114,7 +117,11 @@ func TestRenderLineRowsIndentedContinuation(t *testing.T) {
 }
 
 func TestSearchPopupClickTogglesSwitches(t *testing.T) {
-	m := &Model{width: 100, height: 30, searchActive: true, searchForward: true, searchFromCursor: true}
+	m := &Model{
+		theme:       DefaultTheme(),
+		layoutState: layoutState{width: 100, height: 30},
+		searchState: searchState{searchActive: true, searchForward: true, searchFromCursor: true},
+	}
 	m.searchInput = textinput.New()
 	modal := m.renderSearchModal()
 	left := (m.width - lipgloss.Width(modal)) / 2
@@ -148,9 +155,16 @@ func TestSearchPopupClickTogglesSwitches(t *testing.T) {
 }
 
 func TestWrappedSymbolsKeepAddressGrayOnContinuation(t *testing.T) {
-	m := &Model{width: 42, wrap: true, file: &binfile.File{Symbols: []binfile.Symbol{{
-		Name: strings.Repeat("very_long_symbol_name_", 5), Addr: 0x1000, Kind: binfile.SymFunc,
-	}}}}
+	m := &Model{
+		theme:            DefaultTheme(),
+		layoutState:      layoutState{width: 42},
+		interactionState: interactionState{wrap: true},
+		file: &binfile.File{
+			Symbols: []binfile.Symbol{{
+				Name: strings.Repeat("very_long_symbol_name_", 5), Addr: 0x1000, Kind: binfile.SymFunc,
+			}},
+		},
+	}
 	m.symbolsFiltered = []int{0}
 	rows := m.symbolRows(0, 8, false)
 	if len(rows) < 2 {
@@ -166,10 +180,10 @@ func TestWrappedSymbolsKeepAddressGrayOnContinuation(t *testing.T) {
 
 func TestWrappedSymbolsMouseSelectionUsesVisualRows(t *testing.T) {
 	m := &Model{
-		mode:   modeSymbols,
-		width:  42,
-		height: 120,
-		wrap:   true,
+		theme:            DefaultTheme(),
+		mode:             modeSymbols,
+		layoutState:      layoutState{width: 42, height: 120},
+		interactionState: interactionState{wrap: true},
 		file: &binfile.File{Symbols: []binfile.Symbol{
 			{Name: strings.Repeat("very_long_symbol_name_", 5), Addr: 0x1000, Kind: binfile.SymFunc},
 			{Name: "second", Addr: 0x2000, Kind: binfile.SymObject},
@@ -206,7 +220,7 @@ func TestVisualItemAtRowUsesWrappedHeights(t *testing.T) {
 }
 
 func TestRawClickSkipsSectionSplitRows(t *testing.T) {
-	m := &Model{width: 100, file: &binfile.File{Sections: []binfile.Section{{Name: ".text", Offset: 0, FileSize: 32}}}}
+	m := &Model{layoutState: layoutState{width: 100}, file: &binfile.File{Sections: []binfile.Section{{Name: ".text", Offset: 0, FileSize: 32}}}}
 	data := make([]byte, 64)
 	cur := m.clickByte(modeRaw, data, 0, 7, hexBodyStart(16), 1, func(pos int) uint64 { return uint64(pos) })
 	if cur != 7 {
@@ -219,9 +233,16 @@ func TestRawClickSkipsSectionSplitRows(t *testing.T) {
 }
 
 func TestDisasmAnnotationWrapsWithGrayStyleEachRow(t *testing.T) {
-	m := &Model{width: 64, wrap: true, file: &binfile.File{Sections: []binfile.Section{{
-		Name: strings.Repeat("very_long_section_name_", 5), Addr: 0x2000, Size: 8, Alloc: true,
-	}}}}
+	m := &Model{
+		theme:            DefaultTheme(),
+		layoutState:      layoutState{width: 64},
+		interactionState: interactionState{wrap: true},
+		file: &binfile.File{
+			Sections: []binfile.Section{{
+				Name: strings.Repeat("very_long_section_name_", 5), Addr: 0x2000, Size: 8, Alloc: true,
+			}},
+		},
+	}
 	inst := disasm.Inst{Addr: 0x1000, Text: "call 0x2000", Class: disasm.ClassCall, Bytes: []byte{0xe8}}
 	rows := m.disasmInstRows(inst, 64, false, nil)
 	if len(rows) < 2 {

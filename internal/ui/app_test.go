@@ -452,7 +452,7 @@ func TestDisasmSearchShowsProgressAndCancels(t *testing.T) {
 }
 
 func TestDisasmSearchWorkersAndBatchSizing(t *testing.T) {
-	m := &Model{disasmSearchWorkers: 3, disasmMaxBytes: 256 << 10}
+	m := &Model{disasmState: disasmState{disasmSearchWorkers: 3, disasmMaxBytes: 256 << 10}}
 	if got := m.disasmSearchWorkersFor(10); got != 3 {
 		t.Fatalf("workers = %d, want 3", got)
 	}

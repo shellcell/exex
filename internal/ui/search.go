@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	searchutil "github.com/rabarbra/exex/internal/search"
+	searchutil "github.com/rabarbra/exex/internal/bytesearch"
 )
 
 type searchMode = searchutil.Mode

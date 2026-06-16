@@ -1,4 +1,4 @@
-package source
+package sourcefiles
 
 import (
 	"path/filepath"

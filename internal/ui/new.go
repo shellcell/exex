@@ -1,0 +1,165 @@
+package ui
+
+import (
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+
+	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/config"
+	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/rabarbra/exex/internal/syntax"
+)
+
+func New(f *binfile.File, opts ...Options) (*Model, error) {
+	d, err := disasm.For(f.Arch())
+	if err != nil {
+		// Don't fail — the user can still browse header/sections/symbols.
+		d = nil
+	}
+
+	var cfg config.Config
+	if len(opts) > 0 && opts[0].Config != nil {
+		cfg = *opts[0].Config
+	}
+
+	filter := newPromptInput("type to filter…", "/ ")
+	secFilter := newPromptInput("type to filter…", "/ ")
+	srcFilter := newPromptInput("type to filter…", "/ ")
+	gotoInput := newPromptInput("0x401000 or symbol name", "→ ")
+	searchInput := newPromptInput("hex bytes (de ad be ef) or text", "/ ")
+
+	m := &Model{
+		file:  f,
+		dis:   d,
+		cfg:   cfg,
+		theme: NewTheme(cfg.Colors),
+		mode:  modeInfo,
+		layoutState: layoutState{
+			headerVP: viewport.New(0, 0),
+		},
+		sectionsState: sectionsState{
+			sections:       f.Sections,
+			sectionsFilter: secFilter,
+		},
+		symbolsState: symbolsState{
+			symbolsFilter: filter,
+		},
+		disasmState: disasmState{
+			disasmMaxBytes:      defaultDisasmMaxBytes,
+			disasmSearchWorkers: 0,
+			showSource:          true,
+			srcVP:               viewport.New(0, 0),
+			srcHighlighter:      syntax.NewHighlighter(cfg.Colors.SyntaxTheme),
+		},
+		sourcesState: sourcesState{
+			sourcesFilter: srcFilter,
+		},
+		gotoState: gotoState{
+			gotoInput: gotoInput,
+		},
+		searchState: searchState{
+			searchInput:      searchInput,
+			searchForward:    true,
+			searchFromCursor: true,
+		},
+		keyState: newKeyState(cfg.Keys),
+	}
+	m.recomputeSymbols()
+	m.recomputeSections()
+
+	// The disassembly is decoded lazily on first open (it can be large); record
+	// where the cursor should land — a guaranteed-executable address chosen by
+	// the configured strategy (lowest executable address by default).
+	m.disasmTarget = cfg.Behavior.DefaultDisasmTarget
+	if m.disasmTarget == "" {
+		m.disasmTarget = "lowest"
+	}
+	if cfg.Behavior.DisasmMaxBytes > 0 {
+		m.disasmMaxBytes = cfg.Behavior.DisasmMaxBytes
+	}
+	if cfg.Behavior.DisasmSearchWorkers > 0 {
+		m.disasmSearchWorkers = cfg.Behavior.DisasmSearchWorkers
+	}
+	m.disasmSvc = explorer.NewDisasmService(f, d, m.disasmMaxBytes, m.disasmSearchWorkers)
+	m.disasmInitAddr = explorer.DefaultExecAddr(f, m.disasmTarget)
+
+	// Open the configured default view (info when unset).
+	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))
+	return m, nil
+}
+
+func newPromptInput(placeholder, prompt string) textinput.Model {
+	in := textinput.New()
+	in.Placeholder = placeholder
+	in.Prompt = prompt
+	in.CharLimit = 256
+	return in
+}
+
+func newKeyState(cfg config.Keys) keyState {
+	keys := defaultKeyMap()
+	keys.applyConfig(cfg)
+
+	// Per-view copy/next/prev keys are configurable as aliases onto canonical
+	// tokens the per-view handlers understand.
+	keyAlias := map[string]string{}
+	addAlias := func(ks config.StringOrSlice, canonical string) {
+		for _, k := range ks {
+			if k != "" {
+				keyAlias[k] = canonical
+			}
+		}
+	}
+	addAlias(cfg.CopyAddress, "a")
+	addAlias(cfg.CopySymbol, "s")
+	addAlias(cfg.Next, "]")
+	addAlias(cfg.Prev, "[")
+	addAlias(cfg.CopyPath, "c")
+	addAlias(cfg.OpenDisasm, "d")
+	addAlias(cfg.Wrap, "w")
+	addAlias(cfg.FilterType, "t")
+
+	searchKeyAlias := map[string]string{}
+	addSearchAlias := func(ks config.StringOrSlice, canonical string) {
+		for _, k := range ks {
+			if k != "" {
+				searchKeyAlias[k] = canonical
+			}
+		}
+	}
+	addSearchAlias(cfg.SearchMode, "ctrl+m")
+	addSearchAlias(cfg.SearchDirection, "ctrl+r")
+	addSearchAlias(cfg.SearchOrigin, "ctrl+o")
+
+	return keyState{
+		keys:           keys,
+		keyAlias:       keyAlias,
+		searchKeyAlias: searchKeyAlias,
+	}
+}
+
+// parseDefaultView maps a config view name to a mode, defaulting to Info.
+func parseDefaultView(name string) mode {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "sections":
+		return modeSections
+	case "symbols":
+		return modeSymbols
+	case "disasm":
+		return modeDisasm
+	case "hex":
+		return modeHex
+	case "libs":
+		return modeLibs
+	case "raw":
+		return modeRaw
+	case "strings":
+		return modeStrings
+	case "sources":
+		return modeSources
+	}
+	return modeInfo
+}

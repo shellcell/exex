@@ -101,8 +101,9 @@ func (m *Model) renderStrings() string {
 	rowHeight := func(i int) int {
 		return m.stringRowHeight(i)
 	}
-	top := visualTop(m.stringsCur, m.stringsTop, len(m.stringsList), visible, rowHeight)
+	top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsList), visible, rowHeight)
 	m.stringsTop = top
+	m.renderedStringsTop = top
 
 	rows := []string{header}
 	for i := top; i < len(m.stringsList); i++ {

@@ -57,8 +57,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recomputeSymbols()
 		return m, nil
 
-	case wheelFlushMsg:
-		return m, m.handleWheelFlush(msg)
 	}
 	return m, nil
 }

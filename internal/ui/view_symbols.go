@@ -162,8 +162,9 @@ func (m *Model) renderSymbols() string {
 	rowHeight := func(i int) int {
 		return m.symbolRowHeight(i)
 	}
-	top := visualTop(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, rowHeight)
+	top := m.visualTopForView(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, rowHeight)
 	m.symbolsTop = top
+	m.renderedSymbolsTop = top
 
 	rows := []string{filterRow, header}
 	for i := top; i < len(m.symbolsFiltered); i++ {

@@ -53,19 +53,19 @@ func truncateMiddle(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
-	if lipgloss.Width(stripANSI(s)) <= n {
-		return s
-	}
-	if n <= 3 {
-		return truncateANSI(s, n)
-	}
 	plain := stripANSI(s)
-	left := (n - 1) / 2
-	right := n - 1 - left
-	if len(plain) <= n {
+	if lipgloss.Width(plain) <= n {
 		return plain
 	}
-	return plain[:left] + "…" + plain[len(plain)-right:]
+	if n <= 3 {
+		return truncateANSI(plain, n)
+	}
+	leftW := (n - 1) / 2
+	rightW := n - 1 - leftW
+	totalW := lipgloss.Width(plain)
+	left := ansi.Truncate(plain, leftW, "")
+	right := ansi.TruncateLeft(plain, max(0, totalW-rightW), "")
+	return left + "…" + right
 }
 
 func wrapStatus(on bool) string {
@@ -229,6 +229,56 @@ func ensureVisualTop(cur int, top *int, n, visible int, rowHeight func(int) int)
 	*top = visualTop(cur, *top, n, visible, rowHeight)
 }
 
+func (m *Model) visualTopForView(cur, top, n, visible int, rowHeight func(int) int) int {
+	if m.viewportDetached {
+		return viewportTop(top, n, visible, rowHeight)
+	}
+	return visualTop(cur, top, n, visible, rowHeight)
+}
+
+func viewportTop(top, n, visible int, rowHeight func(int) int) int {
+	if n <= 0 {
+		return 0
+	}
+	if visible < 1 {
+		visible = 1
+	}
+	if top < 0 {
+		top = 0
+	}
+	if top >= n {
+		top = n - 1
+	}
+	maxTop := maxViewportTop(n, visible, rowHeight)
+	if top > maxTop {
+		return maxTop
+	}
+	return top
+}
+
+func maxViewportTop(n, visible int, rowHeight func(int) int) int {
+	if n <= 0 {
+		return 0
+	}
+	if visible < 1 {
+		visible = 1
+	}
+	rows := 0
+	top := n
+	for top > 0 {
+		h := max(1, rowHeight(top-1))
+		if rows+h > visible {
+			break
+		}
+		rows += h
+		top--
+	}
+	if top == n {
+		return n - 1
+	}
+	return top
+}
+
 func visualTop(cur, top, n, visible int, rowHeight func(int) int) int {
 	if n <= 0 {
 		return 0
@@ -247,6 +297,9 @@ func visualTop(cur, top, n, visible int, rowHeight func(int) int) int {
 	}
 	if top >= n {
 		top = n - 1
+	}
+	if maxTop := maxViewportTop(n, visible, rowHeight); top > maxTop {
+		top = maxTop
 	}
 	if top > cur {
 		top = cur

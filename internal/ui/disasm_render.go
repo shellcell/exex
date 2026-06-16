@@ -181,8 +181,9 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 		h = 1
 	}
 	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
-	top := visualTop(m.disasmCur, m.disasmTop, len(m.disasmInst), h, rowHeight)
+	top := m.visualTopForView(m.disasmCur, m.disasmTop, len(m.disasmInst), h, rowHeight)
 	m.disasmTop = top
+	m.renderedDisasmTop = top
 
 	jumpTargets := m.currentIntraJumpTargets()
 	// When the source pane is open (disasm-first), addresses are coloured by
@@ -296,9 +297,8 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 
 	// The assembly is never wrapped and never trimmed to a narrow column — it is
 	// only clamped to the pane width so it can't wrap. The annotation prefers its
-	// column (annCol); a long instruction pushes it to the right of the assembly
-	// instead of truncating the code, and if it still doesn't fit it drops onto
-	// continuation row(s) indented at the annotation column.
+	// column (annCol); a long instruction pushes it to the right of the assembly,
+	// but the annotation still starts on the instruction row whenever possible.
 	asmFit := fitANSIWidth(asm, max(1, w-asmCol))
 	asmEnd := asmCol + lipgloss.Width(stripANSI(asmFit))
 
@@ -314,26 +314,56 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	}
 
 	inlineStart := max(annCol, asmEnd+2)
-	if inlineStart+lipgloss.Width(note) <= w {
-		// Fits on the same row: pad out to the annotation position, then the note.
-		line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + m.theme.addrStyle.Render(note)
-		return []string{padRight(line, w)}
+	inlineAvail := w - inlineStart
+	if inlineAvail > 0 {
+		first, rest := splitPlainWidth(note, inlineAvail)
+		if first != "" {
+			line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + m.theme.addrStyle.Render(first)
+			rows := []string{padRight(line, w)}
+			if rest == "" || !m.wrap {
+				return rows
+			}
+			return append(rows, m.disasmAnnotationContinuationRows(rest, annCol, w)...)
+		}
 	}
 
-	// Doesn't fit beside the assembly — move it to indented continuation row(s).
+	// No usable room remains beside the assembly; fall back to continuation rows.
 	rows := []string{padRight(asmRow, w)}
+	return append(rows, m.disasmAnnotationContinuationRows(note, annCol, w)...)
+}
+
+func (m *Model) disasmAnnotationContinuationRows(note string, annCol, w int) []string {
 	belowW := max(1, w-annCol)
 	var parts []string
 	if m.wrap {
-		parts = strings.Split(strings.TrimRight(ansi.Wrap(note, belowW, " \t/.-_:$@<>,"), "\n"), "\n")
+		parts = strings.Split(strings.TrimRight(ansi.Wrap(strings.TrimLeft(note, " "), belowW, " \t/.-_:$@<>,"), "\n"), "\n")
 	} else {
 		parts = []string{truncateANSI(note, belowW)}
 	}
 	indent := strings.Repeat(" ", annCol)
+	rows := make([]string, 0, len(parts))
 	for _, p := range parts {
 		rows = append(rows, padRight(indent+m.theme.addrStyle.Render(p), w))
 	}
 	return rows
+}
+
+func splitPlainWidth(s string, w int) (string, string) {
+	if w <= 0 {
+		return "", s
+	}
+	if lipgloss.Width(s) <= w {
+		return s, ""
+	}
+	used := 0
+	for i, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > w {
+			return s[:i], s[i:]
+		}
+		used += rw
+	}
+	return s, ""
 }
 
 func selectedDisasmSegment(s string) string {
@@ -444,7 +474,8 @@ func (m *Model) renderSourcePane(w, h int) string {
 	}
 	src := m.file.SourceLines(file)
 	if src == nil {
-		body := fmt.Sprintf("%s:%d (source file not found)\n", file, line)
+		suffix := fmt.Sprintf(":%d (source file not found)", line)
+		body := truncateMiddle(file, max(1, inner-lipgloss.Width(suffix))) + suffix + "\n"
 		return border.Render(padBody(body, inner, h))
 	}
 

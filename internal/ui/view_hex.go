@@ -340,7 +340,15 @@ func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt
 		visible = 1
 	}
 	top := hexVisibleTop(cur, *topPtr, visible)
+	if m.viewportDetached {
+		top = scrollByteViewportTop(*topPtr, len(data), visible, 0)
+	}
 	*topPtr = top
+	if md == modeRaw {
+		m.renderedRawTop = top
+	} else {
+		m.renderedHexTop = top
+	}
 
 	rows := []string{m.theme.stickySymStyle.Render(padRight(banner, m.width))}
 	end := top + visible*row

@@ -47,7 +47,51 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if c, ok := m.keyAlias[key]; ok {
 		key = c
 	}
-	return m.dispatchViewKey(msg, key)
+	before := m.activeCursorState()
+	reattach := keyReattachesViewport(key)
+	model, cmd := m.dispatchViewKey(msg, key)
+	if reattach || before != m.activeCursorState() {
+		m.viewportDetached = false
+	}
+	return model, cmd
+}
+
+type cursorState struct {
+	mode        mode
+	sectionsCur int
+	symbolsCur  int
+	disasmCur   int
+	hexCur      int
+	rawCur      int
+	stringsCur  int
+	sourcesCur  int
+	libsCur     int
+	srcFile     string
+	srcCur      int
+}
+
+func (m *Model) activeCursorState() cursorState {
+	return cursorState{
+		mode:        m.mode,
+		sectionsCur: m.sectionsCur,
+		symbolsCur:  m.symbolsCur,
+		disasmCur:   m.disasmCur,
+		hexCur:      m.hexCur,
+		rawCur:      m.rawCur,
+		stringsCur:  m.stringsCur,
+		sourcesCur:  m.sourcesCur,
+		libsCur:     m.libsCur,
+		srcFile:     m.srcFile,
+		srcCur:      m.srcCur,
+	}
+}
+
+func keyReattachesViewport(key string) bool {
+	switch key {
+	case "up", "down", "k", "j", "pgup", "pgdown", "home", "end", "G":
+		return true
+	}
+	return false
 }
 
 func (m *Model) handleDisasmPaneKey(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd, bool) {

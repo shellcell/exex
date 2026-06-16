@@ -219,38 +219,35 @@ type interactionState struct {
 	lastClickY  int
 	lastClickAt time.Time
 
-	// Wheel scroll accumulator: rapid momentum-scroll events are accumulated
-	// and flushed at 60fps via a tea.Tick, so the render loop never falls
-	// behind and queued events from a previous view are discarded naturally
-	// when the mode changes between accumulation and flush.
-	wheelDelta         int       // accumulated steps (neg=up, pos=down)
-	wheelFlushing      bool      // true when a flush tick is pending
-	wheelModeSnap      mode      // mode at the time of the last accumulation
-	wheelEpoch         uint64    // increments on mode changes to invalidate stale ticks
 	wheelSuppressUntil time.Time // drop continuing momentum after a mode change
+	viewportDetached   bool      // mouse wheel scrolled the viewport without moving the caret
+
+	// Last top row/offset actually rendered for each scrollable view. Wheel input
+	// starts from these screen snapshots so queued key/mouse events cannot snap
+	// the first wheel step back to the caret-derived top.
+	renderedSectionsTop int
+	renderedSymbolsTop  int
+	renderedDisasmTop   int
+	renderedHexTop      int
+	renderedRawTop      int
+	renderedStringsTop  int
+	renderedSourcesTop  int
+	renderedLibsTop     int
+	renderedSrcTop      int
 
 	// helpActive toggles the keybinding cheat-sheet overlay.
 	helpActive bool
 }
 
-// resetWheelAccumulator discards any accumulated scroll delta and cancels the
-// pending flush. It must be called on every mode change so that momentum-wheel
-// events from the previous view never scroll the new view.
-func (m *Model) resetWheelAccumulator() {
-	m.wheelDelta = 0
-	m.wheelFlushing = false
-}
-
 // setMode is the single place for mode-transition side effects. In particular,
-// it breaks any in-flight momentum scroll gesture so stale wheel events from the
-// previous view cannot scroll the newly selected one.
+// it suppresses ongoing momentum-wheel events so stale input from the previous
+// view cannot scroll the newly selected one.
 func (m *Model) setMode(md mode) {
 	if m.mode == md {
 		return
 	}
 	m.mode = md
-	m.resetWheelAccumulator()
-	m.wheelEpoch++
+	m.viewportDetached = false
 	m.wheelSuppressUntil = time.Now().Add(wheelQuietInterval)
 }
 

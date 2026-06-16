@@ -408,8 +408,9 @@ func (m *Model) renderSourceList(bodyH int) string {
 	if visible < 1 {
 		visible = 1
 	}
-	top := visualTop(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
+	top := m.visualTopForView(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
 	m.sourcesTop = top
+	m.renderedSourcesTop = top
 	end := top + visible
 	if end > len(m.sourcesFiltered) {
 		end = len(m.sourcesFiltered)
@@ -460,11 +461,13 @@ func (m *Model) renderSourceText(w, h int) string {
 		}
 		return h
 	}
-	top = visualTop(m.srcCur-1, top, len(src), contentH, rowHeight)
+	top = m.visualTopForView(m.srcCur-1, top, len(src), contentH, rowHeight)
 	m.srcTop = top + 1
+	m.renderedSrcTop = top
 
 	var b strings.Builder
-	b.WriteString(m.theme.infoStyle.Render(truncate(fmt.Sprintf("%s:%d", m.srcFile, m.srcCur), w)))
+	suffix := fmt.Sprintf(":%d", m.srcCur)
+	b.WriteString(m.theme.infoStyle.Render(truncateMiddle(m.srcFile, max(1, w-lipgloss.Width(suffix))) + suffix))
 	b.WriteString("\n")
 
 	rows := 0
@@ -514,7 +517,7 @@ func (m *Model) sourceTextTop(w, contentH int) int {
 		}
 		return h
 	}
-	return visualTop(m.srcCur-1, max(0, m.srcTop-1), len(src), contentH, rowHeight)
+	return m.visualTopForView(m.srcCur-1, max(0, m.srcTop-1), len(src), contentH, rowHeight)
 }
 
 func (m *Model) sourceLineHeight(line, w int) int {
@@ -588,34 +591,50 @@ func (m *Model) renderSourceAsm(w, h int) string {
 }
 
 func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
-	var parts []string
+	const minSymbolHeaderWidth = 12
+	sep := "  ·  "
+	sepW := lipgloss.Width(sep)
 	linePlain := fmt.Sprintf("line %d", m.srcCur)
 	colsPlain := ""
 	if len(cols) > 0 {
 		colsPlain = "cols " + intsString(cols)
 	}
-	sepW := lipgloss.Width("  ·  ")
+	origColsPlain := colsPlain
+	name := ""
 	if anchor >= 0 && anchor < len(m.disasmInst) {
 		addr := m.disasmInst[anchor].Addr
 		if sym, ok := m.file.SymbolAt(addr); ok {
-			name := sym.Display()
+			name = sym.Display()
 			if off := addr - sym.Addr; off > 0 {
 				name = fmt.Sprintf("%s+0x%x", name, off)
 			}
-			fixedW := lipgloss.Width(linePlain)
-			if colsPlain != "" {
-				fixedW += sepW + lipgloss.Width(colsPlain)
-			}
-			fixedW += sepW
-			name = truncateMiddle(name, max(1, w-fixedW))
-			parts = append(parts, m.theme.symbolNameStyle.Render(name))
 		}
 	}
-	parts = append(parts, m.theme.infoStyle.Render(linePlain))
-	if len(cols) > 0 {
-		parts = append(parts, m.theme.infoStyle.Render("cols ")+coloredCols(cols))
+
+	lineW := lipgloss.Width(linePlain)
+	if name != "" && colsPlain != "" {
+		colsBudget := w - lineW - sepW - sepW - minSymbolHeaderWidth
+		colsPlain = truncateMiddle(colsPlain, max(1, colsBudget))
 	}
-	return fitANSIWidth(strings.Join(parts, m.theme.infoStyle.Render("  ·  ")), w)
+	fixedW := lineW
+	if colsPlain != "" {
+		fixedW += sepW + lipgloss.Width(colsPlain)
+	}
+
+	var parts []string
+	if name != "" {
+		name = truncateMiddle(name, max(1, w-fixedW-sepW))
+		parts = append(parts, m.theme.symbolNameStyle.Render(name))
+	}
+	parts = append(parts, m.theme.infoStyle.Render(linePlain))
+	if colsPlain != "" {
+		if colsPlain == origColsPlain {
+			parts = append(parts, m.theme.infoStyle.Render("cols ")+coloredCols(cols))
+		} else {
+			parts = append(parts, m.theme.infoStyle.Render(colsPlain))
+		}
+	}
+	return fitANSIWidth(strings.Join(parts, m.theme.infoStyle.Render(sep)), w)
 }
 
 func intsString(v []int) string {

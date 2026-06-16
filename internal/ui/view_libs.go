@@ -116,8 +116,9 @@ func (m *Model) renderLibs() string {
 	rowHeight := func(i int) int {
 		return m.libRowHeight(i)
 	}
-	top := visualTop(m.libsCur, m.libsTop, len(info.DynamicLibs), visible, rowHeight)
+	top := m.visualTopForView(m.libsCur, m.libsTop, len(info.DynamicLibs), visible, rowHeight)
 	m.libsTop = top
+	m.renderedLibsTop = top
 	for i := top; i < len(info.DynamicLibs); i++ {
 		line := m.libRow(i, i == m.libsCur)
 		for _, row := range renderLineRowsIndented(line, m.width, m.wrap, 6) {

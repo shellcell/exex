@@ -106,8 +106,9 @@ func (m *Model) renderSections() string {
 	rowHeight := func(i int) int {
 		return m.sectionRowHeight(i)
 	}
-	top := visualTop(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, rowHeight)
+	top := m.visualTopForView(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, rowHeight)
 	m.sectionsTop = top
+	m.renderedSectionsTop = top
 
 	rows := []string{filterRow, header}
 	for i := top; i < len(m.sectionsFiltered); i++ {

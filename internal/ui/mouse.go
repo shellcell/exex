@@ -16,13 +16,6 @@ import (
 // to count as a double-click.
 const doubleClickWindow = 350 * time.Millisecond
 
-// wheelFlushMsg is sent by a tea.Tick to flush accumulated scroll deltas.
-// Using a deferred flush instead of processing each wheel event immediately
-// prevents the render loop from falling behind during momentum scrolling,
-// and naturally discards stale events when the user switches views.
-type wheelFlushMsg struct{ epoch uint64 }
-
-const wheelFlushInterval = time.Second / 60
 const wheelQuietInterval = 120 * time.Millisecond
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -71,42 +64,15 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m *Model) enqueueWheel(delta int) (tea.Model, tea.Cmd) {
 	now := time.Now()
 	if now.Before(m.wheelSuppressUntil) {
-		m.resetWheelAccumulator()
 		m.wheelSuppressUntil = now.Add(wheelQuietInterval)
 		return m, nil
 	}
 
-	m.wheelDelta += delta
-	m.wheelModeSnap = m.mode
-	if !m.wheelFlushing {
-		m.wheelFlushing = true
-		epoch := m.wheelEpoch
-		return m, tea.Tick(wheelFlushInterval, func(t time.Time) tea.Msg {
-			return wheelFlushMsg{epoch: epoch}
-		})
+	if !m.viewportDetached {
+		m.captureViewportTop()
+		m.viewportDetached = true
 	}
-	return m, nil
-}
-
-// handleWheelFlush applies the accumulated scroll delta when the mode
-// hasn't changed since accumulation — if the user switched views, the
-// stale delta is discarded instead of scrolling the new view.
-func (m *Model) handleWheelFlush(msg wheelFlushMsg) tea.Cmd {
-	if msg.epoch != m.wheelEpoch {
-		return nil
-	}
-	m.wheelFlushing = false
-	if m.wheelDelta == 0 {
-		return nil
-	}
-	if m.mode != m.wheelModeSnap {
-		m.wheelDelta = 0
-		return nil
-	}
-	n := m.wheelDelta
-	m.wheelDelta = 0
-	_, cmd := m.routeScroll(n)
-	return cmd
+	return m.routeScroll(delta)
 }
 
 func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
@@ -115,26 +81,31 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 	}
 	switch m.mode {
 	case modeSections:
-		m.sectionsCur = scrollIndex(m.sectionsCur, len(m.sectionsFiltered), delta)
+		visible := max(1, m.bodyHeight()-2)
+		m.sectionsTop = scrollViewportTop(m.sectionsTop, len(m.sectionsFiltered), visible, delta, m.sectionRowHeight)
 	case modeSymbols:
-		m.symbolsCur = scrollIndex(m.symbolsCur, len(m.symbolsFiltered), delta)
+		visible := max(1, m.bodyHeight()-2)
+		m.symbolsTop = scrollViewportTop(m.symbolsTop, len(m.symbolsFiltered), visible, delta, m.symbolRowHeight)
 	case modeDisasm:
-		m.scrollDisasmBy(delta)
+		m.scrollDisasmViewport(delta)
 	case modeHex:
 		m.ensureHex()
-		m.hexCur = scrollBytes(m.hexCur, len(m.hexImg.Data), delta)
+		m.hexTop = scrollByteViewportTop(m.hexTop, len(m.hexImg.Data), max(1, m.bodyHeight()-1), delta)
 	case modeRaw:
 		m.ensureRaw()
-		m.rawCur = scrollBytes(m.rawCur, len(m.rawData), delta)
+		m.rawTop = scrollByteViewportTop(m.rawTop, len(m.rawData), max(1, m.bodyHeight()-1), delta)
 	case modeStrings:
 		m.ensureStrings()
-		m.stringsCur = scrollIndex(m.stringsCur, len(m.stringsList), delta)
+		visible := max(1, m.bodyHeight()-1)
+		m.stringsTop = scrollViewportTop(m.stringsTop, len(m.stringsList), visible, delta, m.stringRowHeight)
 	case modeSources:
 		m.ensureSources()
-		m.sourcesCur = scrollIndex(m.sourcesCur, len(m.sourcesFiltered), delta)
+		visible := max(1, m.bodyHeight()-1)
+		m.sourcesTop = scrollViewportTop(m.sourcesTop, len(m.sourcesFiltered), visible, delta, func(int) int { return 1 })
 	case modeLibs:
 		if m.file.Info != nil {
-			m.libsCur = scrollIndex(m.libsCur, len(m.file.Info.DynamicLibs), delta)
+			visible := max(1, m.bodyHeight()-m.libsHeaderRows())
+			m.libsTop = scrollViewportTop(m.libsTop, len(m.file.Info.DynamicLibs), visible, delta, m.libRowHeight)
 		}
 	case modeInfo:
 		if delta < 0 {
@@ -146,76 +117,123 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) scrollDisasmBy(delta int) {
-	if delta == 0 {
-		return
+func (m *Model) captureViewportTop() {
+	switch m.mode {
+	case modeSections:
+		visible := max(1, m.bodyHeight()-2)
+		m.sectionsTop = viewportTop(m.renderedSectionsTop, len(m.sectionsFiltered), visible, m.sectionRowHeight)
+	case modeSymbols:
+		visible := max(1, m.bodyHeight()-2)
+		m.symbolsTop = viewportTop(m.renderedSymbolsTop, len(m.symbolsFiltered), visible, m.symbolRowHeight)
+	case modeDisasm:
+		m.captureDisasmViewportTop()
+	case modeHex:
+		m.ensureHex()
+		visible := max(1, m.bodyHeight()-1)
+		m.hexTop = scrollByteViewportTop(m.renderedHexTop, len(m.hexImg.Data), visible, 0)
+	case modeRaw:
+		m.ensureRaw()
+		visible := max(1, m.bodyHeight()-1)
+		m.rawTop = scrollByteViewportTop(m.renderedRawTop, len(m.rawData), visible, 0)
+	case modeStrings:
+		m.ensureStrings()
+		visible := max(1, m.bodyHeight()-1)
+		m.stringsTop = viewportTop(m.renderedStringsTop, len(m.stringsList), visible, m.stringRowHeight)
+	case modeSources:
+		m.ensureSources()
+		visible := max(1, m.bodyHeight()-1)
+		m.sourcesTop = viewportTop(m.renderedSourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
+	case modeLibs:
+		if m.file.Info != nil {
+			visible := max(1, m.bodyHeight()-m.libsHeaderRows())
+			m.libsTop = viewportTop(m.renderedLibsTop, len(m.file.Info.DynamicLibs), visible, m.libRowHeight)
+		}
 	}
+}
+
+func (m *Model) captureDisasmViewportTop() {
 	if m.sourceFirst && m.srcFile != "" {
-		n := len(m.file.SourceLines(m.srcFile))
-		if n == 0 {
+		src := m.file.SourceLines(m.srcFile)
+		if len(src) == 0 {
 			return
 		}
-		next := scrollLine(m.srcCur, n, delta)
-		if next != m.srcCur {
-			m.srcCur = next
-			m.syncSourceAsm()
+		contentH := max(1, m.bodyHeight()-1)
+		paneW := m.sourcePaneWidth()
+		rowHeight := func(i int) int {
+			ln := i + 1
+			h := m.sourceLineHeight(ln, paneW)
+			if ln == m.srcCur && len(m.sourceLineColumns(m.srcFile, ln)) > 0 {
+				h++
+			}
+			return h
 		}
+		top := viewportTop(m.renderedSrcTop, len(src), contentH, rowHeight)
+		m.srcTop = top + 1
 		return
 	}
 	if len(m.disasmInst) == 0 {
 		return
 	}
-	target := m.disasmCur + delta
-	if target >= 0 && target < len(m.disasmInst) {
-		m.disasmCur = target
-		m.ensureDisasmViewport(m.disasmViewportHeight())
+	w := m.disasmRenderWidth()
+	visible := m.disasmViewportHeight()
+	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
+	m.disasmTop = viewportTop(m.renderedDisasmTop, len(m.disasmInst), visible, rowHeight)
+}
+
+func (m *Model) scrollDisasmViewport(delta int) {
+	if delta == 0 {
 		return
 	}
-	forward := delta > 0
-	steps := delta
-	if steps < 0 {
-		steps = -steps
-	}
-	for i := 0; i < steps; i++ {
-		if !m.stepDisasm(forward) {
+	if m.sourceFirst && m.srcFile != "" {
+		src := m.file.SourceLines(m.srcFile)
+		if len(src) == 0 {
 			return
 		}
+		contentH := max(1, m.bodyHeight()-1)
+		paneW := m.sourcePaneWidth()
+		rowHeight := func(i int) int {
+			ln := i + 1
+			h := m.sourceLineHeight(ln, paneW)
+			if ln == m.srcCur && len(m.sourceLineColumns(m.srcFile, ln)) > 0 {
+				h++
+			}
+			return h
+		}
+		top := scrollViewportTop(max(0, m.srcTop-1), len(src), contentH, delta, rowHeight)
+		m.srcTop = top + 1
+		return
 	}
+	if len(m.disasmInst) == 0 {
+		return
+	}
+	w := m.disasmRenderWidth()
+	visible := m.disasmViewportHeight()
+	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
+	m.disasmTop = scrollViewportTop(m.disasmTop, len(m.disasmInst), visible, delta, rowHeight)
 }
 
-func scrollIndex(cur, n, delta int) int {
+func scrollViewportTop(top, n, visible, delta int, rowHeight func(int) int) int {
 	if n <= 0 {
 		return 0
 	}
-	cur += delta
-	if cur < 0 {
-		return 0
-	}
-	if cur >= n {
-		return n - 1
-	}
-	return cur
+	return viewportTop(top+delta, n, visible, rowHeight)
 }
 
-func scrollLine(cur, n, delta int) int {
+func scrollByteViewportTop(top, n, visibleRows, delta int) int {
 	if n <= 0 {
 		return 0
 	}
-	cur += delta
-	if cur < 1 {
-		return 1
+	row := bytesPerHexRow
+	topRow := top/row + delta
+	maxRow := (n - 1) / row
+	maxTopRow := max(0, maxRow-visibleRows+1)
+	if topRow < 0 {
+		topRow = 0
 	}
-	if cur > n {
-		return n
+	if topRow > maxTopRow {
+		topRow = maxTopRow
 	}
-	return cur
-}
-
-func scrollBytes(cur, n, delta int) int {
-	if n <= 0 {
-		return 0
-	}
-	return scrollIndex(cur, n, delta*bytesPerHexRow)
+	return topRow * row
 }
 
 func (m *Model) handleSearchPopupClick(x, y int) {
@@ -268,34 +286,42 @@ func (m *Model) handleClick(x, y int) {
 	case modeSections:
 		// Body layout: row 0 filter, row 1 header, data follows.
 		visible := max(1, m.bodyHeight()-2)
-		top := visualTop(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, m.sectionRowHeight)
+		top := m.visualTopForView(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, m.sectionRowHeight)
 		if idx, ok := visualItemAtRow(top, len(m.sectionsFiltered), bodyRow-2, m.sectionRowHeight); ok {
 			m.sectionsCur = idx
 		}
 	case modeSymbols:
 		// Body layout: row 0 filter, row 1 header, data follows.
 		visible := max(1, m.bodyHeight()-2)
-		top := visualTop(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, m.symbolRowHeight)
+		top := m.visualTopForView(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, m.symbolRowHeight)
 		if idx, ok := visualItemAtRow(top, len(m.symbolsFiltered), bodyRow-2, m.symbolRowHeight); ok {
 			m.symbolsCur = idx
 		}
 	case modeHex:
 		m.ensureHex()
-		m.hexCur = m.clickByte(modeHex, m.hexImg.Data, hexVisibleTop(m.hexCur, m.hexTop, max(1, m.bodyHeight()-1)), m.hexCur, x, bodyRow, m.hexImg.AddrAt)
+		top := hexVisibleTop(m.hexCur, m.hexTop, max(1, m.bodyHeight()-1))
+		if m.viewportDetached {
+			top = scrollByteViewportTop(m.hexTop, len(m.hexImg.Data), max(1, m.bodyHeight()-1), 0)
+		}
+		m.hexCur = m.clickByte(modeHex, m.hexImg.Data, top, m.hexCur, x, bodyRow, m.hexImg.AddrAt)
 	case modeRaw:
 		m.ensureRaw()
-		m.rawCur = m.clickByte(modeRaw, m.rawData, hexVisibleTop(m.rawCur, m.rawTop, max(1, m.bodyHeight()-1)), m.rawCur, x, bodyRow, func(pos int) uint64 { return uint64(pos) })
+		top := hexVisibleTop(m.rawCur, m.rawTop, max(1, m.bodyHeight()-1))
+		if m.viewportDetached {
+			top = scrollByteViewportTop(m.rawTop, len(m.rawData), max(1, m.bodyHeight()-1), 0)
+		}
+		m.rawCur = m.clickByte(modeRaw, m.rawData, top, m.rawCur, x, bodyRow, func(pos int) uint64 { return uint64(pos) })
 	case modeStrings:
 		// Body layout: row 0 is the column header, data follows.
 		visible := max(1, m.bodyHeight()-1)
-		top := visualTop(m.stringsCur, m.stringsTop, len(m.stringsList), visible, m.stringRowHeight)
+		top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsList), visible, m.stringRowHeight)
 		if idx, ok := visualItemAtRow(top, len(m.stringsList), bodyRow-1, m.stringRowHeight); ok {
 			m.stringsCur = idx
 		}
 	case modeSources:
 		// File list only: row 0 is the filter, files follow.
 		visible := max(1, m.bodyHeight()-1)
-		top := visualTop(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
+		top := m.visualTopForView(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
 		if idx := top + bodyRow - 1; idx >= 0 && idx < len(m.sourcesFiltered) {
 			m.sourcesCur = idx
 		}
@@ -312,7 +338,7 @@ func (m *Model) handleClick(x, y int) {
 		headerRows := m.libsHeaderRows()
 		if m.file.Info != nil {
 			visible := max(1, m.bodyHeight()-headerRows)
-			top := visualTop(m.libsCur, m.libsTop, len(m.file.Info.DynamicLibs), visible, m.libRowHeight)
+			top := m.visualTopForView(m.libsCur, m.libsTop, len(m.file.Info.DynamicLibs), visible, m.libRowHeight)
 			if idx, ok := visualItemAtRow(top, len(m.file.Info.DynamicLibs), bodyRow-headerRows, m.libRowHeight); ok {
 				m.libsCur = idx
 			}
@@ -399,6 +425,6 @@ func (m *Model) instAtBodyRow(bodyRow int) (int, bool) {
 	rowHeight := func(i int) int {
 		return m.disasmInstVisualHeight(i, m.disasmRenderWidth())
 	}
-	top := visualTop(m.disasmCur, m.disasmTop, len(m.disasmInst), visible, rowHeight)
+	top := m.visualTopForView(m.disasmCur, m.disasmTop, len(m.disasmInst), visible, rowHeight)
 	return visualItemAtRow(top, len(m.disasmInst), r, rowHeight)
 }

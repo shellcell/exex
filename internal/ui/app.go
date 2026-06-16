@@ -64,8 +64,10 @@ func (m mode) String() string {
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	file *binfile.File
-	dis  disasm.Disassembler
+	file  *binfile.File
+	dis   disasm.Disassembler
+	cfg   config.Config
+	theme Theme
 
 	mode mode
 
@@ -199,20 +201,23 @@ type Model struct {
 	helpActive bool
 }
 
-func New(f *binfile.File) (*Model, error) {
+// Options contains application-owned dependencies and policy values used to
+// construct a UI model. Omitted options keep built-in defaults.
+type Options struct {
+	Config *config.Config
+}
+
+func New(f *binfile.File, opts ...Options) (*Model, error) {
 	d, err := disasm.For(f.Arch())
 	if err != nil {
 		// Don't fail — the user can still browse header/sections/symbols.
 		d = nil
 	}
 
-	// Load user config and overlay it before constructing styles/keymap.
-	// A missing config file is fine (zero Config); a malformed one surfaces.
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, err
+	var cfg config.Config
+	if len(opts) > 0 && opts[0].Config != nil {
+		cfg = *opts[0].Config
 	}
-	ApplyColors(cfg.Colors)
 	keys := defaultKeyMap()
 	keys.applyConfig(cfg.Keys)
 
@@ -274,6 +279,8 @@ func New(f *binfile.File) (*Model, error) {
 	m := &Model{
 		file:                f,
 		dis:                 d,
+		cfg:                 cfg,
+		theme:               NewTheme(cfg.Colors),
 		mode:                modeInfo,
 		disasmMaxBytes:      defaultDisasmMaxBytes,
 		disasmSearchWorkers: 0,
@@ -850,9 +857,9 @@ func (m *Model) View() string {
 func (m *Model) renderHelpModal() string {
 	const keyW = 16
 	row := func(keys, desc string) string {
-		return helpKeyStyle.Render(padVisual(keys, keyW)) + " " + helpDescStyle.Render(desc)
+		return m.theme.helpKeyStyle.Render(padVisual(keys, keyW)) + " " + m.theme.helpDescStyle.Render(desc)
 	}
-	head := func(s string) string { return helpHeadStyle.Render(s) }
+	head := func(s string) string { return m.theme.helpHeadStyle.Render(s) }
 
 	left := []string{
 		head("Global"),
@@ -918,9 +925,9 @@ func (m *Model) renderHelpModal() string {
 		return strings.Join(rows, "\n")
 	}
 	cols := lipgloss.JoinHorizontal(lipgloss.Top, col(left), "    ", col(right))
-	body := titleStyle.Render(" Keybindings ") + "\n\n" + cols +
-		"\n\n" + footerStyle.Render("Mouse: wheel scrolls · click selects · click tabs · double-click follows")
-	return modalStyle.Render(body)
+	body := m.theme.titleStyle.Render(" Keybindings ") + "\n\n" + cols +
+		"\n\n" + m.theme.footerStyle.Render("Mouse: wheel scrolls · click selects · click tabs · double-click follows")
+	return m.theme.modalStyle.Render(body)
 }
 
 // padVisual right-pads s to a display width of w columns (ANSI/width aware).
@@ -944,7 +951,7 @@ func (m *Model) renderGotoModal() string {
 	sb.WriteString(m.gotoInput.View())
 	sb.WriteString("\n")
 	if len(m.gotoResults) == 0 {
-		sb.WriteString("\n" + footerStyle.Render("type an address or symbol name") + "\n")
+		sb.WriteString("\n" + m.theme.footerStyle.Render("type an address or symbol name") + "\n")
 	} else {
 		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
@@ -961,7 +968,7 @@ func (m *Model) renderGotoModal() string {
 			line := fmt.Sprintf(" 0x%0*x  %s", addrW, t.addr, truncateMiddle(t.label, labelW))
 			line = padRight(line, rowW)
 			if i == m.gotoSel {
-				line = tableSelStyle.Render(line)
+				line = m.theme.tableSelStyle.Render(line)
 			}
 			sb.WriteString(line + "\n")
 		}
@@ -970,8 +977,8 @@ func (m *Model) renderGotoModal() string {
 	if n := len(m.gotoResults); n > 0 {
 		count = fmt.Sprintf("  (%d/%d)", m.gotoSel+1, n)
 	}
-	sb.WriteString("\n" + footerStyle.Render("↑/↓ select · Enter jump · Esc cancel"+count))
-	return modalStyle.Render(sb.String())
+	sb.WriteString("\n" + m.theme.footerStyle.Render("↑/↓ select · Enter jump · Esc cancel"+count))
+	return m.theme.modalStyle.Render(sb.String())
 }
 
 func (m *Model) renderSearchModal() string {
@@ -992,12 +999,12 @@ func (m *Model) renderSearchModal() string {
 	// with handleSearchPopupClick via searchSwitches().
 	var segs []string
 	for _, sw := range m.searchSwitches() {
-		segs = append(segs, switchStyle.Render(sw.label))
+		segs = append(segs, m.theme.switchStyle.Render(sw.label))
 	}
 	switches := strings.Join(segs, searchSwitchSep)
 	body := hint + "\n\n" + m.searchInput.View() + "\n\n" + switches + "\n" +
-		footerStyle.Render("click a switch · Ctrl+M mode · Ctrl+R direction · Ctrl+O origin · Enter find · Esc cancel")
-	return modalStyle.Render(body)
+		m.theme.footerStyle.Render("click a switch · Ctrl+M mode · Ctrl+R direction · Ctrl+O origin · Enter find · Esc cancel")
+	return m.theme.modalStyle.Render(body)
 }
 
 // tabItems is the ordered tab strip, shared by renderTabs (drawing) and
@@ -1019,9 +1026,9 @@ var tabItems = []struct {
 
 func (m *Model) tabSegment(label string, active bool) string {
 	if active {
-		return activeTabStyle.Render(label)
+		return m.theme.activeTabStyle.Render(label)
 	}
-	return tabStyle.Render(label)
+	return m.theme.tabStyle.Render(label)
 }
 
 // tabLead is the non-clickable prefix of the tab row: the tool name and a chip
@@ -1029,8 +1036,8 @@ func (m *Model) tabSegment(label string, active bool) string {
 // ELF-only). Shared by renderTabs and tabHitTest so their geometry matches.
 func (m *Model) tabLead() []string {
 	return []string{
-		titleStyle.Render(" exex "),
-		tabStyle.Render(string(m.file.Format)),
+		m.theme.titleStyle.Render(" exex "),
+		m.theme.tabStyle.Render(string(m.file.Format)),
 	}
 }
 
@@ -1130,12 +1137,12 @@ func (m *Model) renderFooter() string {
 	case modeLibs:
 		help = "↑/↓ move · ? help · q quit"
 	}
-	left := footerStyle.Render(help)
+	left := m.theme.footerStyle.Render(help)
 	right := ""
 	if m.status != "" {
-		st := infoStyle
+		st := m.theme.infoStyle
 		if m.statusError {
-			st = errorStyle
+			st = m.theme.errorStyle
 		}
 		right = st.Render(m.status)
 	}

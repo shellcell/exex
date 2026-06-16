@@ -341,7 +341,7 @@ func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt
 	}
 	top := hexVisibleTop(cur, *topPtr, visible)
 
-	rows := []string{stickySymStyle.Render(padRight(banner, m.width))}
+	rows := []string{m.theme.stickySymStyle.Render(padRight(banner, m.width))}
 	end := top + visible*row
 	if end > len(data) {
 		end = len(data)
@@ -357,7 +357,7 @@ func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt
 	for off := top; off < end; off += row {
 		sec := m.hexSectionName(md, off, addrAt)
 		if sec != "" && sec != prevSec {
-			appendRenderedRows(&rows, footerStyle.Render("── "+sec+" ──"), m.width, m.wrap, bodyH)
+			appendRenderedRows(&rows, m.theme.footerStyle.Render("── "+sec+" ──"), m.width, m.wrap, bodyH)
 		}
 		prevSec = sec
 		if !appendRenderedRowsIndented(&rows, m.renderHexRow(md, data, cur, off, addrW, addrAt), m.width, m.wrap, addrW+75, bodyH) {
@@ -423,28 +423,28 @@ func (m *Model) renderHexRow(md mode, data []byte, cur, off, addrW int, addrAt f
 			ascii = b
 		}
 		if i == cur {
-			hexCol.WriteString(tableSelStyle.Render(hex2(b)))
-			asciiCol.WriteString(tableSelStyle.Render(string(ascii)))
+			hexCol.WriteString(m.theme.tableSelStyle.Render(hex2(b)))
+			asciiCol.WriteString(m.theme.tableSelStyle.Render(string(ascii)))
 		} else {
 			hexCol.WriteString(byteHex[b])
 			asciiCol.WriteString(byteFG[b].Render(string(ascii)))
 		}
 	}
 	line := fmt.Sprintf(" %s  %s  %s",
-		addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, addr)),
+		m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, addr)),
 		hexCol.String(),
 		"|"+asciiCol.String()+"|",
 	)
 	if sym, ok := m.file.SymbolAt(addr); ok && sym.Addr == addr {
-		line += "  " + addrStyle.Render(sym.Display())
+		line += "  " + m.theme.addrStyle.Render(sym.Display())
 	} else if sec := m.file.SectionAt(addr); sec != nil && sec.Addr == addr {
-		line += "  " + addrStyle.Render(sec.Name)
+		line += "  " + m.theme.addrStyle.Render(sec.Name)
 	} else if md == modeRaw {
 		if sec := m.sectionAtOffset(uint64(off)); sec != nil {
-			line += "  " + addrStyle.Render(sec.Name)
+			line += "  " + m.theme.addrStyle.Render(sec.Name)
 		}
 	} else if sec := m.sectionAtOffset(addr); sec != nil && sec.Offset == addr {
-		line += "  " + addrStyle.Render(sec.Name)
+		line += "  " + m.theme.addrStyle.Render(sec.Name)
 	}
 	return line
 }

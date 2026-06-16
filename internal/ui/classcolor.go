@@ -10,45 +10,45 @@ import (
 // styleForClass picks the rendering style for an instruction's class. The
 // default (Other) falls through to the mnemonic colour so most instructions
 // look uniform and the interesting ones jump out.
-func styleForClass(c disasm.InstClass) lipgloss.Style {
+func (t Theme) styleForClass(c disasm.InstClass) lipgloss.Style {
 	switch c {
 	case disasm.ClassCall:
-		return classCallStyle
+		return t.classCallStyle
 	case disasm.ClassRet:
-		return classRetStyle
+		return t.classRetStyle
 	case disasm.ClassJumpUnc:
-		return classJumpUncStyle
+		return t.classJumpUncStyle
 	case disasm.ClassJumpCond:
-		return classJumpCndStyle
+		return t.classJumpCndStyle
 	case disasm.ClassSyscall:
-		return classSyscallStyle
+		return t.classSyscallStyle
 	case disasm.ClassNop:
-		return classNopStyle
+		return t.classNopStyle
 	}
-	return mnemonicStyle
+	return t.mnemonicStyle
 }
 
 // styleForSymbol picks the row colour for a symbol based on its neutral kind.
 // Bind (LOCAL/GLOBAL/WEAK) is folded in: globals are bold, weaks are italic,
 // locals stay plain — so the same colour family stays consistent for the kind
 // while letting the eye spot scope at a glance.
-func styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Style {
+func (t Theme) styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Style {
 	var base lipgloss.Style
 	switch k {
 	case binfile.SymFunc:
-		base = symFuncStyle
+		base = t.symFuncStyle
 	case binfile.SymObject:
-		base = symObjectStyle
+		base = t.symObjectStyle
 	case binfile.SymFile:
-		base = symFileStyle
+		base = t.symFileStyle
 	case binfile.SymSection:
-		base = symSectionStyle
+		base = t.symSectionStyle
 	case binfile.SymTLS:
-		base = symTLSStyle
+		base = t.symTLSStyle
 	case binfile.SymCommon:
-		base = symCommonStyle
+		base = t.symCommonStyle
 	default:
-		base = symOtherStyle
+		base = t.symOtherStyle
 	}
 	switch b {
 	case binfile.BindGlobal:
@@ -60,31 +60,31 @@ func styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Style {
 }
 
 // styleForSection picks the row colour for a section based on its category.
-func styleForSection(s *binfile.Section) lipgloss.Style {
+func (t Theme) styleForSection(s *binfile.Section) lipgloss.Style {
 	if s == nil {
-		return tableRowStyle
+		return t.tableRowStyle
 	}
 	switch s.Category {
 	case binfile.CatDebug:
-		return secDebugStyle
+		return t.secDebugStyle
 	case binfile.CatNote:
-		return secNoteStyle
+		return t.secNoteStyle
 	case binfile.CatSymtab:
-		return secSymtabStyle
+		return t.secSymtabStyle
 	case binfile.CatDynamic:
-		return secDynamicStyle
+		return t.secDynamicStyle
 	case binfile.CatReloc:
-		return secRelocStyle
+		return t.secRelocStyle
 	case binfile.CatText:
-		return secTextStyle
+		return t.secTextStyle
 	case binfile.CatTLS:
-		return secTLSStyle
+		return t.secTLSStyle
 	case binfile.CatData, binfile.CatBSS:
-		return secDataStyle
+		return t.secDataStyle
 	case binfile.CatRodata:
-		return secRodataStyle
+		return t.secRodataStyle
 	}
-	return tableRowStyle
+	return t.tableRowStyle
 }
 
 // kindString / bindString render neutral symbol kinds and bindings for the

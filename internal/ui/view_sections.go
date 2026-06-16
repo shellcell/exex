@@ -87,7 +87,7 @@ func (m *Model) renderSections() string {
 
 	filterRow := m.sectionsFilter.View()
 	if !m.sectionsFilter.Focused() {
-		filterRow = footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)",
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)",
 			m.sectionsFilter.Value(), len(m.sectionsFiltered), len(m.sections)))
 	}
 
@@ -96,7 +96,7 @@ func (m *Model) renderSections() string {
 	addrCol := 2 + addrW           // "0x" + digits
 	hdr := fmt.Sprintf(" %3s  %-22s %-14s %-*s %-12s  %s",
 		"#", "Name", "Type", addrCol, "Addr", "Size", "Flags")
-	header := tableHeaderStyle.Render(padRight(hdr, m.width))
+	header := m.theme.tableHeaderStyle.Render(padRight(hdr, m.width))
 
 	visible := bodyH - 2 // filter row + header
 	if visible < 1 {
@@ -134,9 +134,9 @@ func (m *Model) sectionRow(i, addrW int, selected bool) string {
 		typeName = truncate(typeName, 14)
 	}
 	line := fmt.Sprintf(" %s  %-22s %-14s %s %-12d  %s",
-		addrStyle.Render(fmt.Sprintf("%3d", idx)), name, typeName, addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)), s.Size, s.Flags)
+		m.theme.addrStyle.Render(fmt.Sprintf("%3d", idx)), name, typeName, m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)), s.Size, s.Flags)
 	if selected {
-		return tableSelStyle.Render(stripANSI(line))
+		return m.theme.tableSelStyle.Render(stripANSI(line))
 	}
-	return styleForSection(&s).Render(line)
+	return m.theme.styleForSection(&s).Render(line)
 }

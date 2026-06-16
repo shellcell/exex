@@ -26,11 +26,11 @@ import (
 func (m *Model) srcGutter(ln, curLine int, mapped map[int]bool, digits int) string {
 	switch {
 	case ln == curLine:
-		return srcCurLineStyle.Render(fmt.Sprintf("%*d ▸ ", digits, ln))
+		return m.theme.srcCurLineStyle.Render(fmt.Sprintf("%*d ▸ ", digits, ln))
 	case mapped[ln]:
-		return whiteStyle.Render(fmt.Sprintf("%*d · ", digits, ln))
+		return m.theme.whiteStyle.Render(fmt.Sprintf("%*d · ", digits, ln))
 	default:
-		return srcShadowStyle.Render(fmt.Sprintf("%*d   ", digits, ln))
+		return m.theme.srcShadowStyle.Render(fmt.Sprintf("%*d   ", digits, ln))
 	}
 }
 
@@ -43,14 +43,14 @@ func (m *Model) addrMapStyle(addr uint64, curFile string, curLine int) lipgloss.
 	f, l, c := m.file.LookupAddrCol(addr)
 	switch {
 	case f == "" || l == 0:
-		return srcShadowStyle
+		return m.theme.srcShadowStyle
 	case curFile != "" && f == curFile && l == curLine:
 		if cc, ok := columnColor(m.file.LineColumns(curFile, curLine), c); ok {
 			return lipgloss.NewStyle().Foreground(cc).Bold(true)
 		}
-		return srcMappedStyle
+		return m.theme.srcMappedStyle
 	default:
-		return whiteStyle
+		return m.theme.whiteStyle
 	}
 }
 

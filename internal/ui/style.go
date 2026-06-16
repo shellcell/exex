@@ -6,198 +6,223 @@ import (
 	"github.com/rabarbra/exex/internal/config"
 )
 
-var (
-	titleStyle = lipgloss.NewStyle().
+// Theme contains all Lip Gloss styles used by a Model.
+type Theme struct {
+	titleStyle       lipgloss.Style
+	tabStyle         lipgloss.Style
+	activeTabStyle   lipgloss.Style
+	footerStyle      lipgloss.Style
+	headerKey        lipgloss.Style
+	tableHeaderStyle lipgloss.Style
+	tableRowStyle    lipgloss.Style
+	tableSelStyle    lipgloss.Style
+
+	addrStyle       lipgloss.Style
+	mnemonicStyle   lipgloss.Style
+	symbolNameStyle lipgloss.Style
+
+	whiteStyle      lipgloss.Style
+	srcCurLineStyle lipgloss.Style
+	srcShadowStyle  lipgloss.Style
+	srcMappedStyle  lipgloss.Style
+
+	modalStyle  lipgloss.Style
+	switchStyle lipgloss.Style
+
+	helpKeyStyle  lipgloss.Style
+	helpDescStyle lipgloss.Style
+	helpHeadStyle lipgloss.Style
+
+	errorStyle lipgloss.Style
+	infoStyle  lipgloss.Style
+
+	classCallStyle    lipgloss.Style
+	classRetStyle     lipgloss.Style
+	classJumpUncStyle lipgloss.Style
+	classJumpCndStyle lipgloss.Style
+	classSyscallStyle lipgloss.Style
+	classNopStyle     lipgloss.Style
+
+	stickySymStyle     lipgloss.Style
+	linkAddrIntraStyle lipgloss.Style
+	linkAddrInterStyle lipgloss.Style
+
+	symFuncStyle    lipgloss.Style
+	symObjectStyle  lipgloss.Style
+	symFileStyle    lipgloss.Style
+	symSectionStyle lipgloss.Style
+	symTLSStyle     lipgloss.Style
+	symCommonStyle  lipgloss.Style
+	symOtherStyle   lipgloss.Style
+
+	secTextStyle    lipgloss.Style
+	secDataStyle    lipgloss.Style
+	secRodataStyle  lipgloss.Style
+	secTLSStyle     lipgloss.Style
+	secDebugStyle   lipgloss.Style
+	secNoteStyle    lipgloss.Style
+	secSymtabStyle  lipgloss.Style
+	secDynamicStyle lipgloss.Style
+	secRelocStyle   lipgloss.Style
+}
+
+func NewTheme(c config.Colors) Theme {
+	t := DefaultTheme()
+	t.ApplyColors(c)
+	return t
+}
+
+func DefaultTheme() Theme {
+	tabStyle := lipgloss.NewStyle().
+		Padding(0, 1).
+		Foreground(lipgloss.Color("245"))
+
+	return Theme{
+		titleStyle: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("66")).
-			Padding(0, 1)
-
-	tabStyle = lipgloss.NewStyle().
-			Padding(0, 1).
-			Foreground(lipgloss.Color("245"))
-
-	activeTabStyle = tabStyle.
+			Padding(0, 1),
+		tabStyle: tabStyle,
+		activeTabStyle: tabStyle.
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("63")).
-			Bold(true)
-
-	footerStyle = lipgloss.NewStyle().
+			Bold(true),
+		footerStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245")).
-			Padding(0, 1)
-
-	headerKey = lipgloss.NewStyle().
+			Padding(0, 1),
+		headerKey: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("75")).
-			Bold(true)
-
-	tableHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("231")).
-				Background(lipgloss.Color("236"))
-
-	tableRowStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
-	tableSelStyle = lipgloss.NewStyle().
+			Bold(true),
+		tableHeaderStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("231")).
+			Background(lipgloss.Color("236")),
+		tableRowStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")),
+		tableSelStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("63")).
-			Bold(true)
-
-	// Address columns are intentionally low-contrast (grey) so the symbol
-	// labels and instruction text read as the foreground.
-	addrStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
-
-	mnemonicStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("117"))
-
-	symbolNameStyle = lipgloss.NewStyle().
+			Bold(true),
+		addrStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")),
+		mnemonicStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("117")),
+		symbolNameStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("214")).
-			Bold(true)
-
-	// whiteStyle is plain bright white, used for addresses / line numbers that
-	// carry a source↔code mapping in the split panes.
-	whiteStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("231"))
-
-	// srcCurLineStyle highlights the current (caret) source line's number gutter.
-	srcCurLineStyle = lipgloss.NewStyle().
+			Bold(true),
+		whiteStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("231")),
+		srcCurLineStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("63")).
-			Bold(true)
-
-	// srcShadowStyle dims source lines that have no machine code mapped to them.
-	srcShadowStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
-
-	// srcMappedStyle highlights, in the source view's asm pane, the
-	// instructions that map to the currently selected source line.
-	srcMappedStyle = lipgloss.NewStyle().
+			Bold(true),
+		srcShadowStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")),
+		srcMappedStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("231")).
-			Background(lipgloss.Color("23"))
-
-	modalStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("23")),
+		modalStyle: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("63")).
-			Padding(1, 2)
-
-	// switchStyle renders the clickable toggles in the search popup as buttons.
-	switchStyle = lipgloss.NewStyle().
+			Padding(1, 2),
+		switchStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("238")).
-			Bold(true)
+			Bold(true),
+		helpKeyStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true),
+		helpDescStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
+		helpHeadStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true),
+		errorStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("203")),
+		infoStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("114")),
 
-	// Help overlay: a bright key column, a readable description, and section
-	// headings.
-	helpKeyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	helpDescStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	helpHeadStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
+		// Instruction class palette — picked so calls/rets/syscalls pop out of a
+		// page of "Other" instructions.
+		classCallStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
+		classRetStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
+		classJumpUncStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("220")),
+		classJumpCndStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("213")),
+		classSyscallStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("84")).Bold(true),
+		classNopStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("203"))
-
-	infoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("114"))
-
-	// Instruction class palette — picked so calls/rets/syscalls pop out of a
-	// page of "Other" instructions.
-	classCallStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)  // bright blue
-	classRetStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true) // red
-	classJumpUncStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))            // yellow
-	classJumpCndStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("213"))            // magenta
-	classSyscallStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("84")).Bold(true)  // green
-	classNopStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // dim grey
-
-	// Sticky "current symbol" banner above the disasm scroller.
-	stickySymStyle = lipgloss.NewStyle().
+		stickySymStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("236")).
 			Bold(true).
-			Italic(true)
+			Italic(true),
+		linkAddrIntraStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("85")).
+			Underline(true).
+			Bold(true),
+		linkAddrInterStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("51")).
+			Underline(true).
+			Bold(true),
 
-	// linkAddrIntraStyle marks address literals that resolve to somewhere
-	// inside the *same* function/symbol as the current instruction — local
-	// branches, loop heads, fall-through targets.
-	linkAddrIntraStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("85")). // mint green
-				Underline(true).
-				Bold(true)
+		symFuncStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("84")),
+		symObjectStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("75")),
+		symFileStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		symSectionStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("213")),
+		symTLSStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("177")),
+		symCommonStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("215")),
+		symOtherStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
 
-	// linkAddrInterStyle marks address literals that resolve to a *different*
-	// symbol inside this binary — calls into other functions, jumps to PLT
-	// stubs, etc.
-	linkAddrInterStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("51")). // cyan
-				Underline(true).
-				Bold(true)
+		secTextStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("84")),
+		secDataStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("75")),
+		secRodataStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("117")),
+		secTLSStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("177")),
+		secDebugStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		secNoteStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		secSymtabStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("213")),
+		secDynamicStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("141")),
+		secRelocStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("173")),
+	}
+}
 
-	// Symbol-type row colours — consumed by styleForSymbol.
-	symFuncStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("84"))
-	symObjectStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
-	symFileStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	symSectionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("213"))
-	symTLSStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("177"))
-	symCommonStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("215"))
-	symOtherStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-
-	// Section-type row colours — consumed by styleForSection.
-	secTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("84"))
-	secDataStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
-	secRodataStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
-	secTLSStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("177"))
-	secDebugStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	secNoteStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	secSymtabStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("213"))
-	secDynamicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("141"))
-	secRelocStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("173"))
-)
-
-// ApplyColors overlays the user's config.Colors onto the package's built-in
-// palette. Each non-empty field overrides the corresponding compiled-in style,
-// and empty fields keep their defaults. Re-call to re-skin at runtime.
-func ApplyColors(c config.Colors) {
+// ApplyColors overlays the user's config.Colors onto the built-in palette.
+func (t *Theme) ApplyColors(c config.Colors) {
 	setFg := func(s *lipgloss.Style, color string) {
 		if color != "" {
 			*s = s.Foreground(lipgloss.Color(color))
 		}
 	}
 	// Disasm: instruction-class mnemonic colours.
-	setFg(&classCallStyle, c.InstructionCall)
-	setFg(&classRetStyle, c.InstructionRet)
-	setFg(&classJumpUncStyle, c.InstructionJumpUnconditional)
-	setFg(&classJumpCndStyle, c.InstructionJumpConditional)
-	setFg(&classSyscallStyle, c.InstructionSyscall)
-	setFg(&classNopStyle, c.InstructionNop)
-	setFg(&mnemonicStyle, c.InstructionMnemonicDefault)
+	setFg(&t.classCallStyle, c.InstructionCall)
+	setFg(&t.classRetStyle, c.InstructionRet)
+	setFg(&t.classJumpUncStyle, c.InstructionJumpUnconditional)
+	setFg(&t.classJumpCndStyle, c.InstructionJumpConditional)
+	setFg(&t.classSyscallStyle, c.InstructionSyscall)
+	setFg(&t.classNopStyle, c.InstructionNop)
+	setFg(&t.mnemonicStyle, c.InstructionMnemonicDefault)
 	// Disasm: address + operand-link colours.
-	setFg(&addrStyle, c.AddressColumn)
-	setFg(&linkAddrIntraStyle, c.AddressLinkIntraFunction)
-	setFg(&linkAddrInterStyle, c.AddressLinkInterFunction)
+	setFg(&t.addrStyle, c.AddressColumn)
+	setFg(&t.linkAddrIntraStyle, c.AddressLinkIntraFunction)
+	setFg(&t.linkAddrInterStyle, c.AddressLinkInterFunction)
 	// Disasm: sticky symbol banner (fg + bg).
 	if c.StickySymbolBannerFG != "" {
-		stickySymStyle = stickySymStyle.Foreground(lipgloss.Color(c.StickySymbolBannerFG))
+		t.stickySymStyle = t.stickySymStyle.Foreground(lipgloss.Color(c.StickySymbolBannerFG))
 	}
 	if c.StickySymbolBannerBG != "" {
-		stickySymStyle = stickySymStyle.Background(lipgloss.Color(c.StickySymbolBannerBG))
+		t.stickySymStyle = t.stickySymStyle.Background(lipgloss.Color(c.StickySymbolBannerBG))
 	}
 	// Symbol-table row colours.
-	setFg(&symFuncStyle, c.SymbolFunction)
-	setFg(&symObjectStyle, c.SymbolDataObject)
-	setFg(&symFileStyle, c.SymbolSourceFile)
-	setFg(&symSectionStyle, c.SymbolSection)
-	setFg(&symTLSStyle, c.SymbolTLS)
-	setFg(&symCommonStyle, c.SymbolCommon)
-	setFg(&symOtherStyle, c.SymbolOther)
+	setFg(&t.symFuncStyle, c.SymbolFunction)
+	setFg(&t.symObjectStyle, c.SymbolDataObject)
+	setFg(&t.symFileStyle, c.SymbolSourceFile)
+	setFg(&t.symSectionStyle, c.SymbolSection)
+	setFg(&t.symTLSStyle, c.SymbolTLS)
+	setFg(&t.symCommonStyle, c.SymbolCommon)
+	setFg(&t.symOtherStyle, c.SymbolOther)
 	// Section-table row colours.
-	setFg(&secTextStyle, c.SectionExecutableCode)
-	setFg(&secDataStyle, c.SectionWritableData)
-	setFg(&secRodataStyle, c.SectionReadonlyData)
-	setFg(&secTLSStyle, c.SectionTLS)
-	setFg(&secDebugStyle, c.SectionDebugInfo)
-	setFg(&secNoteStyle, c.SectionNote)
-	setFg(&secSymtabStyle, c.SectionSymbolTable)
-	setFg(&secDynamicStyle, c.SectionDynamicLinking)
-	setFg(&secRelocStyle, c.SectionRelocations)
+	setFg(&t.secTextStyle, c.SectionExecutableCode)
+	setFg(&t.secDataStyle, c.SectionWritableData)
+	setFg(&t.secRodataStyle, c.SectionReadonlyData)
+	setFg(&t.secTLSStyle, c.SectionTLS)
+	setFg(&t.secDebugStyle, c.SectionDebugInfo)
+	setFg(&t.secNoteStyle, c.SectionNote)
+	setFg(&t.secSymtabStyle, c.SectionSymbolTable)
+	setFg(&t.secDynamicStyle, c.SectionDynamicLinking)
+	setFg(&t.secRelocStyle, c.SectionRelocations)
 }
 
 // byteHex holds the pre-rendered "ff"-style hex string with ANSI colour

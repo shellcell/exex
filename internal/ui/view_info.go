@@ -36,7 +36,7 @@ func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 func (m *Model) renderInfo() string {
 	var b strings.Builder
 	kv := func(k, v string) {
-		b.WriteString(headerKey.Render(padKey(k, 16)))
+		b.WriteString(m.theme.headerKey.Render(padKey(k, 16)))
 		b.WriteString(" ")
 		b.WriteString(v)
 		b.WriteString("\n")
@@ -120,7 +120,7 @@ func (m *Model) renderInfo() string {
 				val += " " + info.Libc.Version
 			}
 			if info.Libc.Source != "" {
-				val += "  " + footerStyle.Render("("+info.Libc.Source+")")
+				val += "  " + m.theme.footerStyle.Render("("+info.Libc.Source+")")
 			}
 			kv("Libc:", val)
 		}
@@ -173,10 +173,10 @@ func (m *Model) entryValue() string {
 		if off := entry - sym.Addr; off != 0 {
 			name = fmt.Sprintf("%s+0x%x", name, off)
 		}
-		val += "  " + symbolNameStyle.Render(name)
+		val += "  " + m.theme.symbolNameStyle.Render(name)
 	}
 	if m.dis != nil && entry != 0 {
-		val += "  " + footerStyle.Render("↵ disassemble")
+		val += "  " + m.theme.footerStyle.Render("↵ disassemble")
 	}
 	return val
 }

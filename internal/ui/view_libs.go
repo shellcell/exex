@@ -79,7 +79,7 @@ func (m *Model) openLibAsPrimary(lib string) (tea.Model, tea.Cmd) {
 		m.setStatus("open library: "+err.Error(), true)
 		return m, nil
 	}
-	nm, err := New(f)
+	nm, err := New(f, Options{Config: &m.cfg})
 	if err != nil {
 		m.setStatus("open library: "+err.Error(), true)
 		return m, nil
@@ -94,9 +94,9 @@ func (m *Model) renderLibs() string {
 	if info == nil || len(info.DynamicLibs) == 0 {
 		body := "no dynamic libraries — this binary is statically linked or has no DT_NEEDED entries\n"
 		if info != nil && info.StaticLinked {
-			body += "\n" + headerKey.Render("Static-linked:") + " yes\n"
+			body += "\n" + m.theme.headerKey.Render("Static-linked:") + " yes\n"
 			if info.Libc.Kind != "" && info.Libc.Kind != "none" {
-				body += headerKey.Render("Libc:") + " " + info.Libc.Kind
+				body += m.theme.headerKey.Render("Libc:") + " " + info.Libc.Kind
 				if info.Libc.Version != "" {
 					body += " " + info.Libc.Version
 				}
@@ -134,7 +134,7 @@ func (m *Model) renderLibsHeader() string {
 	info := m.file.Info
 	var b strings.Builder
 	if info.Interp != "" {
-		b.WriteString(headerKey.Render("Interpreter: "))
+		b.WriteString(m.theme.headerKey.Render("Interpreter: "))
 		b.WriteString(info.Interp + "\n")
 	}
 	if info.Libc.Kind != "" {
@@ -143,21 +143,21 @@ func (m *Model) renderLibsHeader() string {
 			libcLine += " " + info.Libc.Version
 		}
 		if info.Libc.Source != "" {
-			libcLine += "  " + footerStyle.Render("("+info.Libc.Source+")")
+			libcLine += "  " + m.theme.footerStyle.Render("("+info.Libc.Source+")")
 		}
-		b.WriteString(headerKey.Render("Libc:        "))
+		b.WriteString(m.theme.headerKey.Render("Libc:        "))
 		b.WriteString(libcLine + "\n")
 	}
 	if len(info.RPath) > 0 {
-		b.WriteString(headerKey.Render("RPATH:       "))
+		b.WriteString(m.theme.headerKey.Render("RPATH:       "))
 		b.WriteString(strings.Join(info.RPath, ":") + "\n")
 	}
 	if len(info.RunPath) > 0 {
-		b.WriteString(headerKey.Render("RUNPATH:     "))
+		b.WriteString(m.theme.headerKey.Render("RUNPATH:     "))
 		b.WriteString(strings.Join(info.RunPath, ":") + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(tableHeaderStyle.Render(padRight(fmt.Sprintf(" %3s  %s", "#", "Needed library"), m.width)))
+	b.WriteString(m.theme.tableHeaderStyle.Render(padRight(fmt.Sprintf(" %3s  %s", "#", "Needed library"), m.width)))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -178,9 +178,9 @@ func (m *Model) libRowHeight(i int) int {
 
 func (m *Model) libRow(i int, selected bool) string {
 	lib := m.file.Info.DynamicLibs[i]
-	line := fmt.Sprintf(" %s  %s", addrStyle.Render(fmt.Sprintf("%3d", i)), colorPathByPrefix(lib, lib))
+	line := fmt.Sprintf(" %s  %s", m.theme.addrStyle.Render(fmt.Sprintf("%3d", i)), colorPathByPrefix(lib, lib))
 	if selected {
-		return tableSelStyle.Render(stripANSI(line))
+		return m.theme.tableSelStyle.Render(stripANSI(line))
 	}
-	return symbolNameStyle.Render(line)
+	return m.theme.symbolNameStyle.Render(line)
 }

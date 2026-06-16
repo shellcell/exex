@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/ui"
 )
 
@@ -26,7 +27,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	m, err := ui.New(f)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+
+	m, err := ui.New(f, ui.Options{Config: cfg})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
 		os.Exit(1)

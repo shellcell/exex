@@ -20,7 +20,7 @@ import (
 // " (.section)" so the reader sees where control is going without leaving
 // the disasm view.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
-	classSt := styleForClass(class)
+	classSt := m.theme.styleForClass(class)
 	// Determine the symbol that contains the instruction we're rendering.
 	curSym, hasCur := m.file.SymbolAt(instAddr)
 
@@ -39,9 +39,9 @@ func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uin
 		}
 		// Pick intra vs inter colour.
 		isIntra := hasCur && curSym.Size > 0 && addr >= curSym.Addr && addr < curSym.Addr+curSym.Size
-		linkSt := linkAddrInterStyle
+		linkSt := m.theme.linkAddrInterStyle
 		if isIntra {
-			linkSt = linkAddrIntraStyle
+			linkSt = m.theme.linkAddrIntraStyle
 		}
 		b.WriteString(classSt.Render(text[from:start]))
 		b.WriteString(linkSt.Render(text[start:end]))
@@ -170,7 +170,7 @@ func (m *Model) renderStickySymbol(w int) string {
 	} else {
 		text = fmt.Sprintf(" (no symbol)   @  0x%0*x", m.file.AddrHexWidth(), addr)
 	}
-	return stickySymStyle.Render(padRight(text, w))
+	return m.theme.stickySymStyle.Render(padRight(text, w))
 }
 
 func (m *Model) renderDisasmScroll(w, h int) string {
@@ -266,7 +266,7 @@ func (m *Model) disasmAnnotationColumn(w int) int {
 func (m *Model) disasmLabelRows(name string, w int) []string {
 	label := "<" + name + ">:"
 	if !m.wrap {
-		return []string{padRight(" "+symbolNameStyle.Render(truncateANSI(label, max(1, w-1))), w)}
+		return []string{padRight(" "+m.theme.symbolNameStyle.Render(truncateANSI(label, max(1, w-1))), w)}
 	}
 	parts := strings.Split(strings.TrimRight(ansi.Wrap(label, max(1, w-1), " \t/.-_:$@<>"), "\n"), "\n")
 	if len(parts) == 0 {
@@ -274,14 +274,14 @@ func (m *Model) disasmLabelRows(name string, w int) []string {
 	}
 	rows := make([]string, 0, len(parts))
 	for _, part := range parts {
-		rows = append(rows, padRight(" "+symbolNameStyle.Render(part), w))
+		rows = append(rows, padRight(" "+m.theme.symbolNameStyle.Render(part), w))
 	}
 	return rows
 }
 
 func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {
 	addrText := fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), inst.Addr)
-	addrCol := addrStyle.Render(addrText)
+	addrCol := m.theme.addrStyle.Render(addrText)
 	if targetStyle != nil {
 		addrCol = targetStyle.Render(addrText)
 	}
@@ -302,7 +302,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	// Highlight only the assembly (prefix + code) of the selected line; the gap,
 	// the annotation, and any continuation rows stay uncoloured.
 	if selected {
-		asmRow = tableSelStyle.Render(stripANSI(asmRow))
+		asmRow = m.theme.tableSelStyle.Render(stripANSI(asmRow))
 	}
 
 	if note == "" {
@@ -312,7 +312,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	inlineStart := max(annCol, asmEnd+2)
 	if inlineStart+lipgloss.Width(note) <= w {
 		// Fits on the same row: pad out to the annotation position, then the note.
-		line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + addrStyle.Render(note)
+		line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + m.theme.addrStyle.Render(note)
 		return []string{padRight(line, w)}
 	}
 
@@ -327,7 +327,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	}
 	indent := strings.Repeat(" ", annCol)
 	for _, p := range parts {
-		rows = append(rows, padRight(indent+addrStyle.Render(p), w))
+		rows = append(rows, padRight(indent+m.theme.addrStyle.Render(p), w))
 	}
 	return rows
 }
@@ -351,7 +351,7 @@ func (m *Model) renderDisasmColumns(inst disasm.Inst, w int) string {
 	if pad < 2 {
 		pad = 2
 	}
-	return asm + strings.Repeat(" ", pad) + addrStyle.Render(note)
+	return asm + strings.Repeat(" ", pad) + m.theme.addrStyle.Render(note)
 }
 
 func (m *Model) currentIntraJumpTargets() map[uint64]lipgloss.Style {
@@ -374,7 +374,7 @@ func (m *Model) currentIntraJumpTargets() map[uint64]lipgloss.Style {
 			return out
 		}
 		if addr >= curSym.Addr && addr < curSym.Addr+curSym.Size {
-			out[addr] = linkAddrIntraStyle
+			out[addr] = m.theme.linkAddrIntraStyle
 		}
 		from = end
 	}
@@ -447,7 +447,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 		loc = fmt.Sprintf("%s:%d:%d", file, line, col)
 	}
 	var b strings.Builder
-	b.WriteString(infoStyle.Render(loc))
+	b.WriteString(m.theme.infoStyle.Render(loc))
 	b.WriteString("\n")
 	half := (h - 1) / 2
 	base := line - half

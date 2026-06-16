@@ -323,7 +323,7 @@ func (m *Model) renderSourceList(bodyH int) string {
 	}
 	filterRow := m.sourcesFilter.View()
 	if !m.sourcesFilter.Focused() {
-		filterRow = footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)",
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)",
 			m.sourcesFilter.Value(), len(m.sourcesFiltered), len(m.sourcesFiles)))
 	}
 
@@ -341,7 +341,7 @@ func (m *Model) renderSourceList(bodyH int) string {
 	b.WriteString(filterRow)
 	b.WriteString("\n")
 	if len(m.sourcesFiltered) == 0 {
-		b.WriteString(footerStyle.Render(" (no source files)"))
+		b.WriteString(m.theme.footerStyle.Render(" (no source files)"))
 		return padBody(b.String(), m.width, bodyH)
 	}
 	for i := top; i < end; i++ {
@@ -349,9 +349,9 @@ func (m *Model) renderSourceList(bodyH int) string {
 		name := colorPathByPrefix(full, truncateMiddle(full, max(16, m.width-2)))
 		line := padRight(" "+name, m.width)
 		if i == m.sourcesCur {
-			b.WriteString(tableSelStyle.Render(line))
+			b.WriteString(m.theme.tableSelStyle.Render(line))
 		} else {
-			b.WriteString(tableRowStyle.Render(line))
+			b.WriteString(m.theme.tableRowStyle.Render(line))
 		}
 		b.WriteString("\n")
 	}
@@ -385,7 +385,7 @@ func (m *Model) renderSourceText(w, h int) string {
 	top = visualTop(m.srcCur-1, top, len(src), contentH, rowHeight)
 
 	var b strings.Builder
-	b.WriteString(infoStyle.Render(truncate(fmt.Sprintf("%s:%d", m.srcFile, m.srcCur), w)))
+	b.WriteString(m.theme.infoStyle.Render(truncate(fmt.Sprintf("%s:%d", m.srcFile, m.srcCur), w)))
 	b.WriteString("\n")
 
 	rows := 0
@@ -495,9 +495,9 @@ func (m *Model) renderSourceAsm(w, h int) string {
 			count++
 		}
 	}
-	head := infoStyle.Render(fmt.Sprintf("line %d — %d instruction(s)", m.srcCur, count))
+	head := m.theme.infoStyle.Render(fmt.Sprintf("line %d — %d instruction(s)", m.srcCur, count))
 	if len(cols) > 0 {
-		head += infoStyle.Render("  ·  cols ") + coloredCols(cols)
+		head += m.theme.infoStyle.Render("  ·  cols ") + coloredCols(cols)
 	}
 	head = fitANSIWidth(head, w)
 

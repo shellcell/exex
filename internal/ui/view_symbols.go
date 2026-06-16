@@ -146,13 +146,13 @@ func (m *Model) renderSymbols() string {
 		if m.symbolsLib != "" {
 			libPart = "   lib:" + m.symbolsLib + " (Esc clears)"
 		}
-		filterRow = footerStyle.Render(fmt.Sprintf("/ %s   type:%s%s   (%d / %d)", m.symbolsFilter.Value(), kind, libPart, len(m.symbolsFiltered), len(m.file.Symbols)))
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   type:%s%s   (%d / %d)", m.symbolsFilter.Value(), kind, libPart, len(m.symbolsFiltered), len(m.file.Symbols)))
 	}
 
 	addrW := m.file.AddrHexWidth()
 	addrCol := 2 + addrW
 	hdr := fmt.Sprintf(" %-*s %-6s %-5s %-8s  %s", addrCol, "Address", "Size", "Bind", "Type", "Name")
-	header := tableHeaderStyle.Render(padRight(hdr, m.width))
+	header := m.theme.tableHeaderStyle.Render(padRight(hdr, m.width))
 
 	visible := bodyH - 2 // filter row + header
 	if visible < 1 {
@@ -187,9 +187,9 @@ func (m *Model) symbolRowHeight(i int) int {
 
 func (m *Model) symbolRows(i, addrW int, selected bool) []string {
 	s := m.file.Symbols[m.symbolsFiltered[i]]
-	rowStyle := styleForSymbol(s.Kind, s.Bind)
+	rowStyle := m.theme.styleForSymbol(s.Kind, s.Bind)
 	prefixPlain := fmt.Sprintf(" 0x%0*x %-6d %-5s %-8s  ", addrW, s.Addr, s.Size, bindString(s.Bind), kindString(s.Kind))
-	prefix := " " + addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)) + rowStyle.Render(fmt.Sprintf(" %-6d %-5s %-8s  ", s.Size, bindString(s.Bind), kindString(s.Kind)))
+	prefix := " " + m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)) + rowStyle.Render(fmt.Sprintf(" %-6d %-5s %-8s  ", s.Size, bindString(s.Bind), kindString(s.Kind)))
 	nameW := m.width - len(prefixPlain)
 	if nameW < 1 {
 		nameW = 1
@@ -213,7 +213,7 @@ func (m *Model) symbolRows(i, addrW int, selected bool) []string {
 			line = strings.Repeat(" ", len(prefixPlain)) + rowStyle.Render(part)
 		}
 		if selected {
-			line = tableSelStyle.Render(stripANSI(line))
+			line = m.theme.tableSelStyle.Render(stripANSI(line))
 		}
 		rows = append(rows, padRight(line, m.width))
 	}

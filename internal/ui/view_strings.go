@@ -92,7 +92,7 @@ func (m *Model) renderStrings() string {
 
 	addrW := m.file.AddrHexWidth()
 	hdr := fmt.Sprintf(" %-10s %-*s %-16s  %s", "Offset", 2+addrW, "Address", "Section", "String")
-	header := tableHeaderStyle.Render(padRight(hdr, m.width))
+	header := m.theme.tableHeaderStyle.Render(padRight(hdr, m.width))
 
 	visible := bodyH - 1
 	if visible < 1 {
@@ -132,9 +132,9 @@ func (m *Model) stringRow(i, addrW int, selected bool) string {
 		text = s.Text
 	}
 	line := fmt.Sprintf(" %s %-*s %-16s  %s",
-		addrStyle.Render(fmt.Sprintf("0x%-8x", s.Offset)), 2+addrW, addrStyle.Render(addr), footerStyle.Render(truncate(s.Section, 16)), tableRowStyle.Render(text))
+		m.theme.addrStyle.Render(fmt.Sprintf("0x%-8x", s.Offset)), 2+addrW, m.theme.addrStyle.Render(addr), m.theme.footerStyle.Render(truncate(s.Section, 16)), m.theme.tableRowStyle.Render(text))
 	if selected {
-		return tableSelStyle.Render(stripANSI(line))
+		return m.theme.tableSelStyle.Render(stripANSI(line))
 	}
 	return line
 }
@@ -143,11 +143,11 @@ func (m *Model) stringRow(i, addrW int, selected bool) string {
 // (matching the Sections and Hex views); unmapped strings render dim.
 func (m *Model) stringRowStyle(s binfile.StringEntry) lipgloss.Style {
 	if sec := m.sectionAtOffset(s.Offset); sec != nil {
-		return styleForSection(sec)
+		return m.theme.styleForSection(sec)
 	}
 	// srcShadowStyle is dim like footerStyle but, unlike it, carries no
 	// horizontal padding (which would over-widen a full-width row and wrap).
-	return srcShadowStyle
+	return m.theme.srcShadowStyle
 }
 
 // sanitizeString collapses control bytes (none should remain from extraction,

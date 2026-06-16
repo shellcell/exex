@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,33 +10,6 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 )
-
-func TestSourceSortRanksProjectFilesFirst(t *testing.T) {
-	dir := t.TempDir()
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(old) }()
-
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd after Chdir: %v", err)
-	}
-	project := filepath.Join(wd, "cmd", "main.go")
-	files := []string{"/usr/include/stdio.h", "/tmp/generated.c", project, "relative.c"}
-	sortSourcesForProject(files, filepath.Join(dir, "app"))
-
-	if !containsSame(files[:2], []string{project, "relative.c"}) {
-		t.Fatalf("project sources not first: %v", files)
-	}
-	if files[len(files)-1] != "/usr/include/stdio.h" {
-		t.Fatalf("external system source should sort last: %v", files)
-	}
-}
 
 func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
 	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
@@ -261,21 +232,4 @@ func TestDisasmAnnotationWrapsWithGrayStyleEachRow(t *testing.T) {
 			t.Fatalf("annotation row lost ANSI styling: %q", row)
 		}
 	}
-}
-
-func containsSame(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	seen := map[string]int{}
-	for _, s := range got {
-		seen[s]++
-	}
-	for _, s := range want {
-		if seen[s] == 0 {
-			return false
-		}
-		seen[s]--
-	}
-	return true
 }

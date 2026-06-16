@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -19,6 +18,8 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/rabarbra/exex/internal/syntax"
 )
 
 type mode int
@@ -106,14 +107,12 @@ type Model struct {
 	disasmTop           int
 	disasmPosLo         int
 	disasmPosHi         int
-	disasmCacheMu       sync.RWMutex
-	disasmCache         map[disasmCacheKey]disasmCacheEntry
-	disasmCacheOrder    []disasmCacheKey
+	disasmSvc           *explorer.DisasmService
 	showSource          bool
 	sourceFirst         bool
 	rightScroll         int // extra scroll offset for the follower (right) pane; 0 = auto-follow
 	srcVP               viewport.Model
-	srcHL               map[string][]string // filename → per-line syntax-highlighted source
+	srcHighlighter      *syntax.Highlighter
 
 	// Navigation history for the disasm view: the last `historyCap` jump
 	// targets, with `historyPos` indicating where in that ring we are. Left
@@ -180,7 +179,7 @@ type Model struct {
 	searchCancelable bool
 	searchResults    disasmSearchCache
 	searchCursorMode int
-	searchMode       int
+	searchMode       searchMode
 	searchCursorAddr uint64
 	searchForward    bool
 	searchFromCursor bool
@@ -278,7 +277,6 @@ func New(f *binfile.File) (*Model, error) {
 		mode:                modeInfo,
 		disasmMaxBytes:      defaultDisasmMaxBytes,
 		disasmSearchWorkers: 0,
-		disasmCache:         map[disasmCacheKey]disasmCacheEntry{},
 		sections:            f.Sections,
 		sourcesFilter:       srcFilter,
 		symbolsFilter:       filter,
@@ -288,6 +286,7 @@ func New(f *binfile.File) (*Model, error) {
 		searchForward:       true,
 		searchFromCursor:    true,
 		showSource:          true,
+		srcHighlighter:      syntax.NewHighlighter(cfg.Colors.SyntaxTheme),
 		keys:                keys,
 		keyAlias:            keyAlias,
 		searchKeyAlias:      searchKeyAlias,
@@ -310,7 +309,8 @@ func New(f *binfile.File) (*Model, error) {
 	if cfg.Behavior.DisasmSearchWorkers > 0 {
 		m.disasmSearchWorkers = cfg.Behavior.DisasmSearchWorkers
 	}
-	m.disasmInitAddr = f.DefaultExecAddr(m.disasmTarget)
+	m.disasmSvc = explorer.NewDisasmService(f, d, m.disasmMaxBytes, m.disasmSearchWorkers)
+	m.disasmInitAddr = explorer.DefaultExecAddr(f, m.disasmTarget)
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))
@@ -949,18 +949,14 @@ func (m *Model) renderGotoModal() string {
 		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
 		// Scroll the window so the selection stays visible.
-		if m.gotoSel < m.gotoTop {
-			m.gotoTop = m.gotoSel
-		} else if m.gotoSel >= m.gotoTop+gotoVisible {
-			m.gotoTop = m.gotoSel - gotoVisible + 1
-		}
-		end := m.gotoTop + gotoVisible
+		gotoTop := visualTop(m.gotoSel, m.gotoTop, len(m.gotoResults), gotoVisible, func(int) int { return 1 })
+		end := gotoTop + gotoVisible
 		if end > len(m.gotoResults) {
 			end = len(m.gotoResults)
 		}
 		rowW := min(max(72, m.width-14), 120)
 		labelW := rowW - addrW - 6
-		for i := m.gotoTop; i < end; i++ {
+		for i := gotoTop; i < end; i++ {
 			t := m.gotoResults[i]
 			line := fmt.Sprintf(" 0x%0*x  %s", addrW, t.addr, truncateMiddle(t.label, labelW))
 			line = padRight(line, rowW)

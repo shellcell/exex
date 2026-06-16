@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/arch"
 )
 
 // TestOpenPE cross-compiles a tiny Go program to a Windows PE and opens it,
@@ -32,7 +32,7 @@ func TestOpenPE(t *testing.T) {
 	if f.Format != FormatPE {
 		t.Fatalf("format = %q, want PE", f.Format)
 	}
-	if f.Arch() != disasm.ArchAMD64 {
+	if f.Arch() != arch.ArchAMD64 {
 		t.Fatalf("arch = %d, want AMD64", f.Arch())
 	}
 	if f.Entry() == 0 {

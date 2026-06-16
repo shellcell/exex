@@ -9,18 +9,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	sourceutil "github.com/rabarbra/exex/internal/source"
 )
 
 // srcMatch is one hit from a cross-source grep.
-type srcMatch struct {
-	file string
-	line int
-}
+type srcMatch = sourceutil.Match
 
 // colColors keys the per-column highlight: the Nth distinct column on a source
 // line is drawn in colColors[N], and the instructions mapped to that column get
@@ -45,39 +43,10 @@ func (m *Model) ensureSources() {
 		if m.sourcesFiles == nil {
 			m.sourcesFiles = []string{}
 		}
-		sortSourcesForProject(m.sourcesFiles, m.file.Path)
+		wd, _ := os.Getwd()
+		sourceutil.SortForProject(m.sourcesFiles, m.file.Path, wd)
 		m.recomputeSourceFiles()
 	}
-}
-
-func sortSourcesForProject(files []string, binPath string) {
-	root := filepath.Dir(binPath)
-	if wd, err := os.Getwd(); err == nil && wd != "" {
-		root = wd
-	}
-	sort.SliceStable(files, func(i, j int) bool {
-		ri, rj := sourceRank(files[i], root), sourceRank(files[j], root)
-		if ri != rj {
-			return ri < rj
-		}
-		return files[i] < files[j]
-	})
-}
-
-func sourceRank(file, root string) int {
-	if root != "" {
-		if rel, err := filepath.Rel(root, file); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
-			return 0
-		}
-	}
-	base := filepath.Base(file)
-	if strings.HasPrefix(file, "/usr/") || strings.HasPrefix(file, "/System/") || strings.HasPrefix(file, "/Library/") || strings.Contains(file, "/.cargo/registry/") || strings.Contains(file, "/go/pkg/mod/") {
-		return 2
-	}
-	if !filepath.IsAbs(file) || !strings.Contains(base, ".") {
-		return 0
-	}
-	return 1
 }
 
 // recomputeSourceFiles rebuilds the filtered file list from the filter text.
@@ -276,7 +245,6 @@ func (m *Model) searchInSourceFile(forward, inclusive bool) {
 		return
 	}
 	src := m.file.SourceLines(m.srcFile)
-	q := strings.ToLower(m.searchQuery)
 	start := m.srcCur
 	if !inclusive {
 		if forward {
@@ -285,23 +253,10 @@ func (m *Model) searchInSourceFile(forward, inclusive bool) {
 			start--
 		}
 	}
-	hit := func(i int) bool { return i >= 1 && i <= len(src) && strings.Contains(strings.ToLower(src[i-1]), q) }
-	if forward {
-		for i := start; i <= len(src); i++ {
-			if hit(i) {
-				m.srcCur = i
-				m.syncSourceAsm()
-				return
-			}
-		}
-	} else {
-		for i := start; i >= 1; i-- {
-			if hit(i) {
-				m.srcCur = i
-				m.syncSourceAsm()
-				return
-			}
-		}
+	if i := sourceutil.FindInLines(src, m.searchQuery, start, forward); i > 0 {
+		m.srcCur = i
+		m.syncSourceAsm()
+		return
 	}
 	m.setStatus("not found in file: "+m.searchQuery, true)
 }
@@ -330,29 +285,14 @@ func (m *Model) searchAllSources(forward, inclusive bool) {
 
 func (m *Model) openSrcMatch(i int) {
 	mt := m.srcMatches[i]
-	m.openSourceFile(mt.file, mt.line)
-	m.setStatus(fmt.Sprintf("match %d/%d  %s:%d", i+1, len(m.srcMatches), filepath.Base(mt.file), mt.line), false)
+	m.openSourceFile(mt.File, mt.Line)
+	m.setStatus(fmt.Sprintf("match %d/%d  %s:%d", i+1, len(m.srcMatches), filepath.Base(mt.File), mt.Line), false)
 }
 
 // grepSources scans every source file for the query (capped).
 func (m *Model) grepSources(query string) []srcMatch {
-	q := strings.ToLower(query)
-	if q == "" {
-		return nil
-	}
 	const cap = 1000
-	var out []srcMatch
-	for _, f := range m.sourcesFiles {
-		for i, line := range m.file.SourceLines(f) {
-			if strings.Contains(strings.ToLower(line), q) {
-				out = append(out, srcMatch{file: f, line: i + 1})
-				if len(out) >= cap {
-					return out
-				}
-			}
-		}
-	}
-	return out
+	return sourceutil.Grep(m.sourcesFiles, m.file.SourceLines, query, cap)
 }
 
 // ---- rendering ----
@@ -391,12 +331,8 @@ func (m *Model) renderSourceList(bodyH int) string {
 	if visible < 1 {
 		visible = 1
 	}
-	if m.sourcesCur < m.sourcesTop {
-		m.sourcesTop = m.sourcesCur
-	} else if m.sourcesCur >= m.sourcesTop+visible {
-		m.sourcesTop = m.sourcesCur - visible + 1
-	}
-	end := m.sourcesTop + visible
+	top := visualTop(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
+	end := top + visible
 	if end > len(m.sourcesFiltered) {
 		end = len(m.sourcesFiltered)
 	}
@@ -408,7 +344,7 @@ func (m *Model) renderSourceList(bodyH int) string {
 		b.WriteString(footerStyle.Render(" (no source files)"))
 		return padBody(b.String(), m.width, bodyH)
 	}
-	for i := m.sourcesTop; i < end; i++ {
+	for i := top; i < end; i++ {
 		full := m.sourcesFiles[m.sourcesFiltered[i]]
 		name := colorPathByPrefix(full, truncateMiddle(full, max(16, m.width-2)))
 		line := padRight(" "+name, m.width)
@@ -446,15 +382,14 @@ func (m *Model) renderSourceText(w, h int) string {
 		}
 		return h
 	}
-	ensureVisualTop(m.srcCur-1, &top, len(src), contentH, rowHeight)
-	m.srcTop = top + 1
+	top = visualTop(m.srcCur-1, top, len(src), contentH, rowHeight)
 
 	var b strings.Builder
 	b.WriteString(infoStyle.Render(truncate(fmt.Sprintf("%s:%d", m.srcFile, m.srcCur), w)))
 	b.WriteString("\n")
 
 	rows := 0
-	for ln := m.srcTop; ln <= len(src) && rows < contentH; ln++ {
+	for ln := top + 1; ln <= len(src) && rows < contentH; ln++ {
 		// The code is always shown syntax-highlighted; only the gutter colour
 		// reflects the mapping (shared srcGutter policy, used by both panes).
 		content := src[ln-1]
@@ -488,6 +423,19 @@ func (m *Model) renderSourceText(w, h int) string {
 		}
 	}
 	return padBody(b.String(), w, h)
+}
+
+func (m *Model) sourceTextTop(w, contentH int) int {
+	src := m.file.SourceLines(m.srcFile)
+	rowHeight := func(i int) int {
+		ln := i + 1
+		h := m.sourceLineHeight(ln, w)
+		if ln == m.srcCur && len(m.file.LineColumns(m.srcFile, ln)) > 0 {
+			h++
+		}
+		return h
+	}
+	return visualTop(m.srcCur-1, max(0, m.srcTop-1), len(src), contentH, rowHeight)
 }
 
 func (m *Model) sourceLineHeight(line, w int) int {
@@ -564,7 +512,6 @@ func (m *Model) renderSourceAsm(w, h int) string {
 		base = m.disasmCur - contentH + 1
 	}
 	top := clampScroll(base+m.rightScroll, len(m.disasmInst), contentH)
-	m.rightScroll = top - base // store the actually-applied (clamped) offset
 	end := top + contentH
 	if end > len(m.disasmInst) {
 		end = len(m.disasmInst)

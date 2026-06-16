@@ -7,22 +7,21 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rabarbra/exex/internal/arch"
+
 	"golang.org/x/arch/arm64/arm64asm"
 	"golang.org/x/arch/riscv64/riscv64asm"
 	"golang.org/x/arch/x86/x86asm"
 )
 
-// Arch is a format-neutral CPU architecture selector. binfile maps each
-// container's machine field (ELF e_machine, Mach-O cputype, …) onto one of
-// these so the disassembler never has to know which container it came from.
-type Arch uint8
+type Arch = arch.Arch
 
 const (
-	ArchUnknown Arch = iota
-	ArchX86          // 32-bit x86
-	ArchAMD64        // x86-64
-	ArchARM64        // AArch64
-	ArchRISCV64      // 64-bit RISC-V
+	ArchUnknown = arch.ArchUnknown
+	ArchX86     = arch.ArchX86
+	ArchAMD64   = arch.ArchAMD64
+	ArchARM64   = arch.ArchARM64
+	ArchRISCV64 = arch.ArchRISCV64
 )
 
 // InstClass classifies an instruction's high-level role so the UI can colour

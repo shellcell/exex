@@ -326,6 +326,7 @@ func (m *Model) disasmSearchStatus(step disasmSearchStep) string {
 func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 	img := m.file.ExecImage()
 	file := m.file
+	svc := m.disasmService()
 	query := step.query
 	match := func(instText string, addr uint64) bool {
 		if strings.Contains(strings.ToLower(instText), query) {
@@ -344,7 +345,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		hits  []disasmSearchHit
 	}
 	return func() tea.Msg {
-		batch := m.disasmSearchBatchChunks()
+		batch := svc.SearchBatchChunks()
 		if batch < 1 {
 			batch = 1
 		}
@@ -360,7 +361,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 				logical = win.End
 			}
 			results := make([]chunkResult, len(wins))
-			limit := m.disasmSearchWorkersFor(len(wins))
+			limit := svc.SearchWorkersFor(len(wins))
 			sem := make(chan struct{}, limit)
 			var wg sync.WaitGroup
 			for i, win := range wins {
@@ -369,7 +370,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 				go func(i int, win binfile.Window) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					insts := m.disasmDecodeWindow(win)
+					insts := svc.DecodeWindow(win)
 					results[i] = chunkResult{order: i, win: win, insts: insts}
 					startPos := step.logical
 					if i > 0 {
@@ -412,7 +413,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 			logical = win.Start
 		}
 		results := make([]chunkResult, len(wins))
-		limit := m.disasmSearchWorkersFor(len(wins))
+		limit := svc.SearchWorkersFor(len(wins))
 		sem := make(chan struct{}, limit)
 		var wg sync.WaitGroup
 		for i, win := range wins {
@@ -421,7 +422,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 			go func(i int, win binfile.Window) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				insts := m.disasmDecodeWindow(win)
+				insts := svc.DecodeWindow(win)
 				results[i] = chunkResult{order: i, win: win, insts: insts}
 				endPos := step.logical
 				if i > 0 {

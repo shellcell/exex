@@ -222,9 +222,12 @@ func appendRenderedRowsIndented(lines *[]string, line string, w int, wrap bool, 
 }
 
 func ensureVisualTop(cur int, top *int, n, visible int, rowHeight func(int) int) {
+	*top = visualTop(cur, *top, n, visible, rowHeight)
+}
+
+func visualTop(cur, top, n, visible int, rowHeight func(int) int) int {
 	if n <= 0 {
-		*top = 0
-		return
+		return 0
 	}
 	if cur < 0 {
 		cur = 0
@@ -232,15 +235,16 @@ func ensureVisualTop(cur int, top *int, n, visible int, rowHeight func(int) int)
 	if cur >= n {
 		cur = n - 1
 	}
-	if *top < 0 || cur < *top {
-		*top = cur
+	if top < 0 || cur < top {
+		top = cur
 	}
-	if *top >= n {
-		*top = n - 1
+	if top >= n {
+		top = n - 1
 	}
-	for *top < cur && visualRowsBetween(*top, cur, rowHeight)+rowHeight(cur) > visible {
-		*top++
+	for top < cur && visualRowsBetween(top, cur, rowHeight)+rowHeight(cur) > visible {
+		top++
 	}
+	return top
 }
 
 func visualRowsBetween(start, end int, rowHeight func(int) int) int {

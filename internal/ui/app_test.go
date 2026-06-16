@@ -367,7 +367,7 @@ func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
 	}
 }
 
-func TestDisasmAutoLoadsVisibleScreenOnChromiumBinary(t *testing.T) {
+func TestDisasmNavigationAutoLoadsVisibleScreenOnChromiumBinary(t *testing.T) {
 	const path = "/usr/lib/chromium-browser/chromium-browser"
 	if _, err := os.Stat(path); err != nil {
 		t.Skip("chromium binary unavailable")
@@ -385,24 +385,18 @@ func TestDisasmAutoLoadsVisibleScreenOnChromiumBinary(t *testing.T) {
 
 	m.jumpDisasmBoundary(false)
 	m.disasmCur = len(m.disasmInst) - 1
-	oldLo, oldHi := m.disasmPosLo, m.disasmPosHi
-	out := m.renderDisasm()
+	_, oldHi := m.disasmPosLo, m.disasmPosHi
+	m.updateDisasm("down")
 	if m.disasmPosHi <= oldHi {
-		t.Fatal("expected render to load more code below")
-	}
-	if strings.Contains(out, "scroll to load") {
-		t.Fatal("unexpected disasm load hint after auto-load")
+		t.Fatal("expected navigation to load more code below")
 	}
 
 	m.jumpDisasmBoundary(true)
 	m.disasmCur = 0
-	oldLo, oldHi = m.disasmPosLo, m.disasmPosHi
-	out = m.renderDisasm()
+	oldLo, _ := m.disasmPosLo, m.disasmPosHi
+	m.updateDisasm("up")
 	if m.disasmPosLo >= oldLo {
-		t.Fatal("expected render to load more code above")
-	}
-	if strings.Contains(out, "scroll to load") {
-		t.Fatal("unexpected disasm load hint after auto-load")
+		t.Fatal("expected navigation to load more code above")
 	}
 }
 

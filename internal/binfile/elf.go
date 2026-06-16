@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/arch"
 )
 
 // elfDWARF returns DWARF for the binary: embedded, or from a separate debug
@@ -326,18 +326,18 @@ func isELFMappingSymbol(name string) bool {
 	return false
 }
 
-func elfArch(m elf.Machine) disasm.Arch {
+func elfArch(m elf.Machine) arch.Arch {
 	switch m {
 	case elf.EM_X86_64:
-		return disasm.ArchAMD64
+		return arch.ArchAMD64
 	case elf.EM_386:
-		return disasm.ArchX86
+		return arch.ArchX86
 	case elf.EM_AARCH64:
-		return disasm.ArchARM64
+		return arch.ArchARM64
 	case elf.EM_RISCV:
-		return disasm.ArchRISCV64
+		return arch.ArchRISCV64
 	}
-	return disasm.ArchUnknown
+	return arch.ArchUnknown
 }
 
 func elfSymKind(t elf.SymType) SymKind {

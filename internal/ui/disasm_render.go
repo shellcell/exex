@@ -128,7 +128,7 @@ func (m *Model) renderDisasm() string {
 	// info; otherwise keep the disasm full-width instead of opening an empty
 	// "no source" pane.
 	showSrc := m.showSource && m.file.HasDWARF()
-	if showSrc && m.sourceFirst && m.ensureSourceForDisasmCursor() {
+	if showSrc && m.sourceFirst && m.hasOpenSourceFile() {
 		leftW := m.width / 2
 		rightW := m.width - leftW
 		left := m.renderSourceText(leftW, bodyH)
@@ -177,9 +177,8 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 	if h < 1 {
 		h = 1
 	}
-	m.ensureDisasmViewport(h)
 	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
-	ensureVisualTop(m.disasmCur, &m.disasmTop, len(m.disasmInst), h, rowHeight)
+	top := visualTop(m.disasmCur, m.disasmTop, len(m.disasmInst), h, rowHeight)
 
 	jumpTargets := m.currentIntraJumpTargets()
 	// When the source pane is open (disasm-first), addresses are coloured by
@@ -192,7 +191,7 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 		curFile, curLine, _ = m.file.LookupAddrCol(m.disasmInst[m.disasmCur].Addr)
 	}
 	var rows []string
-	for i := m.disasmTop; i < len(m.disasmInst) && len(rows) < h; i++ {
+	for i := top; i < len(m.disasmInst) && len(rows) < h; i++ {
 		inst := m.disasmInst[i]
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
 			for _, row := range m.disasmLabelRows(sym.Display(), w) {
@@ -404,6 +403,10 @@ func (m *Model) ensureSourceForDisasmCursor() bool {
 	return true
 }
 
+func (m *Model) hasOpenSourceFile() bool {
+	return m.srcFile != "" && m.file.SourceLines(m.srcFile) != nil
+}
+
 // disasmIsSymbolStart reports whether instruction i begins a symbol (and so is
 // preceded by a "<name>:" label line in the scroller).
 func (m *Model) disasmIsSymbolStart(i int) bool {
@@ -412,45 +415,6 @@ func (m *Model) disasmIsSymbolStart(i int) bool {
 	}
 	sym, ok := m.file.SymbolAt(m.disasmInst[i].Addr)
 	return ok && sym.Addr == m.disasmInst[i].Addr
-}
-
-func (m *Model) ensureDisasmViewport(h int) {
-	if len(m.disasmInst) == 0 || h < 1 {
-		return
-	}
-	img := m.file.ExecImage()
-	curAddr := m.disasmInst[m.disasmCur].Addr
-	for tries := 0; tries < 2; tries++ {
-		if m.disasmCur < m.disasmTop {
-			m.disasmTop = m.disasmCur
-		} else if m.disasmCur >= m.disasmTop+h {
-			m.disasmTop = m.disasmCur - h + 1
-		}
-		end := min(len(m.disasmInst), m.disasmTop+h)
-		needAbove := m.disasmTop == 0 && m.disasmPosLo > 0
-		needBelow := end == len(m.disasmInst) && m.disasmPosHi < img.Len()
-		if !needAbove && !needBelow {
-			return
-		}
-		if needAbove {
-			before := m.disasmMaxBytes - m.disasmOverlapBytes()
-			if !m.loadDisasmWindow(img.AddrAt(m.disasmPosLo-1), before) {
-				return
-			}
-		} else {
-			last := m.disasmInst[len(m.disasmInst)-1]
-			nextAddr := last.Addr + uint64(len(last.Bytes))
-			if _, ok := img.PosForAddr(nextAddr); !ok || !m.loadDisasmWindow(nextAddr, m.disasmOverlapBytes()) {
-				return
-			}
-		}
-		m.disasmCur = m.instIndexAtOrAfterAddr(curAddr)
-		if m.disasmCur >= h {
-			m.disasmTop = m.disasmCur - min(m.disasmCur, h/2)
-		} else {
-			m.disasmTop = 0
-		}
-	}
 }
 
 func (m *Model) renderSourcePane(w, h int) string {
@@ -499,7 +463,6 @@ func (m *Model) renderSourcePane(w, h int) string {
 			from = 1
 		}
 	}
-	m.rightScroll = from - base // store the actually-applied (clamped) offset
 	for i := from; i <= to; i++ {
 		var content string
 		if i-1 >= 0 && i-1 < len(src) {

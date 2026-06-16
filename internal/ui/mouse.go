@@ -144,28 +144,36 @@ func (m *Model) handleClick(x, y int) {
 	switch m.mode {
 	case modeSections:
 		// Body layout: row 0 filter, row 1 header, data follows.
-		if idx, ok := visualItemAtRow(m.sectionsTop, len(m.sectionsFiltered), bodyRow-2, m.sectionRowHeight); ok {
+		visible := max(1, m.bodyHeight()-2)
+		top := visualTop(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, m.sectionRowHeight)
+		if idx, ok := visualItemAtRow(top, len(m.sectionsFiltered), bodyRow-2, m.sectionRowHeight); ok {
 			m.sectionsCur = idx
 		}
 	case modeSymbols:
 		// Body layout: row 0 filter, row 1 header, data follows.
-		if idx, ok := visualItemAtRow(m.symbolsTop, len(m.symbolsFiltered), bodyRow-2, m.symbolRowHeight); ok {
+		visible := max(1, m.bodyHeight()-2)
+		top := visualTop(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, m.symbolRowHeight)
+		if idx, ok := visualItemAtRow(top, len(m.symbolsFiltered), bodyRow-2, m.symbolRowHeight); ok {
 			m.symbolsCur = idx
 		}
 	case modeHex:
 		m.ensureHex()
-		m.hexCur = m.clickByte(modeHex, m.hexImg.Data, m.hexTop, m.hexCur, x, bodyRow, m.hexImg.AddrAt)
+		m.hexCur = m.clickByte(modeHex, m.hexImg.Data, hexVisibleTop(m.hexCur, m.hexTop, max(1, m.bodyHeight()-1)), m.hexCur, x, bodyRow, m.hexImg.AddrAt)
 	case modeRaw:
 		m.ensureRaw()
-		m.rawCur = m.clickByte(modeRaw, m.rawData, m.rawTop, m.rawCur, x, bodyRow, func(pos int) uint64 { return uint64(pos) })
+		m.rawCur = m.clickByte(modeRaw, m.rawData, hexVisibleTop(m.rawCur, m.rawTop, max(1, m.bodyHeight()-1)), m.rawCur, x, bodyRow, func(pos int) uint64 { return uint64(pos) })
 	case modeStrings:
 		// Body layout: row 0 is the column header, data follows.
-		if idx, ok := visualItemAtRow(m.stringsTop, len(m.stringsList), bodyRow-1, m.stringRowHeight); ok {
+		visible := max(1, m.bodyHeight()-1)
+		top := visualTop(m.stringsCur, m.stringsTop, len(m.stringsList), visible, m.stringRowHeight)
+		if idx, ok := visualItemAtRow(top, len(m.stringsList), bodyRow-1, m.stringRowHeight); ok {
 			m.stringsCur = idx
 		}
 	case modeSources:
 		// File list only: row 0 is the filter, files follow.
-		if idx := m.sourcesTop + bodyRow - 1; idx >= 0 && idx < len(m.sourcesFiltered) {
+		visible := max(1, m.bodyHeight()-1)
+		top := visualTop(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
+		if idx := top + bodyRow - 1; idx >= 0 && idx < len(m.sourcesFiltered) {
 			m.sourcesCur = idx
 		}
 	case modeDisasm:
@@ -180,7 +188,9 @@ func (m *Model) handleClick(x, y int) {
 	case modeLibs:
 		headerRows := m.libsHeaderRows()
 		if m.file.Info != nil {
-			if idx, ok := visualItemAtRow(m.libsTop, len(m.file.Info.DynamicLibs), bodyRow-headerRows, m.libRowHeight); ok {
+			visible := max(1, m.bodyHeight()-headerRows)
+			top := visualTop(m.libsCur, m.libsTop, len(m.file.Info.DynamicLibs), visible, m.libRowHeight)
+			if idx, ok := visualItemAtRow(top, len(m.file.Info.DynamicLibs), bodyRow-headerRows, m.libRowHeight); ok {
 				m.libsCur = idx
 			}
 		}
@@ -205,6 +215,7 @@ func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
 		return 0, false
 	}
 	src := m.file.SourceLines(m.srcFile)
+	contentH := max(1, m.bodyHeight()-1)
 	rowHeight := func(i int) int {
 		ln := i + 1
 		h := m.sourceLineHeight(ln, paneW)
@@ -213,7 +224,7 @@ func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
 		}
 		return h
 	}
-	idx, ok := visualItemAtRow(max(0, m.srcTop-1), len(src), r, rowHeight)
+	idx, ok := visualItemAtRow(m.sourceTextTop(paneW, contentH), len(src), r, rowHeight)
 	return idx + 1, ok
 }
 
@@ -261,7 +272,10 @@ func (m *Model) instAtBodyRow(bodyRow int) (int, bool) {
 	if r < 0 {
 		return 0, false
 	}
-	return visualItemAtRow(m.disasmTop, len(m.disasmInst), r, func(i int) int {
+	visible := max(1, m.bodyHeight()-1)
+	rowHeight := func(i int) int {
 		return m.disasmInstVisualHeight(i, m.disasmRenderWidth())
-	})
+	}
+	top := visualTop(m.disasmCur, m.disasmTop, len(m.disasmInst), visible, rowHeight)
+	return visualItemAtRow(top, len(m.disasmInst), r, rowHeight)
 }

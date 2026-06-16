@@ -1,4 +1,4 @@
-package ui
+package syntax
 
 import (
 	"strings"
@@ -9,8 +9,6 @@ import (
 )
 
 func TestHighlightLines(t *testing.T) {
-	// Force a colour profile so Render emits ANSI even though the test's stdout
-	// isn't a TTY (otherwise lipgloss falls back to plain output).
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(old)
@@ -22,30 +20,45 @@ func TestHighlightLines(t *testing.T) {
 		"    return 0;",
 		"}",
 	}
-	hl := highlightLines("main.c", src)
+	hl := HighlightLines("main.c", src, defaultTheme)
 	if hl == nil {
 		t.Fatal("no lexer matched main.c")
 	}
 	if len(hl) != len(src) {
 		t.Fatalf("highlighted line count = %d, want %d", len(hl), len(src))
 	}
-	// Stripping the ANSI must recover the original text on every line.
 	for i := range src {
 		if got := stripANSI(hl[i]); got != src[i] {
 			t.Fatalf("line %d plain text = %q, want %q", i, got, src[i])
 		}
 	}
-	// And at least some colour must have been applied.
 	if !strings.Contains(strings.Join(hl, ""), "\x1b[") {
 		t.Fatal("expected ANSI colour codes in highlighted output")
 	}
 }
 
 func TestHighlightUnknownExtension(t *testing.T) {
-	// An unknown, content-free extension should simply yield no highlighting
-	// rather than panicking, so the caller can fall back to plain text.
-	hl := highlightLines("data.unknownext", []string{"\x00\x01\x02"})
+	hl := HighlightLines("data.unknownext", []string{"\x00\x01\x02"}, defaultTheme)
 	for _, line := range hl {
-		_ = line // nil or best-effort; just must not panic
+		_ = line
 	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			i = j - 1
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

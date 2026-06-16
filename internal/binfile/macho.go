@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/arch"
 )
 
 // Mach-O magic numbers (thin, both byte orders, plus the fat headers).
@@ -267,16 +267,16 @@ func hostCPU() macho.Cpu {
 	return 0
 }
 
-func machoArch(c macho.Cpu) disasm.Arch {
+func machoArch(c macho.Cpu) arch.Arch {
 	switch c {
 	case macho.CpuAmd64:
-		return disasm.ArchAMD64
+		return arch.ArchAMD64
 	case macho.Cpu386:
-		return disasm.ArchX86
+		return arch.ArchX86
 	case macho.CpuArm64:
-		return disasm.ArchARM64
+		return arch.ArchARM64
 	}
-	return disasm.ArchUnknown
+	return arch.ArchUnknown
 }
 
 func machoBind(s macho.Symbol) SymBind {

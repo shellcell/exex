@@ -6,13 +6,13 @@ package ui
 // index helpers that locate an instruction by address.
 
 import (
-	"runtime"
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/explorer"
 )
 
 // disasmReadyMsg carries the finished decode from the background worker.
@@ -23,208 +23,53 @@ type disasmReadyMsg struct {
 	insts []disasm.Inst
 }
 
-type disasmCacheKey struct {
-	start       int
-	end         int
-	decodeStart int
-}
-
-type disasmCacheEntry struct {
-	insts []disasm.Inst
-}
-
-const disasmCacheCap = 24
-
 type disasmPrefetchMsg struct{}
 
+func (m *Model) disasmService() *explorer.DisasmService {
+	if m.disasmSvc == nil {
+		m.disasmSvc = explorer.NewDisasmService(m.file, m.dis, m.disasmMaxBytes, m.disasmSearchWorkers)
+	}
+	m.disasmSvc.SetOptions(m.disasmMaxBytes, m.disasmSearchWorkers)
+	return m.disasmSvc
+}
+
 func (m *Model) disasmOverlapBytes() int {
-	overlap := m.disasmMaxBytes / 8
-	if overlap < 4<<10 {
-		overlap = 4 << 10
-	}
-	if overlap >= m.disasmMaxBytes {
-		overlap = max(1, m.disasmMaxBytes/2)
-	}
-	return overlap
+	return m.disasmService().OverlapBytes()
 }
 
 func (m *Model) disasmLeadBytes() int {
-	lead := m.disasmMaxBytes / 4
-	if lead < m.disasmOverlapBytes() {
-		lead = m.disasmOverlapBytes()
-	}
-	if lead >= m.disasmMaxBytes {
-		lead = max(0, m.disasmMaxBytes-1)
-	}
-	return lead
+	return m.disasmService().LeadBytes()
 }
 
 func (m *Model) disasmSearchChunkBytes() int {
-	chunk := m.disasmMaxBytes / 8
-	if chunk < 64<<10 {
-		chunk = 64 << 10
-	}
-	if chunk > 512<<10 {
-		chunk = 512 << 10
-	}
-	if chunk > m.disasmMaxBytes {
-		chunk = m.disasmMaxBytes
-	}
-	return chunk
+	return m.disasmService().SearchChunkBytes()
 }
 
 func (m *Model) disasmSearchBatchChunks() int {
-	n := m.disasmSearchWorkersFor(0)
-	if n < 2 {
-		n = 2
-	}
-	if m.disasmSearchChunkBytes() <= 128<<10 {
-		n *= 2
-	}
-	if n > 8 {
-		n = 8
-	}
-	return n
+	return m.disasmService().SearchBatchChunks()
 }
 
 func (m *Model) disasmSearchWorkersFor(chunks int) int {
-	workers := m.disasmSearchWorkers
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-		if workers > 6 {
-			workers = 6
-		}
-		if workers < 1 {
-			workers = 1
-		}
-	}
-	if chunks > 0 && workers > chunks {
-		workers = chunks
-	}
-	if workers < 1 {
-		workers = 1
-	}
-	return workers
+	return m.disasmService().SearchWorkersFor(chunks)
 }
 
 func (m *Model) prefetchDisasmAroundCmd(addr uint64) tea.Cmd {
 	if m.dis == nil {
 		return nil
 	}
-	img := m.file.ExecImage()
-	if img.Len() == 0 {
-		return nil
-	}
-	pos, ok := img.PosForAddr(addr)
-	if !ok {
-		return nil
-	}
-	chunk := m.disasmSearchChunkBytes()
-	before := max(0, pos-chunk)
-	after := pos + chunk
-	if after > img.Len()-1 {
-		after = img.Len() - 1
-	}
+	svc := m.disasmService()
 	return func() tea.Msg {
-		wins := []binfile.Window{
-			img.Window(before, min(chunk, img.Len()-before)),
-			img.Window(pos, min(chunk, img.Len()-pos)),
-		}
-		for _, win := range wins {
-			if len(win.Data) == 0 {
-				continue
-			}
-			m.disasmDecodeWindow(win)
-		}
-		if after > pos {
-			win := img.Window(after, min(chunk, img.Len()-after))
-			if len(win.Data) > 0 {
-				m.disasmDecodeWindow(win)
-			}
-		}
+		svc.PrefetchAround(addr)
 		return disasmPrefetchMsg{}
 	}
 }
 
-func (m *Model) disasmCacheGet(key disasmCacheKey) ([]disasm.Inst, bool) {
-	m.disasmCacheMu.RLock()
-	entry, ok := m.disasmCache[key]
-	m.disasmCacheMu.RUnlock()
-	if !ok {
-		return nil, false
-	}
-	return entry.insts, true
-}
-
-func (m *Model) disasmCachePut(key disasmCacheKey, insts []disasm.Inst) {
-	m.disasmCacheMu.Lock()
-	defer m.disasmCacheMu.Unlock()
-	if _, ok := m.disasmCache[key]; !ok {
-		m.disasmCacheOrder = append(m.disasmCacheOrder, key)
-	}
-	m.disasmCache[key] = disasmCacheEntry{insts: insts}
-	for len(m.disasmCacheOrder) > disasmCacheCap {
-		old := m.disasmCacheOrder[0]
-		m.disasmCacheOrder = m.disasmCacheOrder[1:]
-		delete(m.disasmCache, old)
-	}
-}
-
-func (m *Model) decodeInstWindow(win binfile.Window, decodeStart int) []disasm.Inst {
-	if len(win.Data) == 0 || m.dis == nil {
-		return nil
-	}
-	key := disasmCacheKey{start: win.Start, end: win.End, decodeStart: decodeStart}
-	if insts, ok := m.disasmCacheGet(key); ok {
-		return insts
-	}
-	img := m.file.ExecImage()
-	decodeWin := img.Window(decodeStart, win.End-decodeStart)
-	insts := disasm.Range(m.dis, decodeWin.Data, decodeWin.Addr, 0)
-	lo := win.Addr
-	hi := win.Addr + uint64(len(win.Data))
-	keep := insts[:0]
-	for _, inst := range insts {
-		end := inst.Addr + uint64(len(inst.Bytes))
-		if end <= lo || inst.Addr >= hi {
-			continue
-		}
-		keep = append(keep, inst)
-	}
-	insts = append([]disasm.Inst(nil), keep...)
-	m.disasmCachePut(key, insts)
-	return insts
-}
-
 func (m *Model) disasmDecodeWindow(win binfile.Window) []disasm.Inst {
-	if len(win.Data) == 0 || m.dis == nil {
-		return nil
-	}
-	decodeStart := max(0, win.Start-m.disasmOverlapBytes())
-	return m.decodeInstWindow(win, decodeStart)
+	return m.disasmService().DecodeWindow(win)
 }
 
 func (m *Model) decodeDisasmAt(addr uint64, before int) (binfile.Window, []disasm.Inst) {
-	if m.dis == nil {
-		return binfile.Window{}, nil
-	}
-	img := m.file.ExecImage()
-	win, ok := img.WindowContaining(addr, m.disasmMaxBytes, before)
-	if !ok {
-		return binfile.Window{}, nil
-	}
-	decodeStart := max(0, win.Start-m.disasmOverlapBytes())
-	if sym, ok := m.file.SymbolAt(addr); ok {
-		if pos, mapped := img.PosForAddr(sym.Addr); mapped && pos < win.End {
-			if sym.Addr == addr {
-				decodeStart = pos
-			} else if pos >= decodeStart {
-				decodeStart = pos
-			}
-		}
-	}
-	return win, m.decodeInstWindow(win, decodeStart)
-
+	return m.disasmService().DecodeAt(addr, before)
 }
 
 // ensureDisasm decodes synchronously on first use. It's the path jumps take
@@ -243,7 +88,7 @@ func (m *Model) ensureDisasm() bool {
 	}
 	target := m.disasmInitAddr
 	if target == 0 {
-		target = m.file.DefaultExecAddr(m.disasmTarget)
+		target = explorer.DefaultExecAddr(m.file, m.disasmTarget)
 	}
 	win, insts := m.decodeDisasmAt(target, m.disasmLeadBytes())
 	m.disasmPosLo, m.disasmPosHi, m.disasmInst = win.Start, win.End, insts
@@ -253,8 +98,10 @@ func (m *Model) ensureDisasm() bool {
 // decodeDisasmCmd decodes a bounded executable span off the main goroutine and
 // delivers it as a disasmReadyMsg.
 func (m *Model) decodeDisasmCmd(addr uint64) tea.Cmd {
+	svc := m.disasmService()
+	before := svc.LeadBytes()
 	return func() tea.Msg {
-		win, insts := m.decodeDisasmAt(addr, m.disasmLeadBytes())
+		win, insts := svc.DecodeAt(addr, before)
 		return disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts}
 	}
 }

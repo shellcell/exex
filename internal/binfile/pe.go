@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/arch"
 )
 
 // PE section characteristics (not exported by debug/pe).
@@ -117,16 +117,16 @@ func (f *File) loadPE() error {
 	return nil
 }
 
-func peArch(m uint16) disasm.Arch {
+func peArch(m uint16) arch.Arch {
 	switch m {
 	case pe.IMAGE_FILE_MACHINE_AMD64:
-		return disasm.ArchAMD64
+		return arch.ArchAMD64
 	case pe.IMAGE_FILE_MACHINE_I386:
-		return disasm.ArchX86
+		return arch.ArchX86
 	case pe.IMAGE_FILE_MACHINE_ARM64:
-		return disasm.ArchARM64
+		return arch.ArchARM64
 	}
-	return disasm.ArchUnknown
+	return arch.ArchUnknown
 }
 
 func peCategory(name string, exec, write, bss bool) SectionCategory {

@@ -161,10 +161,10 @@ func (m *Model) renderSymbols() string {
 	rowHeight := func(i int) int {
 		return m.symbolRowHeight(i)
 	}
-	ensureVisualTop(m.symbolsCur, &m.symbolsTop, len(m.symbolsFiltered), visible, rowHeight)
+	top := visualTop(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, rowHeight)
 
 	rows := []string{padRight(filterRow, m.width), padRight(header, m.width)}
-	for i := m.symbolsTop; i < len(m.symbolsFiltered); i++ {
+	for i := top; i < len(m.symbolsFiltered); i++ {
 		for _, row := range m.symbolRows(i, addrW, i == m.symbolsCur) {
 			if len(rows) >= bodyH {
 				break

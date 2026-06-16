@@ -158,8 +158,9 @@ func (m *Model) renderInfo() string {
 		}
 	}
 
-	m.headerVP.SetContent(strings.TrimRight(b.String(), "\n"))
-	return m.headerVP.View()
+	vp := m.headerVP
+	vp.SetContent(strings.TrimRight(b.String(), "\n"))
+	return vp.View()
 }
 
 // entryValue renders the entry point value: its address, the entry symbol, and

@@ -335,22 +335,14 @@ func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt
 	bodyH := m.bodyHeight()
 	row := bytesPerHexRow
 	addrW := m.file.AddrHexWidth()
-
-	curRow := cur / row
 	visible := bodyH - 1
 	if visible < 1 {
 		visible = 1
 	}
-	topRow := *topPtr / row
-	if curRow < topRow {
-		topRow = curRow
-	} else if curRow >= topRow+visible {
-		topRow = curRow - visible + 1
-	}
-	*topPtr = topRow * row
+	top := hexVisibleTop(cur, *topPtr, visible)
 
 	rows := []string{stickySymStyle.Render(padRight(banner, m.width))}
-	end := *topPtr + visible*row
+	end := top + visible*row
 	if end > len(data) {
 		end = len(data)
 	}
@@ -359,10 +351,10 @@ func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt
 	// off equality would miss almost all of them. Seed with the section of the
 	// row above the window so the first visible row only splits when it's new.
 	prevSec := ""
-	if *topPtr >= row {
-		prevSec = m.hexSectionName(md, *topPtr-row, addrAt)
+	if top >= row {
+		prevSec = m.hexSectionName(md, top-row, addrAt)
 	}
-	for off := *topPtr; off < end; off += row {
+	for off := top; off < end; off += row {
 		sec := m.hexSectionName(md, off, addrAt)
 		if sec != "" && sec != prevSec {
 			appendRenderedRows(&rows, footerStyle.Render("── "+sec+" ──"), m.width, m.wrap, bodyH)
@@ -373,6 +365,21 @@ func (m *Model) renderHexDump(md mode, data []byte, cur int, topPtr *int, addrAt
 		}
 	}
 	return padBodyRows(rows, m.width, bodyH)
+}
+
+func hexVisibleTop(cur, top, visibleRows int) int {
+	row := bytesPerHexRow
+	curRow := cur / row
+	topRow := top / row
+	if curRow < topRow {
+		topRow = curRow
+	} else if curRow >= topRow+visibleRows {
+		topRow = curRow - visibleRows + 1
+	}
+	if topRow < 0 {
+		topRow = 0
+	}
+	return topRow * row
 }
 
 // hexSectionName returns the name of the section covering the byte at off (a VA

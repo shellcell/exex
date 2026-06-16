@@ -69,8 +69,10 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		m.stepDisasm(true)
 	case "pgup":
 		m.moveDisasmPage(false)
+		m.ensureDisasmViewport(m.disasmViewportHeight())
 	case "pgdown":
 		m.moveDisasmPage(true)
+		m.ensureDisasmViewport(m.disasmViewportHeight())
 	case "home":
 		m.jumpDisasmBoundary(false)
 	case "end", "G":

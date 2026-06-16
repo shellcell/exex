@@ -101,10 +101,10 @@ func (m *Model) renderStrings() string {
 	rowHeight := func(i int) int {
 		return m.stringRowHeight(i)
 	}
-	ensureVisualTop(m.stringsCur, &m.stringsTop, len(m.stringsList), visible, rowHeight)
+	top := visualTop(m.stringsCur, m.stringsTop, len(m.stringsList), visible, rowHeight)
 
 	rows := []string{padRight(header, m.width)}
-	for i := m.stringsTop; i < len(m.stringsList); i++ {
+	for i := top; i < len(m.stringsList); i++ {
 		line := m.stringRow(i, addrW, i == m.stringsCur)
 		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, addrW+33, bodyH) {
 			break

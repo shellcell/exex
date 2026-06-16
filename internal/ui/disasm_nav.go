@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/explorer"
 )
 
 // historyCap caps the depth of the back/forward stack in the disasm view.
@@ -36,7 +37,7 @@ func (m *Model) loadDisasmAtNoHistory(addr uint64) bool {
 	// default, or whatever the config chose) instead of refusing.
 	target := addr
 	if _, mapped := m.file.ExecImage().PosForAddr(target); !mapped {
-		def := m.file.DefaultExecAddr(m.disasmTarget)
+		def := explorer.DefaultExecAddr(m.file, m.disasmTarget)
 		if def == 0 {
 			m.setStatus("no executable code to disassemble", true)
 			return false
@@ -63,6 +64,49 @@ func (m *Model) loadDisasmAtNoHistory(addr uint64) bool {
 	m.disasmPositioned = true
 	m.mode = modeDisasm
 	return true
+}
+
+func (m *Model) disasmViewportHeight() int {
+	return max(1, m.bodyHeight()-1)
+}
+
+func (m *Model) ensureDisasmViewport(h int) {
+	if len(m.disasmInst) == 0 || h < 1 {
+		return
+	}
+	img := m.file.ExecImage()
+	curAddr := m.disasmInst[m.disasmCur].Addr
+	for tries := 0; tries < 2; tries++ {
+		if m.disasmCur < m.disasmTop {
+			m.disasmTop = m.disasmCur
+		} else if m.disasmCur >= m.disasmTop+h {
+			m.disasmTop = m.disasmCur - h + 1
+		}
+		end := min(len(m.disasmInst), m.disasmTop+h)
+		needAbove := m.disasmTop == 0 && m.disasmPosLo > 0
+		needBelow := end == len(m.disasmInst) && m.disasmPosHi < img.Len()
+		if !needAbove && !needBelow {
+			return
+		}
+		if needAbove {
+			before := m.disasmMaxBytes - m.disasmOverlapBytes()
+			if !m.loadDisasmWindow(img.AddrAt(m.disasmPosLo-1), before) {
+				return
+			}
+		} else {
+			last := m.disasmInst[len(m.disasmInst)-1]
+			nextAddr := last.Addr + uint64(len(last.Bytes))
+			if _, ok := img.PosForAddr(nextAddr); !ok || !m.loadDisasmWindow(nextAddr, m.disasmOverlapBytes()) {
+				return
+			}
+		}
+		m.disasmCur = m.instIndexAtOrAfterAddr(curAddr)
+		if m.disasmCur >= h {
+			m.disasmTop = m.disasmCur - min(m.disasmCur, h/2)
+		} else {
+			m.disasmTop = 0
+		}
+	}
 }
 
 func (m *Model) loadDisasmWindowForStep(forward bool) bool {
@@ -111,15 +155,25 @@ func (m *Model) stepDisasm(forward bool) bool {
 	if forward {
 		if m.disasmCur < len(m.disasmInst)-1 {
 			m.disasmCur++
+			m.ensureDisasmViewport(m.disasmViewportHeight())
 			return true
 		}
-		return m.loadDisasmWindowForStep(true)
+		if m.loadDisasmWindowForStep(true) {
+			m.ensureDisasmViewport(m.disasmViewportHeight())
+			return true
+		}
+		return false
 	}
 	if m.disasmCur > 0 {
 		m.disasmCur--
+		m.ensureDisasmViewport(m.disasmViewportHeight())
 		return true
 	}
-	return m.loadDisasmWindowForStep(false)
+	if m.loadDisasmWindowForStep(false) {
+		m.ensureDisasmViewport(m.disasmViewportHeight())
+		return true
+	}
+	return false
 }
 
 func (m *Model) moveDisasmPage(forward bool) {

@@ -105,10 +105,10 @@ func (m *Model) renderSections() string {
 	rowHeight := func(i int) int {
 		return m.sectionRowHeight(i)
 	}
-	ensureVisualTop(m.sectionsCur, &m.sectionsTop, len(m.sectionsFiltered), visible, rowHeight)
+	top := visualTop(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, rowHeight)
 
 	rows := []string{padRight(filterRow, m.width), padRight(header, m.width)}
-	for i := m.sectionsTop; i < len(m.sectionsFiltered); i++ {
+	for i := top; i < len(m.sectionsFiltered); i++ {
 		line := m.sectionRow(i, addrW, i == m.sectionsCur)
 		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, 6, bodyH) {
 			break

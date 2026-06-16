@@ -198,10 +198,6 @@ func ApplyColors(c config.Colors) {
 	setFg(&secSymtabStyle, c.SectionSymbolTable)
 	setFg(&secDynamicStyle, c.SectionDynamicLinking)
 	setFg(&secRelocStyle, c.SectionRelocations)
-	// Source-pane syntax-highlighting theme.
-	if c.SyntaxTheme != "" {
-		syntaxTheme = c.SyntaxTheme
-	}
 }
 
 // byteHex holds the pre-rendered "ff"-style hex string with ANSI colour

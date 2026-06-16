@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/arch"
 )
 
 // Format identifies the container the binary was loaded from.
@@ -117,7 +117,7 @@ type File struct {
 
 	raw       []byte       // entire file contents (mmap'd or read; raw view + section data)
 	unmap     func() error // releases the mapping backing raw (nil-safe via Close)
-	arch      disasm.Arch
+	arch      arch.Arch
 	entry     uint64
 	addrWidth int // hex digits in a printed address (8 or 16)
 	header    []string
@@ -205,19 +205,59 @@ func (f *File) Close() error {
 func (f *File) finalizeSymbols() {
 	sort.Slice(f.Symbols, func(i, j int) bool { return f.Symbols[i].Name < f.Symbols[j].Name })
 
-	f.symByAddr = make([]Symbol, 0, len(f.Symbols))
-	for _, s := range f.Symbols {
+	addrIdx := make([]int, 0, len(f.Symbols))
+	for i, s := range f.Symbols {
 		if s.Addr != 0 {
-			f.symByAddr = append(f.symByAddr, s)
+			addrIdx = append(addrIdx, i)
 		}
 	}
-	sort.Slice(f.symByAddr, func(i, j int) bool {
-		if f.symByAddr[i].Addr != f.symByAddr[j].Addr {
-			return f.symByAddr[i].Addr < f.symByAddr[j].Addr
+	sortAddrIdx := func() {
+		sort.Slice(addrIdx, func(i, j int) bool {
+			si := f.Symbols[addrIdx[i]]
+			sj := f.Symbols[addrIdx[j]]
+			if si.Addr != sj.Addr {
+				return si.Addr < sj.Addr
+			}
+			return si.Size > sj.Size
+		})
+	}
+	sortAddrIdx()
+	f.inferSymbolSizes(addrIdx)
+	sortAddrIdx()
+
+	f.symByAddr = make([]Symbol, 0, len(addrIdx))
+	for _, idx := range addrIdx {
+		f.symByAddr = append(f.symByAddr, f.Symbols[idx])
+	}
+}
+
+// inferSymbolSizes gives zero-sized symbols an extent reaching to the next
+// symbol at a higher address (clamped to the containing section's end). Symbols
+// that already carry a size are left untouched.
+func (f *File) inferSymbolSizes(addrIdx []int) {
+	for i, idx := range addrIdx {
+		if f.Symbols[idx].Size != 0 {
+			continue
 		}
-		return f.symByAddr[i].Size > f.symByAddr[j].Size
-	})
-	f.inferSizes()
+		addr := f.Symbols[idx].Addr
+		var next uint64
+		for j := i + 1; j < len(addrIdx); j++ {
+			candidate := f.Symbols[addrIdx[j]].Addr
+			if candidate > addr {
+				next = candidate
+				break
+			}
+		}
+		if sec := f.SectionAt(addr); sec != nil {
+			secEnd := sec.Addr + sec.Size
+			if next == 0 || next > secEnd {
+				next = secEnd
+			}
+		}
+		if next > addr {
+			f.Symbols[idx].Size = next - addr
+		}
+	}
 }
 
 // ComputeDemangled returns the demangled form of every symbol name, indexed
@@ -284,34 +324,6 @@ func (f *File) lineEntries() []lineEntry {
 		}
 	})
 	return f.lines
-}
-
-// inferSizes gives zero-sized symbols an extent reaching to the next symbol at
-// a higher address (clamped to the containing section's end). Symbols that
-// already carry a size are left untouched.
-func (f *File) inferSizes() {
-	for i := range f.symByAddr {
-		if f.symByAddr[i].Size != 0 {
-			continue
-		}
-		addr := f.symByAddr[i].Addr
-		var next uint64
-		for j := i + 1; j < len(f.symByAddr); j++ {
-			if f.symByAddr[j].Addr > addr {
-				next = f.symByAddr[j].Addr
-				break
-			}
-		}
-		if sec := f.SectionAt(addr); sec != nil {
-			secEnd := sec.Addr + sec.Size
-			if next == 0 || next > secEnd {
-				next = secEnd
-			}
-		}
-		if next > addr {
-			f.symByAddr[i].Size = next - addr
-		}
-	}
 }
 
 // sectionData returns the file bytes backing a section (nil for zero-fill).
@@ -504,85 +516,6 @@ func (f *File) PrevSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
 	return Symbol{}, false
 }
 
-// DefaultExecAddr resolves a guaranteed-executable address to land the disasm
-// view on, honouring the requested strategy and falling back down a sensible
-// chain when the choice can't be resolved. Returns 0 only when the binary has
-// no executable code at all.
-//
-// Strategies: "entry" (the entry point), "main"/"start" (those symbols),
-// "text" (the .text/__text section), "lowest" (lowest executable address).
-func (f *File) DefaultExecAddr(strategy string) uint64 {
-	inExec := func(a uint64) bool {
-		_, ok := f.ExecImage().PosForAddr(a)
-		return ok
-	}
-	try := func(s string) (uint64, bool) {
-		switch s {
-		case "entry":
-			if f.entry != 0 && inExec(f.entry) {
-				return f.entry, true
-			}
-		case "main":
-			if a, ok := f.symbolAddr("main", "_main"); ok {
-				return a, true
-			}
-		case "start":
-			if a, ok := f.symbolAddr("_start", "start", "__start"); ok {
-				return a, true
-			}
-		case "text":
-			if a, ok := f.execSectionAddr(".text", "__text"); ok {
-				return a, true
-			}
-		case "lowest":
-			if im := f.ExecImage(); len(im.Regions) > 0 {
-				return im.Regions[0].Addr, true
-			}
-		}
-		return 0, false
-	}
-	for _, s := range []string{strategy, "entry", "main", "start", "text", "lowest"} {
-		if a, ok := try(s); ok {
-			return a
-		}
-	}
-	return 0
-}
-
-// symbolAddr returns the address of the first named symbol that lands in
-// executable code.
-func (f *File) symbolAddr(names ...string) (uint64, bool) {
-	want := map[string]bool{}
-	for _, n := range names {
-		want[n] = true
-	}
-	for _, s := range f.symByAddr {
-		if want[s.Name] {
-			if _, ok := f.ExecImage().PosForAddr(s.Addr); ok {
-				return s.Addr, true
-			}
-		}
-	}
-	return 0, false
-}
-
-// execSectionAddr returns the address of the first executable section matching
-// one of the given names.
-func (f *File) execSectionAddr(names ...string) (uint64, bool) {
-	for i := range f.Sections {
-		s := &f.Sections[i]
-		if !s.Exec || s.Size == 0 {
-			continue
-		}
-		for _, n := range names {
-			if s.Name == n {
-				return s.Addr, true
-			}
-		}
-	}
-	return 0, false
-}
-
 // SectionAt returns the mapped section whose VM range covers addr.
 func (f *File) SectionAt(addr uint64) *Section {
 	for i := range f.Sections {
@@ -633,8 +566,8 @@ func (f *File) HasDWARF() bool { return f.dwarf != nil }
 // Entry returns the entry-point virtual address.
 func (f *File) Entry() uint64 { return f.entry }
 
-// Arch returns the disassembler architecture for this binary.
-func (f *File) Arch() disasm.Arch { return f.arch }
+// Arch returns the CPU architecture for this binary.
+func (f *File) Arch() arch.Arch { return f.arch }
 
 // Raw returns the entire file contents (source for the raw hex view).
 func (f *File) Raw() []byte { return f.raw }

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// bytesHex renders up to maxN bytes as space-separated, per-byte-coloured hex.
+// bytesHex renders up to maxN bytes as compact, per-byte-coloured hex.
 // The output is padded with plain spaces to a fixed visible width so columns
 // line up regardless of how many bytes the instruction occupied. Uses the
 // precomputed byteHex table to avoid re-rendering ANSI codes on every byte.
@@ -22,17 +22,11 @@ func bytesHex(b []byte, maxN int) string {
 		b = b[:maxN]
 	}
 	var sb strings.Builder
-	for i, x := range b {
-		if i > 0 {
-			sb.WriteByte(' ')
-		}
+	for _, x := range b {
 		sb.WriteString(byteHex[x])
 	}
-	visible := len(b)*3 - 1
-	if len(b) == 0 {
-		visible = 0
-	}
-	want := maxN*3 - 1
+	visible := len(b) * 2
+	want := maxN * 2
 	if visible < want {
 		sb.WriteString(strings.Repeat(" ", want-visible))
 	}

@@ -5,6 +5,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
@@ -152,6 +154,8 @@ type disasmState struct {
 	srcVP               viewport.Model
 	srcHighlighter      *syntax.Highlighter
 	sourceAsmRowCache   map[sourceAsmRowCacheKey]string
+	disasmAsmCache      map[disasmAsmCacheKey]string
+	disasmTokenStyles   map[chroma.TokenType]lipgloss.Style
 }
 
 // sourceAsmRowCacheKey identifies a cached source/assembly mapping row.
@@ -160,6 +164,13 @@ type sourceAsmRowCacheKey struct {
 	w    int
 	file string
 	line int
+}
+
+// disasmAsmCacheKey identifies one highlighted instruction/comment string.
+type disasmAsmCacheKey struct {
+	text string
+	addr uint64
+	cls  disasm.InstClass
 }
 
 // historyState stores disassembly navigation history.

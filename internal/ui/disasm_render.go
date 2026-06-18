@@ -9,19 +9,85 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/rabarbra/exex/internal/arch"
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 )
 
-// For transfer-of-control instructions (call/jmp/jcc) that reach into a
-// *different* symbol, the target literal is followed by " (symbol)" or
-// " (.section)" so the reader sees where control is going without leaving
-// the disasm view.
+const disasmSyntaxDefaultTheme = "catppuccin-mocha"
+
+var disasmAsmLexer chroma.Lexer = nil
+
+type disasmAddrSpan struct {
+	start int
+	end   int
+	style lipgloss.Style
+}
+
+func newDisasmAsmLexer(arch arch.Arch) chroma.Lexer {
+	lexer_names := []string{"ArmAsm", "GAS", "asm", "NASM"}
+	switch arch {
+	case disasm.ArchX86, disasm.ArchAMD64, disasm.ArchRISCV64:
+		lexer_names = append([]string{"GAS"}, lexer_names...)
+	case disasm.ArchARM64:
+		lexer_names = append([]string{"ArmAsm"}, lexer_names...)
+	}
+	for _, name := range lexer_names {
+		if lexer := lexers.Get(name); lexer != nil {
+			return chroma.Coalesce(lexer)
+		}
+	}
+	return nil
+}
+
+// renderInstText uses Chroma for assembly syntax, then overlays semantic link
+// styles on followable address literals.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
+	key := disasmAsmCacheKey{text: text, addr: instAddr, cls: class}
+	if m.disasmAsmCache != nil {
+		if rendered, ok := m.disasmAsmCache[key]; ok {
+			return rendered
+		}
+	}
+	rendered := m.renderInstTextUncached(text, class, instAddr)
+	if m.disasmAsmCache == nil {
+		m.disasmAsmCache = make(map[disasmAsmCacheKey]string)
+	}
+	m.disasmAsmCache[key] = rendered
+	return rendered
+}
+
+func (m *Model) renderInstTextUncached(text string, class disasm.InstClass, instAddr uint64) string {
+	if disasmAsmLexer == nil {
+		disasmAsmLexer = newDisasmAsmLexer(m.file.Arch())
+	}
+	if disasmAsmLexer == nil {
+		return m.renderInstTextFallback(text, class, instAddr)
+	}
+	tokens, err := chroma.Tokenise(disasmAsmLexer, nil, text)
+	if err != nil {
+		return m.renderInstTextFallback(text, class, instAddr)
+	}
+	spans := m.disasmAddrSpans(text, instAddr)
+	pos := 0
+	var b strings.Builder
+	for _, tok := range tokens {
+		if tok == chroma.EOF {
+			break
+		}
+		b.WriteString(m.renderDisasmToken(tok, pos, spans))
+		pos += len(tok.Value)
+	}
+	return b.String()
+}
+
+func (m *Model) renderInstTextFallback(text string, class disasm.InstClass, instAddr uint64) string {
 	classSt := m.theme.styleForClass(class)
-	// Determine the symbol that contains the instruction we're rendering.
 	curSym, hasCur := m.file.SymbolAt(instAddr)
 
 	from := 0
@@ -47,6 +113,89 @@ func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uin
 		b.WriteString(linkSt.Render(text[start:end]))
 		from = end
 	}
+}
+
+func (m *Model) renderDisasmToken(tok chroma.Token, pos int, spans []disasmAddrSpan) string {
+	st := m.disasmTokenStyle(tok.Type)
+	from := 0
+	var b strings.Builder
+	for _, span := range spans {
+		lo := max(span.start, pos)
+		hi := min(span.end, pos+len(tok.Value))
+		if hi <= lo {
+			continue
+		}
+		if rel := lo - pos; rel > from {
+			b.WriteString(st.Render(tok.Value[from:rel]))
+		}
+		b.WriteString(span.style.Render(tok.Value[lo-pos : hi-pos]))
+		from = hi - pos
+	}
+	if from < len(tok.Value) {
+		b.WriteString(st.Render(tok.Value[from:]))
+	}
+	return b.String()
+}
+
+func (m *Model) disasmAddrSpans(text string, instAddr uint64) []disasmAddrSpan {
+	if m.file == nil {
+		return nil
+	}
+	curSym, hasCur := m.file.SymbolAt(instAddr)
+	from := 0
+	var spans []disasmAddrSpan
+	for {
+		addr, start, end, ok := extractTargetAt(text, from)
+		if !ok {
+			return spans
+		}
+		if m.file.IsMapped(addr) {
+			isIntra := hasCur && curSym.Size > 0 && addr >= curSym.Addr && addr < curSym.Addr+curSym.Size
+			linkSt := m.theme.linkAddrInterStyle
+			if isIntra {
+				linkSt = m.theme.linkAddrIntraStyle
+			}
+			spans = append(spans, disasmAddrSpan{start: start, end: end, style: linkSt})
+		}
+		from = end
+	}
+}
+
+func (m *Model) disasmTokenStyle(tt chroma.TokenType) lipgloss.Style {
+	if m.disasmTokenStyles == nil {
+		m.disasmTokenStyles = make(map[chroma.TokenType]lipgloss.Style)
+	}
+	if st, ok := m.disasmTokenStyles[tt]; ok {
+		return st
+	}
+	theme := m.cfg.Colors.SyntaxTheme
+	if theme == "" {
+		theme = disasmSyntaxDefaultTheme
+	}
+	chromaStyle := styles.Get(theme)
+	if chromaStyle == nil {
+		chromaStyle = styles.Fallback
+	}
+	st := chromaStyleEntryToLipgloss(chromaStyle.Get(tt))
+	m.disasmTokenStyles[tt] = st
+	return st
+}
+
+func chromaStyleEntryToLipgloss(e chroma.StyleEntry) lipgloss.Style {
+	st := lipgloss.NewStyle()
+	if e.Colour.IsSet() {
+		st = st.Foreground(lipgloss.Color(e.Colour.String()))
+	}
+	if e.Bold == chroma.Yes {
+		st = st.Bold(true)
+	}
+	if e.Italic == chroma.Yes {
+		st = st.Italic(true)
+	}
+	if e.Underline == chroma.Yes {
+		st = st.Underline(true)
+	}
+	return st
 }
 
 func (m *Model) instAnnotation(text string, class disasm.InstClass) string {
@@ -253,7 +402,7 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 }
 
 func (m *Model) disasmAsmColumn() int {
-	return 1 + 2 + m.file.AddrHexWidth() + 2 + (8*3 - 1) + 2
+	return 1 + 2 + m.file.AddrHexWidth() + 2 + (8 * 2) + 2
 }
 
 func (m *Model) disasmAnnotationColumn(w int) int {
@@ -295,10 +444,6 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	asm := m.renderInstText(inst.Text, inst.Class, inst.Addr)
 	note := m.instAnnotation(inst.Text, inst.Class)
 
-	// The assembly is never wrapped and never trimmed to a narrow column — it is
-	// only clamped to the pane width so it can't wrap. The annotation prefers its
-	// column (annCol); a long instruction pushes it to the right of the assembly,
-	// but the annotation still starts on the instruction row whenever possible.
 	asmFit := fitANSIWidth(asm, max(1, w-asmCol))
 	asmEnd := asmCol + lipgloss.Width(stripANSI(asmFit))
 

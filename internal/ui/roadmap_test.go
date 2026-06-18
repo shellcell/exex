@@ -303,7 +303,7 @@ func TestRawClickSkipsSectionSplitRows(t *testing.T) {
 	}
 }
 
-func TestDisasmAnnotationWrapsWithGrayStyleEachRow(t *testing.T) {
+func TestDisasmAnnotationWrapsSeparatelyAndAddressLinks(t *testing.T) {
 	m := &Model{
 		theme:            DefaultTheme(),
 		layoutState:      layoutState{width: 64},
@@ -317,11 +317,25 @@ func TestDisasmAnnotationWrapsWithGrayStyleEachRow(t *testing.T) {
 	inst := disasm.Inst{Addr: 0x1000, Text: "call 0x2000", Class: disasm.ClassCall, Bytes: []byte{0xe8}}
 	rows := m.disasmInstRows(inst, 64, false, nil)
 	if len(rows) < 2 {
-		t.Fatalf("annotation did not wrap: %q", rows)
+		t.Fatalf("annotation did not wrap into separate rows: %q", rows)
 	}
-	for _, row := range rows {
-		if strings.Contains(stripANSI(row), "very_long_section_name_") && !strings.Contains(row, "\x1b[") {
-			t.Fatalf("annotation row lost ANSI styling: %q", row)
-		}
+	plain := stripANSI(rows[0])
+	if strings.Contains(plain, "#") {
+		t.Fatalf("annotation was rendered as an assembly comment: %q", plain)
 	}
+	allPlain := strings.ReplaceAll(strings.Join(stripANSILines(rows), ""), " ", "")
+	if !strings.Contains(plain, "call 0x2000") || !strings.Contains(allPlain, "very_long_section_name_") {
+		t.Fatalf("assembly or separate annotation missing: %q", rows)
+	}
+	if !strings.Contains(rows[0], ";4") {
+		t.Fatalf("followable address was not underlined: %q", rows[0])
+	}
+}
+
+func stripANSILines(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = stripANSI(line)
+	}
+	return out
 }

@@ -46,6 +46,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wheelTickMsg:
 		return m.handleWheelTick()
 
+	case keyTickMsg:
+		return m.handleKeyTick()
+
 	case disasmReadyMsg:
 		return m.handleDisasmReady(msg)
 

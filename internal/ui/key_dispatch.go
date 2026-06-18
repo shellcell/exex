@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -52,6 +53,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if c, ok := m.keyAlias[key]; ok {
 		key = c
 	}
+	// Coalesce held navigation keys so a key-repeat flood can't block input.
+	if m.isRepeatNavKey(key) {
+		return m.enqueueNavKey(key)
+	}
+	m.pendingKeyN = 0 // any non-repeat key ends held-nav coalescing
 	before := m.activeCursorState()
 	reattach := keyReattachesViewport(key)
 	model, cmd := m.dispatchViewKey(msg, key)
@@ -59,6 +65,72 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewportDetached = false
 	}
 	return model, cmd
+}
+
+// keyTickMsg fires after keyCoalesceInterval to apply accumulated held-key moves.
+type keyTickMsg struct{}
+
+// keyCoalesceInterval bounds how often coalesced held-key moves are applied.
+const keyCoalesceInterval = wheelCoalesceInterval
+
+// isRepeatNavKey reports whether key is a held-repeatable movement key worth
+// coalescing. Info scrolls a bubbles viewport that needs the raw key message, so
+// it is excluded (and is cheap anyway).
+func (m *Model) isRepeatNavKey(key string) bool {
+	if m.mode == modeInfo {
+		return false
+	}
+	switch key {
+	case "up", "down", "k", "j", "pgup", "pgdown", "[", "]":
+		return true
+	}
+	return false
+}
+
+// enqueueNavKey applies a navigation key, coalescing a held key's repeats so
+// only the first lands immediately and the rest are batched onto a tick.
+func (m *Model) enqueueNavKey(key string) (tea.Model, tea.Cmd) {
+	if m.keyTicking {
+		if key == m.pendingKey {
+			m.pendingKeyN++     // accumulate; applied on the next tick
+			m.viewDirty = false // nothing new to draw yet — reuse the last frame
+			return m, nil
+		}
+		// A different held key: apply it now and let it take over the in-flight
+		// tick chain.
+		m.applyNavKey(key, 1)
+		m.pendingKey, m.pendingKeyN = key, 0
+		return m, nil
+	}
+	m.applyNavKey(key, 1)
+	m.pendingKey, m.pendingKeyN = key, 0
+	m.keyTicking = true
+	return m, tea.Tick(keyCoalesceInterval, func(time.Time) tea.Msg { return keyTickMsg{} })
+}
+
+// handleKeyTick applies the moves accumulated since the last tick, stopping the
+// chain once the held key has drained.
+func (m *Model) handleKeyTick() (tea.Model, tea.Cmd) {
+	if m.pendingKeyN <= 0 {
+		m.keyTicking = false
+		return m, nil
+	}
+	n := m.pendingKeyN
+	m.pendingKeyN = 0
+	m.applyNavKey(m.pendingKey, n)
+	return m, tea.Tick(keyCoalesceInterval, func(time.Time) tea.Msg { return keyTickMsg{} })
+}
+
+// applyNavKey dispatches a navigation key n times, preserving the viewport
+// reattach behaviour of the normal key path.
+func (m *Model) applyNavKey(key string, n int) {
+	for i := 0; i < n; i++ {
+		before := m.activeCursorState()
+		m.dispatchViewKey(nil, key)
+		if keyReattachesViewport(key) || before != m.activeCursorState() {
+			m.viewportDetached = false
+		}
+	}
 }
 
 func canonicalKeyString(key string) string {

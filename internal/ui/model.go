@@ -263,6 +263,15 @@ type interactionState struct {
 	pendingWheel int
 	wheelTicking bool
 
+	// Held-key coalescing: a held navigation key (j/k, [/], PgUp/PgDn) repeats
+	// faster than a heavy view can render. Repeats accumulate into pendingKeyN
+	// and are applied in one batch per keyCoalesceInterval, so the key-repeat
+	// flood drains cheaply instead of rendering (and possibly re-decoding) per
+	// event and blocking all other input behind it.
+	pendingKey  string
+	pendingKeyN int
+	keyTicking  bool
+
 	// Last top row/offset actually rendered for each scrollable view. Wheel input
 	// starts from these screen snapshots so queued key/mouse events cannot snap
 	// the first wheel step back to the caret-derived top.

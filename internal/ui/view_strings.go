@@ -16,98 +16,138 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 )
 
-// ensureStrings extracts the file's printable strings lazily.
+// ensureStrings extracts the file's printable strings lazily and builds the
+// (initially unfiltered) view list.
 func (m *Model) ensureStrings() {
 	if m.stringsList == nil {
 		m.stringsList = m.file.Strings()
+		m.recomputeStrings()
 	}
+}
+
+// recomputeStrings rebuilds stringsFiltered from the current filter text,
+// matching on the string text and its owning section.
+func (m *Model) recomputeStrings() {
+	m.clearStringCaches()
+	needle := strings.ToLower(m.stringsFilter.Value())
+	m.stringsFiltered = m.stringsFiltered[:0]
+	for i, s := range m.stringsList {
+		if needle == "" ||
+			strings.Contains(strings.ToLower(s.Text), needle) ||
+			strings.Contains(strings.ToLower(s.Section), needle) {
+			m.stringsFiltered = append(m.stringsFiltered, i)
+		}
+	}
+	if m.stringsCur >= len(m.stringsFiltered) {
+		m.stringsCur = max(0, len(m.stringsFiltered)-1)
+	}
+}
+
+// openStringSearch implements the -s CLI flag: it filters the printable strings
+// by s and either jumps to the single match (Hex if mapped, else Raw) or opens
+// the Strings view with the filter applied when several match.
+func (m *Model) openStringSearch(s string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return
+	}
+	m.ensureStrings()
+	m.stringsFilter.SetValue(s)
+	m.recomputeStrings()
+	m.stringsCur, m.stringsTop = 0, 0
+	switch len(m.stringsFiltered) {
+	case 0:
+		m.setMode(modeStrings)
+		m.setStatus(fmt.Sprintf("no strings match %q", s), true)
+	case 1:
+		e := m.stringsList[m.stringsFiltered[0]]
+		if e.HasAddr {
+			m.openHexAt(e.Addr)
+		} else {
+			m.openRawAt(e.Offset)
+		}
+		m.setStatus(fmt.Sprintf("string %q", s), false)
+	default:
+		m.setMode(modeStrings)
+		m.setStatus(fmt.Sprintf("%d strings match %q", len(m.stringsFiltered), s), false)
+	}
+}
+
+// currentString returns the selected string through the active filter.
+func (m *Model) currentString() (binfile.StringEntry, bool) {
+	if m.stringsCur < 0 || m.stringsCur >= len(m.stringsFiltered) {
+		return binfile.StringEntry{}, false
+	}
+	return m.stringsList[m.stringsFiltered[m.stringsCur]], true
 }
 
 func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	m.ensureStrings()
-	n := len(m.stringsList)
-	if n == 0 {
-		return m, nil
-	}
-	if navKey(&m.stringsCur, n, m.bodyHeight(), key) {
+	if navKey(&m.stringsCur, len(m.stringsFiltered), m.bodyHeight(), key) {
 		return m, nil
 	}
 	switch key {
+	case "/":
+		m.stringsFilter.Focus()
 	case "w":
 		m.toggleWrap()
 	case "enter":
-		s := m.stringsList[m.stringsCur]
-		if s.HasAddr {
-			m.openHexAt(s.Addr)
-		} else {
-			m.openRawAt(s.Offset)
+		if s, ok := m.currentString(); ok {
+			if s.HasAddr {
+				m.openHexAt(s.Addr)
+			} else {
+				m.openRawAt(s.Offset)
+			}
 		}
 	case "a":
-		s := m.stringsList[m.stringsCur]
-		if s.HasAddr {
-			m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), s.Addr), "address")
-		} else {
-			m.copyToClipboard(fmt.Sprintf("0x%x", s.Offset), "offset")
+		if s, ok := m.currentString(); ok {
+			if s.HasAddr {
+				m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), s.Addr), "address")
+			} else {
+				m.copyToClipboard(fmt.Sprintf("0x%x", s.Offset), "offset")
+			}
 		}
 	case "s":
-		m.copyToClipboard(m.stringsList[m.stringsCur].Text, "string")
-	case "/":
-		m.openSearch()
-	case "n":
-		m.runSearch(true, false)
-	case "N":
-		m.runSearch(false, false)
+		if s, ok := m.currentString(); ok {
+			m.copyToClipboard(s.Text, "string")
+		}
 	}
 	return m, nil
 }
 
-// searchStrings finds the next/previous string whose text contains the query.
-func (m *Model) searchStrings(start int, forward bool) int {
-	q := strings.ToLower(m.searchQuery)
-	n := len(m.stringsList)
-	if forward {
-		for i := start; i < n; i++ {
-			if i >= 0 && strings.Contains(strings.ToLower(m.stringsList[i].Text), q) {
-				return i
-			}
-		}
-		return -1
-	}
-	if start > n-1 {
-		start = n - 1
-	}
-	for i := start; i >= 0; i-- {
-		if strings.Contains(strings.ToLower(m.stringsList[i].Text), q) {
-			return i
-		}
-	}
-	return -1
-}
-
 func (m *Model) renderStrings() string {
 	bodyH := m.bodyHeight()
+	if bodyH < 2 {
+		bodyH = 2
+	}
 	m.ensureStrings()
 	if len(m.stringsList) == 0 {
 		return padBody("no printable strings found\n", m.width, bodyH)
+	}
+
+	filterRow := m.stringsFilter.View()
+	if !m.stringsFilter.Focused() {
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)",
+			m.stringsFilter.Value(), len(m.stringsFiltered), len(m.stringsList)))
 	}
 
 	addrW := m.file.AddrHexWidth()
 	hdr := fmt.Sprintf(" %-10s %-*s %-16s  %s", "Offset", 2+addrW, "Address", "Section", "String")
 	header := m.tableHeader(hdr)
 
-	visible := bodyH - 1
+	visible := bodyH - 2 // filter row + header
 	if visible < 1 {
 		visible = 1
 	}
 	rowHeight := func(i int) int {
 		return m.stringRowHeight(i)
 	}
-	top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsList), visible, rowHeight)
+	top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsFiltered), visible, rowHeight)
 	m.stringsTop = top
 	m.renderedStringsTop = top
 
-	rows := []string{header}
-	for i := top; i < len(m.stringsList); i++ {
+	rows := []string{filterRow, header}
+	for i := top; i < len(m.stringsFiltered); i++ {
 		line := m.stringRow(i, addrW)
 		if i == m.stringsCur {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
@@ -120,7 +160,7 @@ func (m *Model) renderStrings() string {
 }
 
 func (m *Model) stringRowHeight(i int) int {
-	if i < 0 || i >= len(m.stringsList) {
+	if i < 0 || i >= len(m.stringsFiltered) {
 		return 1
 	}
 	addrW := m.file.AddrHexWidth()
@@ -147,7 +187,7 @@ func (m *Model) stringRow(i, addrW int) string {
 		}
 	}
 
-	s := m.stringsList[i]
+	s := m.stringsList[m.stringsFiltered[i]]
 	addr := strings.Repeat(" ", 2+addrW)
 	if s.HasAddr {
 		addr = fmt.Sprintf("0x%0*x", addrW, s.Addr)

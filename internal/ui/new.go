@@ -29,6 +29,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	filter := newPromptInput("type to filter…", "/ ")
 	secFilter := newPromptInput("type to filter…", "/ ")
 	srcFilter := newPromptInput("type to filter…", "/ ")
+	strFilter := newPromptInput("type to filter…", "/ ")
 	gotoInput := newPromptInput("0x401000 or symbol name", "→ ")
 	searchInput := newPromptInput("hex bytes (de ad be ef) or text", "/ ")
 
@@ -54,6 +55,9 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 			showSource:          true,
 			srcVP:               viewport.New(),
 			srcHighlighter:      syntax.NewHighlighter(cfg.Colors.SyntaxTheme),
+		},
+		stringsState: stringsState{
+			stringsFilter: strFilter,
 		},
 		sourcesState: sourcesState{
 			sourcesFilter: srcFilter,
@@ -90,9 +94,14 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))
 
-	// A startup goto target (CLI arg) overrides the default view.
-	if len(opts) > 0 && strings.TrimSpace(opts[0].Goto) != "" {
-		m.gotoTargetString(opts[0].Goto)
+	// Startup CLI navigation overrides the default view.
+	if len(opts) > 0 {
+		if strings.TrimSpace(opts[0].Goto) != "" {
+			m.gotoTargetString(opts[0].Goto)
+		}
+		if strings.TrimSpace(opts[0].SearchString) != "" {
+			m.openStringSearch(opts[0].SearchString)
+		}
 	}
 	return m, nil
 }

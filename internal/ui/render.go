@@ -33,19 +33,6 @@ func bytesHex(b []byte, maxN int) string {
 	return sb.String()
 }
 
-// truncate trims s to n display columns, appending an ellipsis when it doesn't
-// fit. It is width- and rune-aware (never splits a multi-byte rune), so it is
-// safe for arbitrary UTF-8 text.
-func truncate(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= n {
-		return s
-	}
-	return ansi.Truncate(s, n, "…")
-}
-
 // truncateMiddle keeps both ends of a string visible within n columns.
 func truncateMiddle(s string, n int) string {
 	if n <= 0 {

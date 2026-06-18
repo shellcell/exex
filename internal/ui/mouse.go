@@ -152,7 +152,7 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 	case modeStrings:
 		m.ensureStrings()
 		visible := max(1, m.bodyHeight()-1)
-		m.stringsTop = scrollViewportTop(m.stringsTop, len(m.stringsList), visible, delta, m.stringRowHeight)
+		m.stringsTop = scrollViewportTop(m.stringsTop, len(m.stringsFiltered), visible, delta, m.stringRowHeight)
 	case modeSources:
 		m.ensureSources()
 		visible := max(1, m.bodyHeight()-1)
@@ -193,7 +193,7 @@ func (m *Model) captureViewportTop() {
 	case modeStrings:
 		m.ensureStrings()
 		visible := max(1, m.bodyHeight()-1)
-		m.stringsTop = viewportTop(m.renderedStringsTop, len(m.stringsList), visible, m.stringRowHeight)
+		m.stringsTop = viewportTop(m.renderedStringsTop, len(m.stringsFiltered), visible, m.stringRowHeight)
 	case modeSources:
 		m.ensureSources()
 		visible := max(1, m.bodyHeight()-1)
@@ -402,10 +402,10 @@ func (m *Model) handleClick(x, y int) {
 		}
 		m.rawCur = m.clickByte(modeRaw, m.rawData, top, m.rawCur, x, bodyRow, identityAddr)
 	case modeStrings:
-		// Body layout: row 0 is the column header, data follows.
-		visible := max(1, m.bodyHeight()-1)
-		top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsList), visible, m.stringRowHeight)
-		if idx, ok := visualItemAtRow(top, len(m.stringsList), bodyRow-1, m.stringRowHeight); ok {
+		// Body layout: row 0 filter, row 1 header, data follows.
+		visible := max(1, m.bodyHeight()-2)
+		top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsFiltered), visible, m.stringRowHeight)
+		if idx, ok := visualItemAtRow(top, len(m.stringsFiltered), bodyRow-2, m.stringRowHeight); ok {
 			m.stringsCur = idx
 		}
 	case modeSources:

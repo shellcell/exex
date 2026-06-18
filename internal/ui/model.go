@@ -210,10 +210,12 @@ type libsState struct {
 	libsTop int
 }
 
-// stringsState stores list and cache state for printable strings.
+// stringsState stores list, filter and cache state for printable strings.
 type stringsState struct {
 	stringsList       []binfile.StringEntry
-	stringsCur        int
+	stringsFilter     textinput.Model
+	stringsFiltered   []int // indices into stringsList
+	stringsCur        int   // index into stringsFiltered
 	stringsTop        int
 	stringRowCache    map[rowCacheKey]string
 	stringHeightCache map[rowCacheKey]int
@@ -382,4 +384,8 @@ type Options struct {
 	// Goto is an optional startup target (an address like "0x1000" or a symbol
 	// name) navigated to once the model is built, overriding the default view.
 	Goto string
+	// SearchString, when set, searches the printable strings on startup: a single
+	// match opens the Hex (or Raw) view at it, several open the Strings view
+	// filtered by it.
+	SearchString string
 }

@@ -3,8 +3,32 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestReorderArgs(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		// flag after the positional binary path
+		{[]string{"/bin/ls", "-s", "Main window"}, "-s|Main window|/bin/ls"},
+		// flag value kept attached, positionals preserved in order
+		{[]string{"bin", "-debug", "d.dSYM", "0x1000"}, "-debug|d.dSYM|bin|0x1000"},
+		// -s=value form is self-contained
+		{[]string{"bin", "-s=foo"}, "-s=foo|bin"},
+		// already flags-first is unchanged
+		{[]string{"-s", "foo", "bin"}, "-s|foo|bin"},
+		// everything after -- is positional
+		{[]string{"-s", "x", "--", "-weirdname"}, "-s|x|-weirdname"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(reorderArgs(c.in), "|"); got != c.want {
+			t.Errorf("reorderArgs(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
 
 func TestResolveTargetKeepsExistingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app")

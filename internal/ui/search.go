@@ -99,8 +99,6 @@ func (m *Model) runSearchWithOrigin(forward, inclusive bool, fromCursor bool) te
 		m.runHexSearch(forward, inclusive, fromCursor)
 	case modeRaw:
 		m.runRawSearch(forward, inclusive, fromCursor)
-	case modeStrings:
-		m.runStringsSearch(forward, inclusive, fromCursor)
 	case modeSources:
 		m.runSourcesSearch(forward, inclusive)
 	default:
@@ -141,30 +139,6 @@ func (m *Model) runRawSearch(forward, inclusive, fromCursor bool) {
 		}
 	}
 	m.rawCur = m.searchBytesAt(m.rawData, start, forward, inclusive)
-}
-
-func (m *Model) runStringsSearch(forward, inclusive, fromCursor bool) {
-	m.ensureStrings()
-	start := m.stringsCur
-	if !fromCursor {
-		if forward {
-			start = 0
-		} else {
-			start = len(m.stringsList) - 1
-		}
-	} else if !inclusive {
-		if forward {
-			start++
-		} else {
-			start--
-		}
-	}
-	if i := m.searchStrings(start, forward); i >= 0 {
-		m.stringsCur = i
-		m.setStatus("match: "+truncate(m.stringsList[i].Text, 40), false)
-	} else {
-		m.setStatus("not found: "+m.searchQuery, true)
-	}
 }
 
 func (m *Model) runSourcesSearch(forward, inclusive bool) {

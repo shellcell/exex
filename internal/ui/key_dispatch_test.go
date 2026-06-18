@@ -17,6 +17,8 @@ func TestKeyCoalescing(t *testing.T) {
 		layoutState:  layoutState{width: 80, height: 24},
 		stringsState: stringsState{stringsList: make([]binfile.StringEntry, 5000)},
 	}
+	m.stringsFilter = newPromptInput("", "/ ")
+	m.recomputeStrings()
 
 	m.enqueueNavKey("down")
 	if !m.keyTicking {

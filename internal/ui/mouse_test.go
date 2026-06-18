@@ -9,7 +9,7 @@ import (
 )
 
 func wheelDownModel() *Model {
-	return &Model{
+	m := &Model{
 		theme:       DefaultTheme(),
 		file:        &binfile.File{},
 		mode:        modeStrings,
@@ -18,6 +18,9 @@ func wheelDownModel() *Model {
 			stringsList: make([]binfile.StringEntry, 5000),
 		},
 	}
+	m.stringsFilter = newPromptInput("", "/ ")
+	m.recomputeStrings() // empty filter → all rows visible
+	return m
 }
 
 func wheelDown(m *Model) {

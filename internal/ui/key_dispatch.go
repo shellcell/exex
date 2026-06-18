@@ -269,6 +269,8 @@ func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) 
 		return filterCapture(&m.symbolsFilter, key, msg, m.recomputeSymbols)
 	case modeSections:
 		return filterCapture(&m.sectionsFilter, key, msg, m.recomputeSections)
+	case modeStrings:
+		return filterCapture(&m.stringsFilter, key, msg, m.recomputeStrings)
 	case modeSources:
 		if m.srcFile == "" {
 			return filterCapture(&m.sourcesFilter, key, msg, m.recomputeSourceFiles)

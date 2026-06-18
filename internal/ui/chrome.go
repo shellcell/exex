@@ -323,7 +323,7 @@ func (m *Model) renderFooter() string {
 	case modeInfo:
 		help = "Enter disasm entry · g goto · ? help · q quit"
 	case modeStrings:
-		help = "Enter jump · / search · g goto · ? help · q quit"
+		help = "Enter jump · / filter · g goto · ? help · q quit"
 	case modeSections:
 		help = "Enter open · / filter · g goto · ? help · q quit"
 	case modeSymbols:

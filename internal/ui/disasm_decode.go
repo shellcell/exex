@@ -88,6 +88,7 @@ func (m *Model) ensureDisasm() bool {
 	}
 	win, insts := m.decodeDisasmAt(target, m.disasmLeadBytes())
 	m.disasmPosLo, m.disasmPosHi, m.disasmInst = win.Start, win.End, insts
+	m.disasmHeightCache = nil
 	return len(m.disasmInst) > 0
 }
 
@@ -176,6 +177,7 @@ func (m *Model) setDisasmWindow(win binfile.Window, insts []disasm.Inst) bool {
 	m.disasmDecoding = false
 	m.disasmPendingAddr = 0
 	m.sourceAsmRowCache = nil
+	m.disasmHeightCache = nil
 	return len(insts) > 0
 }
 

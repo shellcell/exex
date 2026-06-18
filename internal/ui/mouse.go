@@ -18,6 +18,15 @@ const doubleClickWindow = 350 * time.Millisecond
 
 const wheelQuietInterval = 120 * time.Millisecond
 
+// wheelCoalesceInterval bounds how often accumulated wheel deltas are actually
+// applied. A trackpad can emit hundreds of wheel events per gesture; without
+// this, each one ran a full scroll+render synchronously and the backlog blocked
+// all other input (clicks, keys) until it drained.
+const wheelCoalesceInterval = 16 * time.Millisecond
+
+// wheelTickMsg fires after wheelCoalesceInterval to apply any accumulated scroll.
+type wheelTickMsg struct{}
+
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	ms := msg.Mouse()
 	shift := ms.Mod&tea.ModShift != 0
@@ -45,7 +54,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if _, ok := msg.(tea.MouseClickMsg); ok && ms.Button == tea.MouseLeft {
-		if ms.Y == 0 { // the tab strip
+		m.pendingWheel = 0 // a click halts any in-flight wheel momentum
+		if ms.Y == 0 {     // the tab strip
 			if md, ok := m.tabHitTest(ms.X); ok {
 				return m, m.switchMode(md)
 			}
@@ -78,6 +88,7 @@ func (m *Model) enqueueWheel(delta int) (tea.Model, tea.Cmd) {
 	now := time.Now()
 	if now.Before(m.wheelSuppressUntil) {
 		m.wheelSuppressUntil = now.Add(wheelQuietInterval)
+		m.viewDirty = false // dropped: nothing changed, reuse the last frame
 		return m, nil
 	}
 
@@ -85,7 +96,36 @@ func (m *Model) enqueueWheel(delta int) (tea.Model, tea.Cmd) {
 		m.captureViewportTop()
 		m.viewportDetached = true
 	}
-	return m.routeScroll(delta)
+	m.pendingWheel += delta
+	// While a coalescing tick is in flight, just accumulate — this keeps a flood
+	// of momentum events nearly free (no scroll, no re-render) so the message
+	// queue (and any click/key behind it) drains immediately.
+	if m.wheelTicking {
+		m.viewDirty = false
+		return m, nil
+	}
+	m.wheelTicking = true
+	return m.flushWheel()
+}
+
+// flushWheel applies the accumulated scroll delta and schedules the next tick.
+func (m *Model) flushWheel() (tea.Model, tea.Cmd) {
+	if m.pendingWheel != 0 {
+		d := m.pendingWheel
+		m.pendingWheel = 0
+		m.routeScroll(d)
+	}
+	return m, tea.Tick(wheelCoalesceInterval, func(time.Time) tea.Msg { return wheelTickMsg{} })
+}
+
+// handleWheelTick applies any scroll accumulated since the last tick, stopping
+// the ticker once the burst has drained.
+func (m *Model) handleWheelTick() (tea.Model, tea.Cmd) {
+	if m.pendingWheel == 0 {
+		m.wheelTicking = false
+		return m, nil
+	}
+	return m.flushWheel()
 }
 
 func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {

@@ -29,6 +29,9 @@ func (m *Model) setStatus(s string, isError bool) {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Assume each message changes the screen; the rare no-op paths (coalesced
+	// wheel events) clear this so View() can reuse the previous frame.
+	m.viewDirty = true
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
@@ -39,6 +42,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+
+	case wheelTickMsg:
+		return m.handleWheelTick()
 
 	case disasmReadyMsg:
 		return m.handleDisasmReady(msg)
@@ -82,6 +88,7 @@ func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	m.disasmPosLo = msg.posLo
 	m.disasmPosHi = msg.posHi
 	m.sourceAsmRowCache = nil
+	m.disasmHeightCache = nil
 	m.disasmBuilt = true
 	m.disasmDecoding = false
 	m.disasmPendingAddr = 0

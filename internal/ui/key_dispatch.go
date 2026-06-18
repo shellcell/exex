@@ -10,6 +10,10 @@ import (
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := canonicalKeyString(msg.String())
 
+	// A keypress cancels any in-flight wheel momentum so it can't keep scrolling
+	// after the user has moved on.
+	m.pendingWheel = 0
+
 	// The help overlay swallows the next keypress to dismiss itself.
 	if m.helpActive {
 		m.helpActive = false

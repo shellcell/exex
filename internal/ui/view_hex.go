@@ -639,16 +639,16 @@ func (m *Model) renderHexRow(md mode, data []byte, cur int, span hexRowSpan, add
 			continue
 		}
 		b := data[i]
-		ascii := byte('.')
-		if b >= 0x20 && b < 0x7f {
-			ascii = b
-		}
 		if i == cur {
+			ascii := byte('.')
+			if b >= 0x20 && b < 0x7f {
+				ascii = b
+			}
 			hexCol.WriteString(m.theme.tableSelStyle.Render(hex2(b)))
 			asciiCol.WriteString(m.theme.tableSelStyle.Render(string(ascii)))
 		} else {
 			hexCol.WriteString(byteHex[b])
-			asciiCol.WriteString(byteFG[b].Render(string(ascii)))
+			asciiCol.WriteString(byteASCII[b])
 		}
 	}
 	var line strings.Builder

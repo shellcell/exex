@@ -388,6 +388,10 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	if i < 0 || i >= len(m.disasmInst) {
 		return 1
 	}
+	key := disasmHeightKey{i: i, w: w, wrap: m.wrap}
+	if h, ok := m.disasmHeightCache[key]; ok {
+		return h
+	}
 	inst := m.disasmInst[i]
 	h := len(m.disasmInstRows(inst, w, false, nil))
 	if m.disasmIsSymbolStart(i) {
@@ -398,6 +402,10 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 			h++
 		}
 	}
+	if m.disasmHeightCache == nil {
+		m.disasmHeightCache = make(map[disasmHeightKey]int)
+	}
+	m.disasmHeightCache[key] = h
 	return h
 }
 

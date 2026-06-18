@@ -331,6 +331,11 @@ var byteHex [256]string
 // nibble — making structural patterns in raw bytes pop out visually.
 var byteFG [256]lipgloss.Style
 
+// byteASCII holds the pre-rendered, per-byte-coloured ASCII cell ("." for
+// non-printable bytes). Like byteHex, this avoids a lipgloss.Render call for
+// every byte of every visible row on each frame.
+var byteASCII [256]string
+
 // defaultBytePalette is the built-in 18-colour ramp. Index 0 = 0x00 (grey),
 // 1..16 = high-nibble buckets for 0x01..0xFE, 17 = 0xFF (white).
 var defaultBytePalette = [18]string{
@@ -381,6 +386,11 @@ func setBytePalette(p []string) {
 		}
 		byteFG[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(p[idx]))
 		byteHex[i] = byteFG[i].Render(hex2(byte(i)))
+		ch := byte('.')
+		if i >= 0x20 && i < 0x7f {
+			ch = byte(i)
+		}
+		byteASCII[i] = byteFG[i].Render(string(ch))
 	}
 }
 

@@ -14,6 +14,12 @@ func (m *Model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		return tea.NewView("initializing…")
 	}
+	// Reuse the last frame when the preceding message changed nothing visible
+	// (e.g. a coalesced wheel event that only accumulated scroll), so a flood of
+	// such events can't make each redraw rebuild the whole screen.
+	if !m.viewDirty && m.viewCache != "" {
+		return m.screenView(m.viewCache)
+	}
 	parts := []string{m.renderTabs()}
 	body := ""
 	switch m.mode {
@@ -46,6 +52,14 @@ func (m *Model) View() tea.View {
 	case m.searchActive:
 		out = m.overlayCenter(out, m.renderSearchModal())
 	}
+	m.viewCache = out
+	m.viewDirty = false
+	return m.screenView(out)
+}
+
+// screenView wraps a rendered body string in the alt-screen / mouse-mode view
+// configuration shared by every frame.
+func (m *Model) screenView(out string) tea.View {
 	v := tea.NewView(out)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion

@@ -210,3 +210,14 @@ func (m *Model) copyToClipboard(text, what string) {
 	}
 	m.setStatus(fmt.Sprintf("copied %s: %s", what, text), false)
 }
+
+// copyBlob puts a large multi-line payload on the clipboard and reports a short
+// summary (not the payload) in the footer — for content too big to echo, like a
+// whole function's disassembly.
+func (m *Model) copyBlob(text, summary string) {
+	if err := clipboard.WriteAll(text); err != nil {
+		m.setStatus(fmt.Sprintf("clipboard: %v", err), true)
+		return
+	}
+	m.setStatus(summary, false)
+}

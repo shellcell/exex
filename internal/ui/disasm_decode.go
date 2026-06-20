@@ -6,7 +6,9 @@ package ui
 // index helpers that locate an instruction by address.
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,6 +16,56 @@ import (
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 )
+
+// functionInsts decodes and returns the instructions making up sym's extent,
+// fresh from the executable image so the whole function is covered even when the
+// currently-visible window doesn't span it. nil when the symbol has no size or
+// isn't in executable code.
+func (m *Model) functionInsts(sym binfile.Symbol) []disasm.Inst {
+	if sym.Size == 0 || m.dis == nil {
+		return nil
+	}
+	img := m.file.ExecImage()
+	pos, ok := img.PosForAddr(sym.Addr)
+	if !ok {
+		return nil
+	}
+	win := img.Window(pos, int(sym.Size))
+	end := sym.Addr + sym.Size
+	var out []disasm.Inst
+	for _, in := range m.disasmService().DecodeWindow(win) {
+		if in.Addr >= sym.Addr && in.Addr < end {
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+// functionDisasmText renders a function's instructions as plain, copy-friendly
+// "addr:  bytes  text" lines under a header naming the symbol and its range. It
+// is pure (no styling, no clipboard) so it can be unit-tested directly.
+func functionDisasmText(sym binfile.Symbol, insts []disasm.Inst, addrW int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s  (0x%0*x–0x%0*x, %d bytes)\n",
+		sym.Display(), addrW, sym.Addr, addrW, sym.Addr+sym.Size, sym.Size)
+	for _, in := range insts {
+		fmt.Fprintf(&b, "0x%0*x:  %-21s %s\n",
+			addrW, in.Addr, plainBytesString(in.Bytes), strings.TrimSpace(in.Text))
+	}
+	return b.String()
+}
+
+// plainBytesString formats instruction bytes as space-separated hex, no colour.
+func plainBytesString(b []byte) string {
+	var sb strings.Builder
+	for i, x := range b {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
+		fmt.Fprintf(&sb, "%02x", x)
+	}
+	return sb.String()
+}
 
 // disasmReadyMsg carries the finished decode from the background worker.
 type disasmReadyMsg struct {

@@ -115,6 +115,7 @@ func (m *Model) renderHelpModal() string {
 		row("[ / ]", "previous / next symbol"),
 		row("Enter / dbl-clk", "follow address"),
 		row("x", "find references (xrefs)"),
+		row("a / s / c", "copy addr / symbol / function asm"),
 		row("/  n/N", "search · next/prev"),
 		row("Tab", "show / hide right pane"),
 		row("⇧Tab", "swap source / disasm"),
@@ -345,7 +346,7 @@ func (m *Model) renderFooter() string {
 	case modeSymbols:
 		help = "Enter jump · / filter · g goto · ? help · q quit"
 	case modeDisasm:
-		help = "Enter follow · [ ] sym · x xrefs · ←/→ history · / search · g goto · ? help · q quit"
+		help = "Enter follow · [ ] sym · x xrefs · c copy func · ←/→ history · / search · ? help"
 		if (m.showSource || m.sourceFirst) && m.file.HasDWARF() {
 			help = "Tab toggle right pane · ⇧Tab swap panes · ⇧↑/⇧↓ scroll pane · [ ] sym · ←/→ history · / search · ? help · q quit"
 		}

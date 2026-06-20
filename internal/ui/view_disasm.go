@@ -105,8 +105,32 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("no symbol at this address", true)
 		}
+	case "c":
+		m.copyFunctionDisasm()
 	}
 	return m, nil
+}
+
+// copyFunctionDisasm copies the disassembly of the function under the cursor to
+// the clipboard as plain "addr: bytes  text" lines — the natural unit for bug
+// reports, diffs and pasting into an LLM. The range comes from the symbol extent.
+func (m *Model) copyFunctionDisasm() {
+	if len(m.disasmInst) == 0 {
+		m.setStatus("no disassembly loaded", true)
+		return
+	}
+	sym, ok := m.file.SymbolAt(m.disasmInst[m.disasmCur].Addr)
+	if !ok || sym.Size == 0 {
+		m.setStatus("cursor is not inside a sized function", true)
+		return
+	}
+	insts := m.functionInsts(sym)
+	if len(insts) == 0 {
+		m.setStatus("no instructions to copy for this function", true)
+		return
+	}
+	text := functionDisasmText(sym, insts, m.file.AddrHexWidth())
+	m.copyBlob(text, fmt.Sprintf("copied %d instructions of %s", len(insts), sym.Display()))
 }
 
 // extractTargetAt finds the first 0x-prefixed hex number in text starting at

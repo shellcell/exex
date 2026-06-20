@@ -117,7 +117,7 @@ Output streams, so `| head` returns immediately even on large binaries.
 
 | Key | Action |
 |-----|--------|
-| `1`–`9` | switch view (Info, Sections, Symbols, Disasm, Hex, Libs, Raw, Strings, Sources) |
+| `1`–`9` | switch view (Info, Sections, Symbols, Disasm, Hex, Raw, Strings, Libs, Sources) |
 | `↑/↓` `j/k`, `PgUp/PgDn`, `Home/End` | move / page (also `⌘↑`/`⌘↓`, `^A`/`^E` on macOS) |
 | `/` | filter / search the current view |
 | `Enter` | open / follow / jump |

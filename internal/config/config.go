@@ -31,7 +31,7 @@ type Config struct {
 // Behavior holds non-visual preferences.
 type Behavior struct {
 	// View to open on startup: one of info, sections, symbols, disasm, hex,
-	// libs, raw, strings. Empty keeps the default (info).
+	// raw, strings, libs, sources. Empty keeps the default (info).
 	DefaultView string `yaml:"default_view"`
 	// Where the disasm view lands by default, and where it redirects when asked
 	// to show a non-executable address: one of entry, main, start, text, lowest.

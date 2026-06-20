@@ -173,6 +173,10 @@ type disasmState struct {
 	// re-renders each instruction to count rows, which the scroll math calls
 	// dozens of times per wheel tick). Reset whenever disasmInst is replaced.
 	disasmHeightCache map[disasmHeightKey]int
+	// execSecStarts maps each executable section's start address to its name, so
+	// the disasm scroller's per-row section-separator check is an O(1) lookup
+	// instead of a scan over all sections. Built once (sections are immutable).
+	execSecStarts map[uint64]string
 }
 
 // disasmHeightKey identifies a cached instruction height for one layout.
@@ -221,6 +225,10 @@ type rawState struct {
 	rawTop       int
 	rawPinnedTop int // section start pinned by jump/search until wheel scroll
 	rawPinned    bool
+	// rawSecByOff is the file-backed sections sorted by file offset, so the raw
+	// view's per-row section lookups binary-search instead of scanning every
+	// section. Built once (sections are immutable).
+	rawSecByOff []*binfile.Section
 }
 
 // libsState stores cursor and viewport state for the Libraries view.

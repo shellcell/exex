@@ -139,7 +139,7 @@ func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.disasmInst = msg.insts
-	m.disasmPosLo = msg.posLo
+	m.disasmPosLo = m.posLoFor(msg.posLo, msg.insts)
 	m.disasmPosHi = msg.posHi
 	m.sourceAsmRowCache = nil
 	m.disasmHeightCache = nil

@@ -180,8 +180,8 @@ keys:
   settings: ","   # open the settings popup
 
 behavior:
-  # View to open on startup: info, sections, symbols, disasm, hex, libs, raw,
-  # strings, sources. Defaults to info.
+  # View to open on startup: info, sections, symbols, disasm, hex, raw,
+  # strings, libs, sources. Defaults to info.
   default_view: info
   # Tint the view/pane area with the theme background. Off by default (the UI
   # uses the terminal's own background). Toggle live from the settings popup (,).

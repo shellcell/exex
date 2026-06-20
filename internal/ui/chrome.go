@@ -294,9 +294,9 @@ var tabItems = []struct {
 	{"3·Symbols", modeSymbols},
 	{"4·Disasm", modeDisasm},
 	{"5·Hex", modeHex},
-	{"6·Libs", modeLibs},
-	{"7·Raw", modeRaw},
-	{"8·Strings", modeStrings},
+	{"6·Raw", modeRaw},
+	{"7·Strings", modeStrings},
+	{"8·Libs", modeLibs},
 	{"9·Sources", modeSources},
 }
 
@@ -312,7 +312,7 @@ func (m *Model) tabSegment(label string, active bool) string {
 // ELF-only). Shared by renderTabs and tabHitTest so their geometry matches.
 func (m *Model) tabLead() []string {
 	return []string{
-		m.theme.titleStyle.Render(" exex "),
+		m.theme.titleStyle.Render(" ExEx "),
 		m.theme.tabStyle.Render(string(m.file.Format)),
 	}
 }

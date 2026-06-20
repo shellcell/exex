@@ -13,6 +13,7 @@ package ui
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -340,33 +341,24 @@ func (m *Model) jumpByteCursor(md mode, pos int) {
 }
 
 // seekHexSection moves the byte cursor to the start of the next/previous mapped
-// section (by virtual address), reporting when there is none in that direction.
+// region (by virtual address), reporting when there is none in that direction.
+// The VA image's Regions are the mapped sections sorted by address, so this is a
+// binary search; a region's Off is exactly the byte position of its start.
 func (m *Model) seekHexSection(forward bool) int {
 	curAddr := m.hexImg.AddrAt(m.hexCur)
-	best := uint64(0)
-	found := false
-	for i := range m.file.Sections {
-		s := &m.file.Sections[i]
-		if !s.Alloc || s.Size == 0 {
-			continue
+	regs := m.hexImg.Regions
+	if forward {
+		i := sort.Search(len(regs), func(i int) bool { return regs[i].Addr > curAddr })
+		if i < len(regs) {
+			return regs[i].Off
 		}
-		if forward {
-			if s.Addr > curAddr && (!found || s.Addr < best) {
-				best, found = s.Addr, true
-			}
-		} else {
-			if s.Addr < curAddr && (!found || s.Addr > best) {
-				best, found = s.Addr, true
-			}
+	} else {
+		i := sort.Search(len(regs), func(i int) bool { return regs[i].Addr >= curAddr })
+		if i > 0 {
+			return regs[i-1].Off
 		}
 	}
-	if !found {
-		m.setStatus("no more sections in this direction", false)
-		return m.hexCur
-	}
-	if pos, ok := m.hexImg.PosForAddr(best); ok {
-		return pos
-	}
+	m.setStatus("no more sections in this direction", false)
 	return m.hexCur
 }
 
@@ -435,24 +427,21 @@ func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
 }
 
 // seekRawSection moves the raw cursor to the start of the next/previous
-// section's file bytes (by file offset).
+// section's file bytes (by file offset), via the offset-sorted index.
 func (m *Model) seekRawSection(forward bool) int {
 	cur := uint64(m.rawCur)
+	secs := m.rawSectionsByOffset()
 	best := uint64(0)
 	found := false
-	for i := range m.file.Sections {
-		s := &m.file.Sections[i]
-		if s.FileSize == 0 {
-			continue
+	if forward {
+		i := sort.Search(len(secs), func(i int) bool { return secs[i].Offset > cur })
+		if i < len(secs) {
+			best, found = secs[i].Offset, true
 		}
-		if forward {
-			if s.Offset > cur && (!found || s.Offset < best) {
-				best, found = s.Offset, true
-			}
-		} else {
-			if s.Offset < cur && (!found || s.Offset > best) {
-				best, found = s.Offset, true
-			}
+	} else {
+		i := sort.Search(len(secs), func(i int) bool { return secs[i].Offset >= cur })
+		if i > 0 {
+			best, found = secs[i-1].Offset, true
 		}
 	}
 	if !found {
@@ -465,16 +454,37 @@ func (m *Model) seekRawSection(forward bool) int {
 	return m.rawCur
 }
 
-// sectionAtOffset returns the section whose file bytes cover off.
+// rawSectionsByOffset returns the file-backed sections sorted by file offset,
+// built once and cached (sections are immutable), so the raw view's per-row
+// section lookups binary-search instead of scanning all sections each render.
+func (m *Model) rawSectionsByOffset() []*binfile.Section {
+	if m.rawSecByOff == nil {
+		var secs []*binfile.Section
+		for i := range m.file.Sections {
+			if m.file.Sections[i].FileSize > 0 {
+				secs = append(secs, &m.file.Sections[i])
+			}
+		}
+		sort.Slice(secs, func(i, j int) bool { return secs[i].Offset < secs[j].Offset })
+		if secs == nil {
+			secs = []*binfile.Section{} // cache the "none" result too
+		}
+		m.rawSecByOff = secs
+	}
+	return m.rawSecByOff
+}
+
+// sectionAtOffset returns the section whose file bytes cover off (binary search
+// over the offset-sorted index; well-formed section file ranges don't overlap).
 func (m *Model) sectionAtOffset(off uint64) *binfile.Section {
-	for i := range m.file.Sections {
-		s := &m.file.Sections[i]
-		if s.FileSize == 0 {
-			continue
-		}
-		if off >= s.Offset && off < s.Offset+s.FileSize {
-			return s
-		}
+	secs := m.rawSectionsByOffset()
+	i := sort.Search(len(secs), func(i int) bool { return secs[i].Offset > off })
+	if i == 0 {
+		return nil
+	}
+	s := secs[i-1]
+	if off < s.Offset+s.FileSize {
+		return s
 	}
 	return nil
 }
@@ -689,11 +699,10 @@ func (m *Model) hexSectionStartName(md mode, off int) string {
 		}
 		return ""
 	}
-	for i := range m.file.Sections {
-		s := &m.file.Sections[i]
-		if s.FileSize > 0 && s.Offset == uint64(off) {
-			return s.Name
-		}
+	secs := m.rawSectionsByOffset()
+	i := sort.Search(len(secs), func(i int) bool { return secs[i].Offset >= uint64(off) })
+	if i < len(secs) && secs[i].Offset == uint64(off) {
+		return secs[i].Name
 	}
 	return ""
 }
@@ -754,27 +763,22 @@ func (m *Model) pinnedByteSectionTop(md mode) (int, bool) {
 }
 
 func (m *Model) nextHexSectionStart(md mode, off int) (int, bool) {
-	best := 0
-	found := false
 	if md == modeHex {
-		for _, r := range m.hexImg.Regions {
-			if r.Off > off && (!found || r.Off < best) {
-				best, found = r.Off, true
-			}
+		// Regions are sorted by Off, so binary-search the first one past off.
+		regs := m.hexImg.Regions
+		i := sort.Search(len(regs), func(i int) bool { return regs[i].Off > off })
+		if i < len(regs) {
+			return regs[i].Off, true
 		}
-		return best, found
+		return 0, false
 	}
-	for i := range m.file.Sections {
-		s := &m.file.Sections[i]
-		if s.FileSize == 0 || s.Offset > uint64(int(^uint(0)>>1)) {
-			continue
-		}
-		start := int(s.Offset)
-		if start > off && (!found || start < best) {
-			best, found = start, true
-		}
+	// Raw: file-section offsets, indexed sorted once (see rawSectionsByOffset).
+	secs := m.rawSectionsByOffset()
+	i := sort.Search(len(secs), func(i int) bool { return secs[i].Offset > uint64(off) })
+	if i < len(secs) {
+		return int(secs[i].Offset), true
 	}
-	return best, found
+	return 0, false
 }
 
 // hexWordDecode renders a row's pointer-sized little-/big-endian words (per the

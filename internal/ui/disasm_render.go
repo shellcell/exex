@@ -221,6 +221,15 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 	var rows []string
 	for i := top; i < len(m.disasmInst) && len(rows) < h; i++ {
 		inst := m.disasmInst[i]
+		// A "═══ .section ═══" banner where an executable section begins (like the
+		// hex view). Emitted before the symbol label; its row is accounted for in
+		// disasmInstVisualHeight so scroll/click math stays correct.
+		if name, ok := m.disasmSectionStart(i); ok {
+			rows = append(rows, m.disasmSectionBanner(name, w))
+			if len(rows) >= h {
+				break
+			}
+		}
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
 			for _, row := range m.disasmLabelRows(sym.Display(), w) {
 				if len(rows) >= h {
@@ -268,6 +277,9 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	}
 	inst := m.disasmInst[i]
 	h := len(m.disasmInstRows(inst, w, false, nil))
+	if _, ok := m.disasmSectionStart(i); ok {
+		h++ // the "═══ .section ═══" separator row
+	}
 	if m.disasmIsSymbolStart(i) {
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
 			h += len(m.disasmLabelRows(sym.Display(), w))
@@ -458,6 +470,35 @@ func (m *Model) disasmIsSymbolStart(i int) bool {
 	}
 	sym, ok := m.file.SymbolAt(m.disasmInst[i].Addr)
 	return ok && sym.Addr == m.disasmInst[i].Addr
+}
+
+// disasmSectionStart reports whether instruction i begins an executable section
+// (and so is preceded by a "═══ name ═══" separator in the scroller). The
+// exec-section start addresses are indexed once so this is an O(1) lookup per
+// row, not a scan over all sections on every render.
+func (m *Model) disasmSectionStart(i int) (string, bool) {
+	if i < 0 || i >= len(m.disasmInst) {
+		return "", false
+	}
+	if m.execSecStarts == nil {
+		m.execSecStarts = make(map[uint64]string)
+		for j := range m.file.Sections {
+			s := &m.file.Sections[j]
+			if s.Exec && s.Size > 0 {
+				m.execSecStarts[s.Addr] = s.Name
+			}
+		}
+	}
+	name, ok := m.execSecStarts[m.disasmInst[i].Addr]
+	return name, ok
+}
+
+// disasmSectionBanner renders the centred section separator row (matching the
+// hex view's "═══ name ═══" banner) to width w.
+func (m *Model) disasmSectionBanner(name string, w int) string {
+	banner := lipgloss.PlaceHorizontal(max(1, w-1), lipgloss.Center, " "+name+" ",
+		lipgloss.WithWhitespaceChars("="))
+	return padRight(m.theme.sectionStyle.Render(banner), w)
 }
 
 func (m *Model) renderSourcePane(w, h int) string {

@@ -184,7 +184,7 @@ func (m *Model) renderInfo() string {
 			kv("Libc", v)
 		}
 		if len(info.DynamicLibs) > 0 {
-			kv("Needed libs", num(fmt.Sprintf("%d", len(info.DynamicLibs)))+"  "+dim("(press 6 to view)"))
+			kv("Needed libs", num(fmt.Sprintf("%d", len(info.DynamicLibs)))+"  "+dim("(press 8 to view)"))
 		}
 
 		// Toolchain / provenance.

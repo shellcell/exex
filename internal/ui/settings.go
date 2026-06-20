@@ -20,7 +20,7 @@ const settingsFieldCount = 4
 
 // settingsViewNames is the cycle for the "default view" setting.
 var settingsViewNames = []string{
-	"info", "sections", "symbols", "disasm", "hex", "libs", "raw", "strings", "sources",
+	"info", "sections", "symbols", "disasm", "hex", "raw", "strings", "libs", "sources",
 }
 
 // settingsThemeList is the cycle for the "theme" setting: the built-in names

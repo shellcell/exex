@@ -90,7 +90,8 @@ func (m *Model) ensureDisasm() bool {
 		target = explorer.DefaultExecAddr(m.file, m.disasmTarget)
 	}
 	win, insts := m.decodeDisasmAt(target, m.disasmLeadBytes())
-	m.disasmPosLo, m.disasmPosHi, m.disasmInst = win.Start, win.End, insts
+	m.disasmInst = insts
+	m.disasmPosLo, m.disasmPosHi = m.posLoFor(win.Start, insts), win.End
 	m.disasmHeightCache = nil
 	return len(m.disasmInst) > 0
 }
@@ -167,6 +168,20 @@ func (m *Model) instIndexAtOrAfterAddr(addr uint64) int {
 	return len(insts) - 1
 }
 
+// posLoFor returns the image position of the first decoded instruction, which is
+// what bounds "is there code above / where does it start". It differs from the
+// decode window's Start when DecodeAt began at a symbol (a section/function jump):
+// the window reserves lead bytes that hold no decoded instructions, so anchoring
+// scroll-up on win.Start would jump far before the actual preceding code.
+func (m *Model) posLoFor(winStart int, insts []disasm.Inst) int {
+	if len(insts) > 0 {
+		if p, ok := m.file.ExecImage().PosForAddr(insts[0].Addr); ok {
+			return p
+		}
+	}
+	return winStart
+}
+
 func (m *Model) setDisasmWindow(win binfile.Window, insts []disasm.Inst) bool {
 	// Never clobber a good window with an empty decode (e.g. a step that ran off
 	// the end): keep what we have so the cursor stays valid.
@@ -174,7 +189,7 @@ func (m *Model) setDisasmWindow(win binfile.Window, insts []disasm.Inst) bool {
 		return false
 	}
 	m.disasmInst = insts
-	m.disasmPosLo = win.Start
+	m.disasmPosLo = m.posLoFor(win.Start, insts)
 	m.disasmPosHi = win.End
 	m.disasmBuilt = true
 	m.disasmDecoding = false

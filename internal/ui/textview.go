@@ -349,7 +349,8 @@ func (m *textModel) renderPicker() string {
 	const visible = 12
 	rowW := modalListWidth(m.width)
 	var sb strings.Builder
-	sb.WriteString(m.theme.modalTitle("Open path") + "\n\n")
+	sb.WriteString(m.theme.modalTitle("Open path"))
+	sb.WriteString("\n\n")
 	top := visualTop(m.pickerSel, m.pickerTop, len(m.picks), visible, func(int) int { return 1 })
 	m.pickerTop = top
 	end := min(top+visible, len(m.picks))
@@ -362,9 +363,11 @@ func (m *textModel) renderPicker() string {
 		if i == m.pickerSel {
 			line = m.theme.tableSelStyle.Render(line)
 		}
-		sb.WriteString(line + "\n")
+		sb.WriteString(line)
+		sb.WriteString("\n")
 	}
-	sb.WriteString("\n" + m.theme.modalHint(
+	sb.WriteString("\n")
+	sb.WriteString(m.theme.modalHint(
 		fmt.Sprintf("↑/↓ select · Enter open · Esc cancel   (%d/%d)", m.pickerSel+1, len(m.picks))))
 	return m.theme.modalStyle.Render(sb.String())
 }

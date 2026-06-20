@@ -133,8 +133,11 @@ func (m *Model) renderInfo() string {
 			chips = append(chips, "dynamic")
 		}
 	}
-	b.WriteString("  " + m.theme.symbolNameStyle.Render("▸ "+filepath.Base(m.file.Path)) +
-		"   " + dim(strings.Join(chips, " · ")) + "\n\n")
+	b.WriteString("  ")
+	b.WriteString(m.theme.symbolNameStyle.Render("▸ " + filepath.Base(m.file.Path)))
+	b.WriteString("   ")
+	b.WriteString(dim(strings.Join(chips, " · ")))
+	b.WriteString("\n\n")
 
 	// Identity (from the format header). The Entry line is actionable.
 	head("Identity")
@@ -146,7 +149,9 @@ func (m *Model) renderInfo() string {
 		if idx := strings.IndexByte(l, ':'); idx >= 0 {
 			kvText(l[:idx], strings.TrimSpace(l[idx+1:]))
 		} else {
-			b.WriteString("    " + m.theme.tableRowStyle.Render(l) + "\n")
+			b.WriteString("    ")
+			b.WriteString(m.theme.tableRowStyle.Render(l))
+			b.WriteString("\n")
 		}
 	}
 	if m.dis != nil {

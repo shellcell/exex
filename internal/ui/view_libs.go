@@ -138,7 +138,8 @@ func (m *Model) renderLibsHeader() string {
 	var b strings.Builder
 	if info.Interp != "" {
 		b.WriteString(m.theme.headerKey.Render("Interpreter: "))
-		b.WriteString(info.Interp + "\n")
+		b.WriteString(info.Interp)
+		b.WriteString("\n")
 	}
 	if info.Libc.Kind != "" {
 		libcLine := info.Libc.Kind
@@ -149,15 +150,18 @@ func (m *Model) renderLibsHeader() string {
 			libcLine += "  " + m.theme.footerStyle.Render("("+info.Libc.Source+")")
 		}
 		b.WriteString(m.theme.headerKey.Render("Libc:        "))
-		b.WriteString(libcLine + "\n")
+		b.WriteString(libcLine)
+		b.WriteString("\n")
 	}
 	if len(info.RPath) > 0 {
 		b.WriteString(m.theme.headerKey.Render("RPATH:       "))
-		b.WriteString(strings.Join(info.RPath, ":") + "\n")
+		b.WriteString(strings.Join(info.RPath, ":"))
+		b.WriteString("\n")
 	}
 	if len(info.RunPath) > 0 {
 		b.WriteString(m.theme.headerKey.Render("RUNPATH:     "))
-		b.WriteString(strings.Join(info.RunPath, ":") + "\n")
+		b.WriteString(strings.Join(info.RunPath, ":"))
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 	b.WriteString(m.tableHeader(fmt.Sprintf(" %3s  %s", "#", "Needed library")))

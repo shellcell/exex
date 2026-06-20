@@ -896,7 +896,9 @@ func (m *Model) renderHexRow(md mode, data []byte, cur int, span hexRowSpan, add
 	if m.hexWords {
 		line.WriteString(m.hexWordDecode(data, span, cur))
 	} else {
-		line.WriteString("|" + asciiCol.String() + "|")
+		line.WriteString("|")
+		line.WriteString(asciiCol.String())
+		line.WriteString("|")
 	}
 	// The trailing symbol/section annotation is only useful in the ASCII view; in
 	// pointer mode the row already carries the word decode and its → targets, so

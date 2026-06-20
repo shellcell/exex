@@ -158,8 +158,9 @@ func (m *Model) renderHelpModal() string {
 	div := m.theme.srcShadowStyle.Render("│")
 
 	var b strings.Builder
-	b.WriteString(m.theme.modalTitle("Keybindings") + "\n\n")
-	for i := 0; i < n; i++ {
+	b.WriteString(m.theme.modalTitle("Keybindings"))
+	b.WriteString("\n\n")
+	for i := range n {
 		l, r := padVisual("", lw), padVisual("", rw)
 		if i < len(leftLines) {
 			l = leftLines[i]
@@ -167,9 +168,15 @@ func (m *Model) renderHelpModal() string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		b.WriteString(l + "  " + div + "  " + r + "\n")
+		b.WriteString(l)
+		b.WriteString("  ")
+		b.WriteString(div)
+		b.WriteString("  ")
+		b.WriteString(r)
+		b.WriteString("\n")
 	}
-	b.WriteString("\n" + m.theme.modalHint("Mouse: wheel scrolls · over right pane scrolls it · click selects · double-click follows"))
+	b.WriteString("\n")
+	b.WriteString(m.theme.modalHint("Mouse: wheel scrolls · over right pane scrolls it · click selects · double-click follows"))
 	return m.theme.modalStyle.Render(b.String())
 }
 
@@ -220,11 +227,14 @@ func (m *Model) overlayCenter(bg, modal string) string {
 
 func (m *Model) renderGotoModal() string {
 	var sb strings.Builder
-	sb.WriteString(m.theme.modalTitle("Go to") + "\n\n")
+	sb.WriteString(m.theme.modalTitle("Go to"))
+	sb.WriteString("\n\n")
 	sb.WriteString(m.gotoInput.View())
 	sb.WriteString("\n")
 	if len(m.gotoResults) == 0 {
-		sb.WriteString("\n" + m.theme.modalHint("type an address or symbol name") + "\n")
+		sb.WriteString("\n")
+		sb.WriteString(m.theme.modalHint("type an address or symbol name"))
+		sb.WriteString("\n")
 	} else {
 		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
@@ -250,7 +260,8 @@ func (m *Model) renderGotoModal() string {
 	if n := len(m.gotoResults); n > 0 {
 		count = fmt.Sprintf("  (%d/%d)", m.gotoSel+1, n)
 	}
-	sb.WriteString("\n" + m.theme.modalHint("↑/↓ select · Enter jump · Esc cancel"+count))
+	sb.WriteString("\n")
+	sb.WriteString(m.theme.modalHint("↑/↓ select · Enter jump · Esc cancel" + count))
 	return m.theme.modalStyle.Render(sb.String())
 }
 

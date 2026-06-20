@@ -239,9 +239,11 @@ func (m *Model) renderXrefModal() string {
 
 	// Title bar; the target name (a possibly long demangled symbol) goes on its
 	// own line(s), wrapped to the modal width so it never widens past the view.
-	sb.WriteString(m.theme.modalTitle("Cross-references") + "\n")
+	sb.WriteString(m.theme.modalTitle("Cross-references"))
+	sb.WriteString("\n")
 	for _, r := range renderLineRowsIndented(m.theme.symbolNameStyle.Render(m.xrefLabel), rowW, true, 0) {
-		sb.WriteString(r + "\n")
+		sb.WriteString(r)
+		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
 	top := visualTop(m.xrefSel, m.xrefTop, len(m.xrefResults), visible, func(int) int { return 1 })
@@ -261,10 +263,12 @@ func (m *Model) renderXrefModal() string {
 		if i == m.xrefSel {
 			line = m.theme.tableSelStyle.Render(line)
 		}
-		sb.WriteString(line + "\n")
+		sb.WriteString(line)
+		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n" + m.theme.modalHint(
+	sb.WriteString("\n")
+	sb.WriteString(m.theme.modalHint(
 		fmt.Sprintf("↑/↓ select · Enter jump · Esc close   (%d/%d)", m.xrefSel+1, len(m.xrefResults))))
 	return m.theme.modalStyle.Render(sb.String())
 }

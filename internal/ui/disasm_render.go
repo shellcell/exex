@@ -563,7 +563,8 @@ func (m *Model) renderSourcePane(w, h int) string {
 		prefix := m.srcGutter(i, line, mapped, 5)
 		gutterW := lipgloss.Width(prefix)
 		avail := inner - gutterW
-		b.WriteString(prefix + fitANSIWidth(content, avail))
+		b.WriteString(prefix)
+		b.WriteString(fitANSIWidth(content, avail))
 		b.WriteString("\n")
 		// Point carets at every column this source line maps to (a line can map
 		// at several positions), each in its column colour — same as the

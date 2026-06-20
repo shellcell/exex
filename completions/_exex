@@ -1,0 +1,32 @@
+#compdef exex
+# zsh completion for exex
+#
+# Install: put this file (named _exex) in a directory on $fpath, e.g.
+#   ~/.zsh/completions/_exex   with  `fpath=(~/.zsh/completions $fpath)` before
+#   `compinit` in ~/.zshrc.
+
+_exex() {
+	local -a views
+	views=(info sections segments symbols strings libs sources disasm disasm-all)
+
+	_arguments -s \
+		'(-d -debug)'{-d,-debug}'[external debug-symbols file or directory]:debug path:_files' \
+		'-s[search printable strings on startup]:string:' \
+		'-o[print a view or disassembly to stdout and exit]::view:->oview' \
+		'-h[show usage and exit]' \
+		'1:binary:->binary' \
+		'2:goto (address or symbol):' \
+		&& return
+
+	case $state in
+	oview)
+		_describe -t views 'view' views ;;
+	binary)
+		# A path to a file, or a command name found on $PATH (exex ls -> /bin/ls).
+		_alternative \
+			'commands:command on $PATH:_command_names -e' \
+			'files:file:_files' ;;
+	esac
+}
+
+_exex "$@"

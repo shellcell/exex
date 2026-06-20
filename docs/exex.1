@@ -1,0 +1,218 @@
+.\" Manpage for exex.
+.\" Contact rabarbrablad@gmail.com to correct errors or typos.
+.TH EXEX 1 "2026-06-20" "exex" "User Commands"
+.SH NAME
+exex \- terminal UI for exploring ELF, Mach-O and PE binaries
+.SH SYNOPSIS
+.B exex
+.RB [ \-debug
+.IR PATH ]
+.RB [ \-s
+.IR STRING ]
+.RB [ \-o
+.RI [ VIEW ]]
+.I binary
+.RI [ goto ]
+.SH DESCRIPTION
+.B exex
+is a keyboard- and mouse-driven terminal user interface for exploring
+executable files in the
+.BR ELF ,
+.B Mach-O
+and
+.B PE
+formats. It presents the file header, sections, segments, symbols,
+disassembly, hex and raw byte dumps, printable strings, dynamic libraries,
+and \(em when the binary carries debug info (DWARF, or a Mach-O
+.IR .dSYM )
+\(em the original source side by side with the disassembly it maps to,
+navigable in both directions.
+.PP
+With the
+.B \-o
+flag,
+.B exex
+runs non-interactively: it prints a view (or a function's disassembly) to
+standard output and exits, making it scriptable like the classic binary
+inspection tools.
+.SH OPTIONS
+Flags may appear in any position on the command line.
+.TP
+.BI \-debug " PATH" "\fR, \fP" \-d " PATH"
+Path to an external debug-symbols file or directory: an ELF
+.B .debug
+companion, or a Mach-O
+.B .dSYM
+bundle or file. Tried before the conventional auto-discovered locations.
+.TP
+.BI \-s " STRING"
+Search the printable strings on startup. A single match opens the Hex view at
+it; several matches open the Strings view filtered by it.
+.TP
+.BI \-o " VIEW"
+Print
+.I VIEW
+to standard output and exit, without starting the TUI. Recognised views:
+.BR info ,
+.BR sections ,
+.BR segments ,
+.BR symbols ,
+.BR strings ,
+.BR libs ,
+.BR sources ,
+.B disasm
+(executable sections, like
+.BR "objdump \-d" )
+and
+.B disasm-all
+(every section, like
+.BR "objdump \-D" ).
+The disassembly output streams, so piping to
+.BR head (1)
+or
+.BR less (1)
+returns immediately even on large binaries.
+.TP
+.B \-o
+Bare, with no view: print the
+.I goto
+symbol or address's function disassembly to standard output and exit.
+.TP
+.B \-h
+Print a usage summary and exit.
+.SH ARGUMENTS
+.TP
+.I binary
+Path to an ELF, Mach-O or PE file, or a command name found on
+.BR $PATH
+(for example
+.B exex ls
+opens
+.BR /bin/ls ).
+.TP
+.I goto
+Optional address
+.RB ( 0x401000 )
+or symbol name to act on. Interactively, it jumps there on open: a unique
+symbol jumps straight to it, an ambiguous one opens the Symbols view filtered
+by it. With a bare
+.BR \-o ,
+it selects the function to disassemble.
+.SH KEYS
+The following keys drive the interactive UI; press
+.B ?
+for the full in-app reference.
+.TP
+.B 1\(en9
+Switch view: Info, Sections, Symbols, Disasm, Hex, Libs, Raw, Strings, Sources.
+.TP
+.BR \[u2191] / \[u2193] ", " j / k ", " PgUp / PgDn ", " Home / End
+Move and page (also
+.BR \(haA / \(haE
+and Cmd-Up/Cmd-Down on macOS).
+.TP
+.B /
+Filter or search the current view.
+.TP
+.B Enter
+Open, follow, or jump.
+.TP
+.B g
+Go to an address or symbol.
+.TP
+.B ,
+Open the settings popup (theme, background, default wrap, default view); changes
+apply live and are saved to the config file when it is writable.
+.TP
+.BR [ / ]
+Previous/next section (Hex, Raw) or symbol (Disasm).
+.TP
+.B d
+Disassemble the selected address when it is executable.
+.TP
+.BR a / s
+Copy address / name.
+.TP
+.B x
+Find cross-references to the address under the cursor (Disasm).
+.TP
+.B w
+Toggle long-line wrapping.
+.TP
+.BR Tab / Shift-Tab
+Show/hide and swap the disassembly source pane.
+.TP
+.B q
+Quit.
+.PP
+The mouse wheel scrolls, a click selects, and a double-click follows in the
+disassembly view.
+.SH CONFIGURATION
+Configuration is optional YAML loaded from
+.B $XDG_CONFIG_HOME/exex/config.yaml
+or, when
+.B XDG_CONFIG_HOME
+is unset,
+.BR $HOME/.config/exex/config.yaml .
+Every field is optional; unset entries keep their defaults. It can select a
+built-in theme preset, override individual colours, rebind top-level keys, and
+set behaviour (default view, default wrap, disassembly landing target, decode
+window size). See the annotated
+.B config.example.yaml
+shipped with the distribution for the full schema.
+.PP
+A subset of these preferences can also be changed from inside the TUI: press
+.B ,
+to open the settings popup, which adjusts the theme, the view/pane background,
+default wrap and the default view live. On confirm it writes them back to the
+config file; if that file is not writable, the change still applies for the
+current session.
+.SH FILES
+.TP
+.B $XDG_CONFIG_HOME/exex/config.yaml
+User configuration (falls back to
+.BR $HOME/.config/exex/config.yaml ).
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Runtime error (for example the file could not be opened, or an
+.B \-o
+target could not be resolved).
+.TP
+.B 2
+Usage error (bad or missing arguments).
+.SH EXAMPLES
+.TP
+Open a binary in the TUI:
+.B exex ./a.out
+.TP
+Open at a symbol:
+.B exex ./a.out main
+.TP
+List symbols to stdout:
+.B exex \-o symbols ./a.out
+.TP
+Disassemble all executable sections, paged:
+.B exex \-o disasm ./a.out | less
+.TP
+Disassemble one function:
+.B exex \-o ./a.out main
+.TP
+Use an external dSYM:
+.B exex \-d ./a.out.dSYM ./a.out
+.SH SEE ALSO
+.BR objdump (1),
+.BR readelf (1),
+.BR nm (1),
+.BR strings (1),
+.BR hexdump (1),
+.BR addr2line (1),
+.BR otool (1),
+.BR gdb (1)
+.SH AUTHOR
+Polina Simonenko <rabarbrablad@gmail.com>
+.SH LICENSE
+MIT.

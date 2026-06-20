@@ -5,8 +5,15 @@ DIST := dist
 VERSION ?= dev
 # Platforms built by `make release`.
 RELEASE_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/386 linux/arm
+# Man page and its install location (override with `make install-man MANPREFIX=...`).
+MANPAGE := docs/exex.1
+MANPREFIX ?= /usr/local/share/man
+# Shell-completion install dirs (override per platform, e.g. with brew --prefix).
+BASHCOMPDIR ?= /usr/local/etc/bash_completion.d
+ZSHCOMPDIR ?= /usr/local/share/zsh/site-functions
+FISHCOMPDIR ?= /usr/local/share/fish/vendor_completions.d
 
-.PHONY: build lite install test clean release
+.PHONY: build lite install install-man install-completions test clean release
 
 # Full build: includes Chroma syntax highlighting (source pane + asm colours).
 build:
@@ -19,6 +26,18 @@ lite:
 
 install:
 	go install -trimpath -ldflags="$(LDFLAGS)" .
+
+# Install the man page into $(MANPREFIX)/man1 (use sudo for a system prefix).
+install-man:
+	install -d "$(MANPREFIX)/man1"
+	install -m 0644 "$(MANPAGE)" "$(MANPREFIX)/man1/exex.1"
+
+# Install shell completions (override *COMPDIR vars for your platform).
+install-completions:
+	install -d "$(BASHCOMPDIR)" "$(ZSHCOMPDIR)" "$(FISHCOMPDIR)"
+	install -m 0644 completions/exex.bash "$(BASHCOMPDIR)/exex"
+	install -m 0644 completions/_exex "$(ZSHCOMPDIR)/_exex"
+	install -m 0644 completions/exex.fish "$(FISHCOMPDIR)/exex.fish"
 
 test:
 	go test ./...
@@ -40,7 +59,8 @@ release:
 	    if [ "$$variant" = lite ]; then tags="-tags lite"; suffix="-lite"; fi; \
 	    bin=$(BINARY); [ "$$os" = windows ] && bin=$(BINARY).exe; \
 	    stage=$$(mktemp -d); \
-	    cp docs/config.example.yaml README.md "$$stage/" 2>/dev/null || true; \
+	    cp docs/config.example.yaml README.md LICENSE $(MANPAGE) "$$stage/" 2>/dev/null || true; \
+	    cp -r completions "$$stage/" 2>/dev/null || true; \
 	    echo "building $$os/$$arch ($$variant)"; \
 	    CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 	      go build $$tags -trimpath -ldflags="$(LDFLAGS)" -o "$$stage/$$bin" . || exit 1; \

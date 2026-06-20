@@ -63,6 +63,30 @@ make lite     # lite  -> ./exex
 make test     # go test + lite vet
 ```
 
+### Man page and shell completions
+
+A man page (`docs/exex.1`) and bash/zsh/fish completions (`completions/`) ship with
+the source and release archives. Completions complete the flags, the `-o` view
+names, and the `<binary>` argument with both files and command names on `$PATH`
+(so `exex ls<Tab>` works).
+
+```sh
+make install-man           # -> $MANPREFIX/man1/exex.1   (sudo for a system prefix)
+make install-completions   # -> bash/zsh/fish completion dirs (override *COMPDIR vars)
+man exex
+```
+
+Or install a single completion by hand:
+
+```sh
+# bash: source it, or drop it in a bash-completion dir
+source completions/exex.bash
+# zsh: put _exex on your $fpath (before compinit), e.g.
+cp completions/_exex ~/.zsh/completions/_exex
+# fish:
+cp completions/exex.fish ~/.config/fish/completions/exex.fish
+```
+
 ## Usage
 
 ```
@@ -195,3 +219,7 @@ So exex is not trying to replace a disassembler-platform or the binutils suite â
 it's the fast first look: open any ELF/Mach-O/PE, read its layout and code, follow
 references and source mappings interactively, and drop to plain text when you need
 to script.
+
+## License
+
+exex is released under the MIT License â€” see [LICENSE](LICENSE).

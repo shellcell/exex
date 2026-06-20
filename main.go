@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Command exex is a terminal UI for exploring ELF, Mach-O, and PE binaries:
 // header, sections, symbols, disassembly, and DWARF-driven source mapping.
 package main

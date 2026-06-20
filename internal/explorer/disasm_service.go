@@ -140,6 +140,36 @@ func (s *DisasmService) DecodeWindow(win binfile.Window) []disasm.Inst {
 	return s.decodeInstWindow(win, decodeStart)
 }
 
+// DecodeRange decodes the instructions in [start, start+size) of the executable
+// image, using only `lead` bytes of context before start to re-synchronise the
+// decoder (vs DecodeWindow's large interactive overlap). It is uncached, so a
+// contiguous full-image scan neither re-decodes each chunk's predecessor (~2×
+// less work) nor evicts the interactive decode cache. `lead` should keep the
+// architecture's instruction alignment (a multiple of 4 covers arm64/riscv).
+func (s *DisasmService) DecodeRange(start, size, lead int) []disasm.Inst {
+	if s == nil || s.file == nil || s.dis == nil {
+		return nil
+	}
+	img := s.file.ExecImage()
+	win := img.Window(start, size)
+	if len(win.Data) == 0 {
+		return nil
+	}
+	decodeStart := max(0, win.Start-lead)
+	decodeWin := img.Window(decodeStart, win.End-decodeStart)
+	insts := disasm.Range(s.dis, decodeWin.Data, decodeWin.Addr, 0)
+	lo, hi := win.Addr, win.Addr+uint64(len(win.Data))
+	out := insts[:0]
+	for _, in := range insts {
+		end := in.Addr + uint64(len(in.Bytes))
+		if end <= lo || in.Addr >= hi {
+			continue
+		}
+		out = append(out, in)
+	}
+	return out
+}
+
 // DecodeAt returns a window containing addr and the instructions overlapping it.
 func (s *DisasmService) DecodeAt(addr uint64, before int) (binfile.Window, []disasm.Inst) {
 	if s == nil || s.file == nil || s.dis == nil {

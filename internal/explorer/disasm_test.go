@@ -1,6 +1,52 @@
 package explorer
 
-import "testing"
+import (
+	"os"
+	"testing"
+
+	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/disasm"
+)
+
+// TestDecodeRangeMatchesWindow guards the xref speed-up: DecodeRange (small
+// resync lead, uncached) must decode the same instructions over a window as
+// DecodeWindow (large interactive overlap). Uses the test binary itself so it
+// needs no fixture.
+func TestDecodeRangeMatchesWindow(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	f, err := binfile.Open(exe)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer f.Close()
+	dis, err := disasm.For(f.Arch())
+	if err != nil || dis == nil {
+		t.Skip("no disassembler for host arch")
+	}
+	img := f.ExecImage()
+	size := 8192
+	if img.Len() < 4*size {
+		t.Skip("exec image too small")
+	}
+	start := (img.Len() / 2) &^ 0xfff // a 4 KiB-aligned window well inside .text
+
+	s := NewDisasmService(f, dis, 2<<20, 0)
+	want := s.DecodeWindow(img.Window(start, size))
+	got := s.DecodeRange(start, size, 1<<10)
+
+	if len(want) == 0 || len(want) != len(got) {
+		t.Fatalf("instruction count: DecodeWindow=%d DecodeRange=%d", len(want), len(got))
+	}
+	for i := range want {
+		if want[i].Addr != got[i].Addr || want[i].Text != got[i].Text {
+			t.Fatalf("inst %d differs:\n window: 0x%x %q\n  range: 0x%x %q",
+				i, want[i].Addr, want[i].Text, got[i].Addr, got[i].Text)
+		}
+	}
+}
 
 func TestDisasmSearchWorkerPolicy(t *testing.T) {
 	s := NewDisasmService(nil, nil, 256<<10, 3)

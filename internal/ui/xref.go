@@ -11,14 +11,21 @@ package ui
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 )
 
 // xrefMaxHits caps how many references are collected (the modal scrolls).
 const xrefMaxHits = 500
+
+// xrefLead is the resync context decoded before each scan chunk; small (vs the
+// interactive overlap) since chunks are contiguous, and a multiple of 4 to keep
+// arm64/riscv instruction alignment.
+const xrefLead = 1 << 10
 
 // xrefHit is one referencing instruction.
 type xrefHit struct {
@@ -78,45 +85,88 @@ func (m *Model) xrefScanCmd(target uint64, seq int) tea.Cmd {
 	img := m.file.ExecImage()
 	file := m.file
 	chunk := m.disasmSearchChunkBytes()
+	// A one-shot full-image scan can use every core (unlike interactive search,
+	// which caps workers to stay responsive). Honour an explicit config override.
+	maxWorkers := runtime.GOMAXPROCS(0)
+	if m.disasmSearchWorkers > 0 {
+		maxWorkers = m.disasmSearchWorkers
+	}
 	return func() tea.Msg {
-		var hits []xrefHit
-		seen := map[uint64]bool{} // an instruction straddling a chunk edge decodes twice
+		// Split the executable image into chunks and decode + scan them in
+		// parallel — decoding dominates the cost, so this scales with cores. (The
+		// old scan decoded the whole image on one goroutine.)
+		var starts []int
 		for pos := 0; pos < img.Len(); {
 			win := img.Window(pos, chunk)
 			if len(win.Data) == 0 || win.End <= pos {
 				break
 			}
-			for _, inst := range svc.DecodeWindow(win) {
-				if seen[inst.Addr] {
+			starts = append(starts, pos)
+			pos = win.End
+		}
+
+		results := make([][]xrefHit, len(starts))
+		workers := max(min(maxWorkers, len(starts)), 1)
+		sem := make(chan struct{}, workers)
+		var wg sync.WaitGroup
+		for i, start := range starts {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i, start int) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				var hits []xrefHit
+				for _, inst := range svc.DecodeRange(start, chunk, xrefLead) {
+					if !instReferences(inst.Text, target) {
+						continue
+					}
+					sym := ""
+					if s, ok := file.SymbolAt(inst.Addr); ok {
+						sym = s.Display()
+					}
+					hits = append(hits, xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym})
+				}
+				results[i] = hits
+			}(i, start)
+		}
+		wg.Wait()
+
+		// Merge in address order, de-duplicating instructions that straddle a
+		// chunk edge (decoded in two windows), and cap the total.
+		seen := map[uint64]bool{}
+		var hits []xrefHit
+		for _, rs := range results {
+			for _, h := range rs {
+				if seen[h.addr] {
 					continue
 				}
-				for from := 0; ; {
-					addr, _, end, ok := extractTargetAt(inst.Text, from)
-					if !ok {
-						break
-					}
-					if addr == target {
-						seen[inst.Addr] = true
-						sym := ""
-						if s, ok := file.SymbolAt(inst.Addr); ok {
-							sym = s.Display()
-						}
-						hits = append(hits, xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym})
-						break
-					}
-					from = end
-				}
-				if len(hits) >= xrefMaxHits {
-					break
-				}
+				seen[h.addr] = true
+				hits = append(hits, h)
 			}
 			if len(hits) >= xrefMaxHits {
 				break
 			}
-			pos = win.End
 		}
 		sort.Slice(hits, func(i, j int) bool { return hits[i].addr < hits[j].addr })
+		if len(hits) > xrefMaxHits {
+			hits = hits[:xrefMaxHits]
+		}
 		return xrefDoneMsg{seq: seq, target: target, hits: hits}
+	}
+}
+
+// instReferences reports whether the instruction text contains a resolved
+// address literal equal to target.
+func instReferences(text string, target uint64) bool {
+	for from := 0; ; {
+		addr, _, end, ok := extractTargetAt(text, from)
+		if !ok {
+			return false
+		}
+		if addr == target {
+			return true
+		}
+		from = end
 	}
 }
 
@@ -127,7 +177,7 @@ func (m *Model) handleXrefDone(msg xrefDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.xrefRunning = false
 	if len(msg.hits) == 0 {
-		m.setStatus("no references to "+m.xrefLabel, false)
+		m.setStatus("no references to "+m.xrefLabel, true)
 		return m, nil
 	}
 	m.xrefResults = msg.hits

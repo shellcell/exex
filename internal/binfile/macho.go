@@ -34,6 +34,7 @@ const (
 // Mach-O load command + symbol constants we parse by hand.
 const (
 	lcMain             = 0x80000028
+	lcLoadDylinker     = 0x0e
 	lcUUID             = 0x1b
 	lcCodeSignature    = 0x1d
 	lcEncryptionInfo   = 0x21
@@ -111,7 +112,11 @@ func (f *File) loadMachO() error {
 		return err
 	}
 	if len(arches) > 1 {
-		f.FatArches = arches
+		f.FatArchInfos = arches
+		f.FatArches = make([]string, len(arches))
+		for i, a := range arches {
+			f.FatArches[i] = a.Name
+		}
 	}
 	f.FatArch = chosen
 
@@ -227,11 +232,10 @@ func (f *File) loadMachO() error {
 }
 
 // parseMachO opens raw as a thin or fat Mach-O. It returns the chosen slice's
-// *macho.File, the file offset that slice starts at (0 for thin files), the names
-// of all architectures (nil/one entry for thin), and the chosen slice's name.
-// want selects a fat slice by name (e.g. "x86_64"); "" picks the host arch, else
-// the first slice.
-func parseMachO(raw []byte, want string) (mf *macho.File, base uint64, arches []string, chosen string, err error) {
+// *macho.File, the file offset that slice starts at (0 for thin files), a summary
+// of every architecture (nil for thin), and the chosen slice's name. want selects
+// a fat slice by name (e.g. "x86_64"); "" picks the host arch, else the first.
+func parseMachO(raw []byte, want string) (mf *macho.File, base uint64, arches []FatArchInfo, chosen string, err error) {
 	ra := bytes.NewReader(raw)
 	if isFatMachO(raw) {
 		ff, ferr := macho.NewFatFile(ra)
@@ -242,7 +246,21 @@ func parseMachO(raw []byte, want string) (mf *macho.File, base uint64, arches []
 			return nil, 0, nil, "", fmt.Errorf("fat Mach-O has no architectures")
 		}
 		for _, fa := range ff.Arches {
-			arches = append(arches, machoCPUName(fa.Cpu))
+			bits := 32
+			if fa.File != nil && fa.File.Magic == macho.Magic64 {
+				bits = 64
+			}
+			typ := ""
+			if fa.File != nil {
+				typ = fa.File.Type.String()
+			}
+			arches = append(arches, FatArchInfo{
+				Name:   machoCPUName(fa.Cpu),
+				Type:   typ,
+				Bits:   bits,
+				Offset: uint64(fa.Offset),
+				Size:   uint64(fa.Size),
+			})
 		}
 		fa := pickFatArch(ff, want)
 		return fa.File, uint64(fa.Offset), arches, machoCPUName(fa.Cpu), nil
@@ -460,7 +478,14 @@ func machoEntry(mf *macho.File, textSeg *macho.Segment, base uint64) uint64 {
 		}
 		return entryoff
 	}
-	// Fall back to a likely start symbol, then the first exec section.
+	// Only executables have an entry point. Dylibs, bundles and object files do
+	// not, so don't invent one (a start symbol or __text address) for them — that
+	// would mislead the Info view. The disasm view picks its own landing target.
+	if mf.Type != macho.TypeExec {
+		return 0
+	}
+	// An LC_MAIN-less executable (e.g. old/static, LC_UNIXTHREAD): fall back to a
+	// likely start symbol, then the __text section.
 	for _, name := range []string{"_main", "start", "_start", "__start"} {
 		for _, s := range mfSyms(mf) {
 			if s.Name == name && s.Value != 0 {
@@ -491,9 +516,7 @@ func (f *File) loadMachOInfo(mf *macho.File) {
 	in.BuildID = machoUUID(mf)
 	in.Stripped = mf.Symtab == nil || len(mf.Symtab.Syms) == 0
 	in.StaticLinked = len(in.DynamicLibs) == 0
-	if !in.StaticLinked {
-		in.Interp = "/usr/lib/dyld"
-	}
+	in.Interp = machoInterp(mf)
 	in.Libc = machoLibc(in)
 
 	// Layout.
@@ -510,6 +533,11 @@ func (f *File) loadMachOInfo(mf *macho.File) {
 	// Hardening from header flags.
 	in.PIE = TriNo
 	if mf.Flags&macho.FlagPIE != 0 {
+		in.PIE = TriYes
+	} else if mf.Type == macho.TypeDylib || mf.Type == macho.TypeBundle {
+		// Dylibs and bundles don't set MH_PIE but are always position-independent,
+		// like an ELF shared object (ET_DYN). Reporting "no" would falsely suggest
+		// a fixed load address.
 		in.PIE = TriYes
 	}
 	in.NX = TriYes
@@ -826,6 +854,33 @@ func machoLibc(in *Info) LibcInfo {
 	return LibcInfo{Kind: "none", Source: "no-deps"}
 }
 
+// machoInterp returns the dynamic linker path from the LC_LOAD_DYLINKER load
+// command, or "" when there is none. Only executables carry it; dylibs, bundles
+// and object files are loaded by an already-running dyld and have no interpreter,
+// so reporting one for them (as a hardcoded "/usr/lib/dyld" once did) is wrong.
+func machoInterp(mf *macho.File) string {
+	for _, l := range mf.Loads {
+		lb, ok := l.(macho.LoadBytes)
+		if !ok {
+			continue
+		}
+		raw := lb.Raw()
+		if len(raw) < 12 || mf.ByteOrder.Uint32(raw) != lcLoadDylinker {
+			continue
+		}
+		off := mf.ByteOrder.Uint32(raw[8:12]) // lc_str union: offset within the command
+		if int(off) >= len(raw) {
+			continue
+		}
+		name := raw[off:]
+		if i := bytes.IndexByte(name, 0); i >= 0 {
+			name = name[:i]
+		}
+		return string(name)
+	}
+	return ""
+}
+
 // machoUUID extracts the LC_UUID load command as a hyphenated hex string.
 func machoUUID(mf *macho.File) string {
 	for _, l := range mf.Loads {
@@ -844,13 +899,19 @@ func machoUUID(mf *macho.File) string {
 }
 
 func (f *File) machoHeaderInfo(mf *macho.File) []string {
+	// Dylibs, bundles and object files have no entry point (f.entry == 0); say so
+	// rather than printing a literal 0x0.
+	entry := fmt.Sprintf("0x%x", f.entry)
+	if f.entry == 0 {
+		entry = "(none)"
+	}
 	return []string{
 		fmt.Sprintf("Path:        %s", f.Path),
 		fmt.Sprintf("Format:      %s", f.Format),
 		fmt.Sprintf("CPU:         %s", mf.Cpu),
 		fmt.Sprintf("Type:        %s", mf.Type),
 		fmt.Sprintf("64-bit:      %v", mf.Magic == macho.Magic64),
-		fmt.Sprintf("Entry:       0x%x", f.entry),
+		fmt.Sprintf("Entry:       %s", entry),
 		fmt.Sprintf("Sections:    %d", len(f.Sections)),
 		fmt.Sprintf("Symbols:     %d", len(f.Symbols)),
 		fmt.Sprintf("DWARF info:  %v", f.dwarf != nil),

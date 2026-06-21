@@ -157,10 +157,33 @@ func (m *Model) renderInfo() string {
 	if m.dis != nil {
 		kvText("Disassembler", m.dis.Name())
 	}
-	// Universal (fat) Mach-O: list the slices and which one is shown; `a` switches.
-	if len(m.file.FatArches) > 1 {
-		kv("Architectures", m.theme.tableRowStyle.Render(strings.Join(m.file.FatArches, ", "))+
-			"  "+dim("(showing "+m.file.FatArch+", press a to switch)"))
+	// Universal (fat) Mach-O: a per-architecture listing. Shown for every fat
+	// binary; the slice currently loaded is marked, and `a` switches between them.
+	if infos := m.file.FatArchInfos; len(infos) > 1 {
+		head("Architectures")
+		nameW, typeW := 0, 0
+		for _, a := range infos {
+			nameW = max(nameW, len(a.Name))
+			typeW = max(typeW, len(a.Type))
+		}
+		for _, a := range infos {
+			current := a.Name == m.file.FatArch
+			marker := "  "
+			if current {
+				marker = m.theme.symbolNameStyle.Render("▸ ")
+			}
+			row := "    " + marker +
+				m.theme.tableRowStyle.Render(padRight(a.Name, nameW)) + "   " +
+				dim(padRight(a.Type, typeW)) + "   " +
+				dim(fmt.Sprintf("%d-bit", a.Bits)) + "   " +
+				addrc(fmt.Sprintf("@ 0x%08x", a.Offset)) + "   " +
+				num(humanBytes(a.Size))
+			if current {
+				row += "   " + m.theme.infoStyle.Render("● loaded")
+			}
+			b.WriteString(row + "\n")
+		}
+		b.WriteString("    " + dim("press a to switch slice") + "\n")
 	}
 
 	if info != nil {
@@ -295,6 +318,10 @@ func headerField(lines []string, key string) string {
 // a hint that Enter follows it into the disassembly.
 func (m *Model) entryValue() string {
 	entry := m.file.Entry()
+	if entry == 0 {
+		// Dylibs, bundles and object files have no entry point.
+		return m.theme.srcShadowStyle.Render("(none)")
+	}
 	val := fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), entry)
 	if sym, ok := m.file.SymbolAt(entry); ok {
 		name := sym.Display()

@@ -2,6 +2,7 @@ package binfile
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -49,6 +50,47 @@ func TestOpenSystemMachO(t *testing.T) {
 	t.Logf("format=%s arch=%d entry=0x%x sections=%d symbols=%d raw=%d va-image=%d exec-image=%d",
 		f.Format, f.Arch(), f.Entry(), len(f.Sections), len(f.Symbols),
 		len(f.Raw()), f.VAImage().Len(), f.ExecImage().Len())
+}
+
+// TestMachODylibInfo guards that a Mach-O dylib reports no entry point and no
+// interpreter (only executables have those), and is treated as position-
+// independent. Regression for an earlier bug that invented an __text "entry" and
+// a hardcoded "/usr/lib/dyld" interpreter for dylibs.
+func TestMachODylibInfo(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("on-disk system dylib only available on macOS")
+	}
+	matches, _ := filepath.Glob("/usr/lib/*.dylib")
+	var path string
+	for _, m := range matches {
+		fi, err := os.Lstat(m)
+		if err == nil && fi.Mode().IsRegular() { // skip symlinks into the shared cache
+			path = m
+			break
+		}
+	}
+	if path == "" {
+		t.Skip("no on-disk dylib found under /usr/lib")
+	}
+	f, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%s): %v", path, err)
+	}
+	defer f.Close()
+	if f.Format != FormatMachO {
+		t.Skipf("%s is not Mach-O", path)
+	}
+	if f.Entry() != 0 {
+		t.Errorf("dylib entry = 0x%x, want 0 (no entry point)", f.Entry())
+	}
+	if f.Info != nil {
+		if f.Info.Interp != "" {
+			t.Errorf("dylib interpreter = %q, want empty", f.Info.Interp)
+		}
+		if f.Info.PIE != TriYes {
+			t.Errorf("dylib PIE = %v, want yes (position-independent)", f.Info.PIE)
+		}
+	}
 }
 
 // TestFatMagicVsJavaClass guards the 0xCAFEBABE ambiguity: a fat Mach-O has a

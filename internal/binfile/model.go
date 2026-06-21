@@ -101,6 +101,16 @@ type Segment struct {
 	R, W, X  bool   // permissions
 }
 
+// FatArchInfo summarises one architecture slice of a universal (fat) Mach-O,
+// for the Info view's per-architecture listing.
+type FatArchInfo struct {
+	Name   string // conventional CPU name, e.g. "x86_64", "arm64"
+	Type   string // Mach-O file type: "Exec", "Dylib", …
+	Bits   int    // 32 or 64
+	Offset uint64 // file offset where the slice begins
+	Size   uint64 // slice size in bytes
+}
+
 // Perms renders the segment's permission bits as an "rwx" string.
 func (s Segment) Perms() string {
 	b := []byte("---")
@@ -147,10 +157,12 @@ type File struct {
 	Symbols  []Symbol  // sorted by Name
 	Info     *Info
 
-	// Fat (universal) Mach-O: the names of every architecture slice, and the one
-	// currently loaded. FatArches is empty for thin binaries and non-Mach-O.
-	FatArches []string
-	FatArch   string
+	// Fat (universal) Mach-O: the names of every architecture slice, the one
+	// currently loaded, and per-slice details for the Info view. FatArches is
+	// empty for thin binaries and non-Mach-O.
+	FatArches    []string
+	FatArch      string
+	FatArchInfos []FatArchInfo
 
 	debugPath string       // explicit external debug-symbols path (--debug), or ""
 	reqArch   string       // requested fat-Mach-O slice (--arch), or ""
@@ -654,6 +666,10 @@ func (f *File) Raw() []byte { return f.raw }
 
 // DebugPath returns the explicit external debug-symbols path (--debug), or "".
 func (f *File) DebugPath() string { return f.debugPath }
+
+// RequestedArch returns the fat-Mach-O slice requested via --arch, or "" when
+// none was given (the host/first slice was auto-selected).
+func (f *File) RequestedArch() string { return f.reqArch }
 
 // AddrHexWidth is the number of hex digits an address should be printed with.
 func (f *File) AddrHexWidth() int {

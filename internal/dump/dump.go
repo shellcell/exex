@@ -161,6 +161,18 @@ func Info(f *binfile.File) string {
 		b.WriteString(l)
 		b.WriteByte('\n')
 	}
+	// Universal (fat) Mach-O: list every architecture slice; mark the loaded one.
+	if len(f.FatArchInfos) > 1 {
+		fmt.Fprintf(&b, "Architectures: %d (universal)\n", len(f.FatArchInfos))
+		for _, a := range f.FatArchInfos {
+			marker := " "
+			if a.Name == f.FatArch {
+				marker = "*"
+			}
+			fmt.Fprintf(&b, "  %s %-8s %-7s %d-bit  @ 0x%08x  %d bytes\n",
+				marker, a.Name, a.Type, a.Bits, a.Offset, a.Size)
+		}
+	}
 	in := f.Info
 	if in == nil {
 		return b.String()

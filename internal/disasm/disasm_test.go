@@ -83,6 +83,11 @@ func TestForSupportedArchitecturesDecodeNop(t *testing.T) {
 		{arch: ArchX86, name: "x86", code: []byte{0x90}},
 		{arch: ArchARM64, name: "arm64", code: []byte{0x1f, 0x20, 0x03, 0xd5}},
 		{arch: ArchRISCV64, name: "riscv64", code: []byte{0x13, 0x00, 0x00, 0x00}},
+		{arch: ArchARM, name: "arm", code: []byte{0x00, 0xf0, 0x8e, 0xe2}},         // add pc, lr, #0
+		{arch: ArchPPC64, name: "ppc64", code: []byte{0x4e, 0x80, 0x00, 0x20}},     // blr (big-endian)
+		{arch: ArchPPC64LE, name: "ppc64le", code: []byte{0x20, 0x00, 0x80, 0x4e}}, // blr (little-endian)
+		{arch: ArchS390X, name: "s390x", code: []byte{0x07, 0xfe}},                 // br %r14
+		{arch: ArchLoong64, name: "loong64", code: []byte{0x20, 0x00, 0x00, 0x4c}}, // ret
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,6 +109,17 @@ func TestForSupportedArchitecturesDecodeNop(t *testing.T) {
 	}
 }
 
+func TestClassifyBLRAmbiguity(t *testing.T) {
+	// PowerPC "blr" (no operand) is branch-to-link-register, i.e. a return;
+	// ARM64 "blr <reg>" is an indirect call. Classify must tell them apart.
+	if c := Classify("blr"); c != ClassRet {
+		t.Errorf("Classify(bare blr) = %v, want ClassRet", c)
+	}
+	if c := Classify("blr x16"); c != ClassCall {
+		t.Errorf("Classify(blr x16) = %v, want ClassCall", c)
+	}
+}
+
 func TestResolveRelTargets(t *testing.T) {
 	cases := map[string]string{
 		"bl .+0xfffffffffffffc58": "bl 0xc58",     // negative (two's complement) → 0x1000-0x3a8
@@ -114,6 +130,23 @@ func TestResolveRelTargets(t *testing.T) {
 	for in, want := range cases {
 		if got := resolveRelTargets(in, 0x1000); got != want {
 			t.Errorf("resolveRelTargets(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestResolveRiscvBranch(t *testing.T) {
+	cases := map[string]string{
+		"j 50":            "j 0x1032",        // 0x1000 + 50
+		"j -40":           "j 0xfd8",         // 0x1000 - 40
+		"bnez x10,12":     "bnez x10,0x100c", // last operand is the PC-rel target
+		"jal x1,16":       "jal x1,0x1010",   // two-operand jal
+		"jalr x1,528(x1)": "jalr x1,528(x1)", // register-relative: untouched
+		"addi x2,x2,-48":  "addi x2,x2,-48",  // immediate, not a branch: untouched
+		"ret":             "ret",             // no operand
+	}
+	for in, want := range cases {
+		if got := resolveRiscvBranch(in, 0x1000); got != want {
+			t.Errorf("resolveRiscvBranch(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

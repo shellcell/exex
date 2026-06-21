@@ -12,4 +12,11 @@ const (
 	ArchAMD64        // x86-64
 	ArchARM64        // AArch64
 	ArchRISCV64      // 64-bit RISC-V
+	ArchARM          // 32-bit ARM (A32, little-endian)
+	ArchPPC64        // 64-bit PowerPC, big-endian
+	ArchPPC64LE      // 64-bit PowerPC, little-endian
+	ArchS390X        // IBM Z (s390x, big-endian)
+	ArchLoong64      // LoongArch 64 (little-endian)
+	ArchPPC          // 32-bit PowerPC, big-endian
+	ArchPPCLE        // 32-bit PowerPC, little-endian
 )

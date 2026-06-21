@@ -229,6 +229,18 @@ func (m *Model) cycleSymbolBindFilter() {
 	m.symbolsBindOn = false
 }
 
+// canDisasmAt reports whether addr can actually be disassembled: there is a
+// decoder for this architecture and the address lives in executable code. When
+// false (an unsupported CPU, or an address outside any mapped exec section),
+// callers should fall back to the hex view rather than the disasm view.
+func (m *Model) canDisasmAt(addr uint64) bool {
+	if m.dis == nil {
+		return false
+	}
+	_, ok := m.file.ExecImage().PosForAddr(addr)
+	return ok
+}
+
 // openSymbol opens a symbol in the most appropriate view. The hex and disasm
 // views span the whole binary now, so this only chooses which view to land in
 // and seeks the cursor onto the symbol's address:
@@ -236,18 +248,25 @@ func (m *Model) cycleSymbolBindFilter() {
 //   - OBJECT/TLS/COMMON     → hex (virtual-address) view, cursor on the symbol
 //   - SECTION               → exec ⇒ disasm; else hex/raw at the section
 //   - NOTYPE                → exec section ⇒ disasm; else hex; else raw
+//
+// Anything that would land in disasm falls back to hex when disassembly isn't
+// possible (no decoder for this CPU, or the address isn't in executable code).
 func (m *Model) openSymbol(sym binfile.Symbol) {
+	wantDisasm := false
 	switch sym.Kind {
 	case binfile.SymFunc:
-		m.loadDisasmAt(sym.Addr)
+		wantDisasm = true
 	case binfile.SymObject, binfile.SymTLS, binfile.SymCommon:
-		m.openHexAt(sym.Addr)
+		wantDisasm = false
 	default:
 		if sec := m.file.SectionAt(sym.Addr); sec != nil && binfile.IsExecSection(sec) {
-			m.loadDisasmAt(sym.Addr)
-		} else {
-			m.openHexAt(sym.Addr)
+			wantDisasm = true
 		}
+	}
+	if wantDisasm && m.canDisasmAt(sym.Addr) {
+		m.loadDisasmAt(sym.Addr)
+	} else {
+		m.openHexAt(sym.Addr)
 	}
 }
 

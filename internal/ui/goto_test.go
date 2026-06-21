@@ -75,6 +75,55 @@ func TestStartupGotoNavigatesAwayFromDefault(t *testing.T) {
 	}
 }
 
+func TestOpenSymbolFallsBackToHexWithoutDisasm(t *testing.T) {
+	path := firstExisting("/bin/ls", "/usr/bin/true", "/bin/cat")
+	if path == "" {
+		t.Skip("no system binary available")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	var fn binfile.Symbol
+	found := false
+	for _, s := range f.Symbols {
+		if s.Kind == binfile.SymFunc && s.Addr != 0 {
+			if _, ok := f.ExecImage().PosForAddr(s.Addr); ok {
+				fn, found = s, true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Skip("no executable function symbol")
+	}
+
+	// With a decoder for the host CPU, a function symbol opens in disasm.
+	m, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.openSymbol(fn)
+	if m.mode != modeDisasm {
+		t.Fatalf("with a disassembler, openSymbol(FUNC) mode = %v, want disasm", m.mode)
+	}
+
+	// Simulating an unsupported architecture (no decoder), the same function must
+	// fall back to the hex view rather than erroring.
+	m2, err := New(f)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m2.dis = nil
+	m2.openSymbol(fn)
+	if m2.mode != modeHex {
+		t.Fatalf("without a disassembler, openSymbol(FUNC) mode = %v, want hex", m2.mode)
+	}
+	if m2.statusError {
+		t.Fatalf("hex fallback should not set an error status; got %q", m2.status)
+	}
+}
+
 func TestOpenWithMissingDebugPathStillOpens(t *testing.T) {
 	path := firstExisting("/bin/ls", "/usr/bin/true", "/bin/cat")
 	if path == "" {

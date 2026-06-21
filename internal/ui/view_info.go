@@ -25,8 +25,14 @@ func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 		m.headerVP.GotoBottom()
 		return m, nil
 	case "enter":
-		if m.dis != nil && m.file.Entry() != 0 {
-			m.loadDisasmAt(m.file.Entry())
+		// Follow the entry point into disasm; fall back to hex when disassembly
+		// isn't possible (no decoder for this CPU, or entry not in exec code).
+		if entry := m.file.Entry(); entry != 0 {
+			if m.canDisasmAt(entry) {
+				m.loadDisasmAt(entry)
+			} else {
+				m.openHexAt(entry)
+			}
 		}
 		return m, nil
 	case "a":
@@ -330,8 +336,11 @@ func (m *Model) entryValue() string {
 		}
 		val += "  " + m.theme.symbolNameStyle.Render(name)
 	}
-	if m.dis != nil && entry != 0 {
+	// Enter follows the entry point: into disasm when possible, else into hex.
+	if m.canDisasmAt(entry) {
 		val += "  " + m.theme.footerStyle.Render("↵ disassemble")
+	} else {
+		val += "  " + m.theme.footerStyle.Render("↵ hex")
 	}
 	return val
 }

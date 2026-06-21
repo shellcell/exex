@@ -1,16 +1,22 @@
 // Package disasm wraps golang.org/x/arch to provide a uniform decoder across
-// x86, x86-64, ARM64 and RISC-V 64.
+// x86, x86-64, ARM64, RISC-V 64, 32-bit ARM, PowerPC (32- and 64-bit, both
+// endians), s390x and LoongArch 64.
 package disasm
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/rabarbra/exex/internal/arch"
 
+	"golang.org/x/arch/arm/armasm"
 	"golang.org/x/arch/arm64/arm64asm"
+	"golang.org/x/arch/loong64/loong64asm"
+	"golang.org/x/arch/ppc64/ppc64asm"
 	"golang.org/x/arch/riscv64/riscv64asm"
+	"golang.org/x/arch/s390x/s390xasm"
 	"golang.org/x/arch/x86/x86asm"
 )
 
@@ -23,6 +29,13 @@ const (
 	ArchAMD64   = arch.ArchAMD64
 	ArchARM64   = arch.ArchARM64
 	ArchRISCV64 = arch.ArchRISCV64
+	ArchARM     = arch.ArchARM
+	ArchPPC64   = arch.ArchPPC64
+	ArchPPC64LE = arch.ArchPPC64LE
+	ArchS390X   = arch.ArchS390X
+	ArchLoong64 = arch.ArchLoong64
+	ArchPPC     = arch.ArchPPC
+	ArchPPCLE   = arch.ArchPPCLE
 )
 
 // InstClass classifies an instruction's high-level role so the UI can colour
@@ -85,10 +98,19 @@ func Classify(text string) InstClass {
 	}
 	op = strings.ToLower(op)
 
+	// "blr" is ambiguous: ARM64 "blr <reg>" is an indirect call, but PowerPC "blr"
+	// (no operand) is branch-to-link-register, i.e. a return. Disambiguate by
+	// whether an operand follows.
+	if op == "blr" {
+		if sp < 0 {
+			return ClassRet
+		}
+		return ClassCall
+	}
 	switch op {
 	case "call", "callq", "calll", "callw":
 		return ClassCall
-	case "bl", "blr", "blraa", "blrab", "blraaz", "blrabz", "blx":
+	case "bl", "blraa", "blrab", "blraaz", "blrabz", "blx", "blrl", "bctrl":
 		return ClassCall
 	case "jal", "jalr":
 		return ClassCall
@@ -101,7 +123,7 @@ func Classify(text string) InstClass {
 	case "nop", "fnop":
 		return ClassNop
 	case "jmp", "jmpq", "jmpl", "jmpw", "jmpf",
-		"b", "br", "j":
+		"b", "br", "j", "bctr", "ba":
 		return ClassJumpUnc
 	}
 	if strings.HasPrefix(op, "j") {
@@ -164,6 +186,21 @@ func For(a Arch) (Disassembler, error) {
 		return arm64d{}, nil
 	case ArchRISCV64:
 		return riscv64d{}, nil
+	case ArchARM:
+		return armd{}, nil
+	case ArchPPC64:
+		return ppc64d{ord: binary.BigEndian, name: "ppc64"}, nil
+	case ArchPPC64LE:
+		return ppc64d{ord: binary.LittleEndian, name: "ppc64le"}, nil
+	case ArchPPC:
+		// 32-bit PowerPC shares the ppc64 instruction encodings (the base ISA).
+		return ppc64d{ord: binary.BigEndian, name: "ppc"}, nil
+	case ArchPPCLE:
+		return ppc64d{ord: binary.LittleEndian, name: "ppcle"}, nil
+	case ArchS390X:
+		return s390xd{}, nil
+	case ArchLoong64:
+		return loong64d{}, nil
 	}
 	return nil, fmt.Errorf("unsupported architecture")
 }
@@ -267,8 +304,172 @@ func (riscv64d) Decode(code []byte, addr uint64) (Inst, error) {
 	if n == 0 || n > len(code) {
 		n = 2
 	}
-	text := resolveRelTargets(riscv64asm.GNUSyntax(inst), addr)
+	text := resolveRiscvBranch(resolveRelTargets(riscv64asm.GNUSyntax(inst), addr), addr)
 	return Inst{Addr: addr, Bytes: code[:n], Text: text, Class: Classify(text)}, nil
+}
+
+// resolveRiscvBranch rewrites the PC-relative target of a RISC-V branch/jump from
+// the bare signed decimal offset that riscv64asm prints (e.g. "j 50", "bnez
+// x10,12", "j -40") into an absolute address ("j 0x10fed98"). riscv64asm.GNUSyntax
+// takes no PC, so without this branch targets stay relative — unreadable and
+// invisible to the UI's symbol annotation, which keys off absolute 0x… operands.
+// Only true PC-relative branches are touched (the offset is the last operand and a
+// pure signed decimal); register offsets like "jalr x1,528(x1)" and immediates
+// like "addi x2,x2,-48" are left alone via the mnemonic gate.
+func resolveRiscvBranch(text string, addr uint64) string {
+	sp := strings.IndexAny(text, " \t")
+	if sp < 0 {
+		return text
+	}
+	op := strings.ToLower(text[:sp])
+	branch := op == "jal" || op == "j"
+	if !branch {
+		switch Classify(text) {
+		case ClassJumpCond, ClassJumpUnc:
+			branch = true
+		}
+	}
+	if !branch {
+		return text
+	}
+	args := text[sp+1:]
+	head := len(text[:sp]) + 1 // index in text where args begin
+	lastComma := strings.LastIndex(args, ",")
+	last := strings.TrimSpace(args[lastComma+1:])
+	off, err := strconv.ParseInt(last, 10, 64)
+	if err != nil {
+		return text // not a bare PC-relative offset (e.g. "528(x1)")
+	}
+	target := addr + uint64(off) // uint64 wraparound handles negative offsets
+	return text[:head+lastComma+1] + fmt.Sprintf("0x%x", target)
+}
+
+// armd adapts x/arch's 32-bit ARM decoder. Only the A32 (ARM) instruction set is
+// decoded — x/arch's armasm does not implement Thumb — which matches the A32 code
+// Go and Zig emit for the ELF arm target.
+type armd struct{}
+
+// Name returns the decoder's short display name.
+func (armd) Name() string { return "arm" }
+
+// Step returns the resynchronization stride after decode errors.
+func (armd) Step() int { return 4 }
+
+// Decode decodes one 32-bit ARM (A32) instruction at addr.
+func (armd) Decode(code []byte, addr uint64) (out Inst, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = Inst{}, fmt.Errorf("arm decode panic: %v", r)
+		}
+	}()
+	if len(code) < 4 {
+		return Inst{}, fmt.Errorf("short read")
+	}
+	inst, derr := armasm.Decode(code, armasm.ModeARM)
+	if derr != nil {
+		return Inst{}, derr
+	}
+	n := inst.Len
+	if n == 0 || n > len(code) {
+		n = 4
+	}
+	text := resolveRelTargets(armasm.GNUSyntax(inst), addr)
+	return Inst{Addr: addr, Bytes: code[:n], Text: text, Class: Classify(text)}, nil
+}
+
+// ppc64d adapts x/arch's PowerPC 64 decoder. The byte order is fixed per slice
+// (big-endian for ppc64, little for ppc64le), so it is baked in at construction.
+type ppc64d struct {
+	ord  binary.ByteOrder
+	name string
+}
+
+// Name returns the decoder's short display name.
+func (d ppc64d) Name() string { return d.name }
+
+// Step returns the resynchronization stride after decode errors.
+func (ppc64d) Step() int { return 4 }
+
+// Decode decodes one PowerPC 64 instruction at addr.
+func (d ppc64d) Decode(code []byte, addr uint64) (out Inst, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = Inst{}, fmt.Errorf("ppc64 decode panic: %v", r)
+		}
+	}()
+	if len(code) < 4 {
+		return Inst{}, fmt.Errorf("short read")
+	}
+	inst, derr := ppc64asm.Decode(code, d.ord)
+	if derr != nil {
+		return Inst{}, derr
+	}
+	n := inst.Len
+	if n == 0 || n > len(code) {
+		n = 4
+	}
+	text := ppc64asm.GNUSyntax(inst, addr)
+	return Inst{Addr: addr, Bytes: code[:n], Text: text, Class: Classify(text)}, nil
+}
+
+// s390xd adapts x/arch's s390x (IBM Z) decoder. Instructions are 2, 4 or 6 bytes
+// and the architecture is always big-endian.
+type s390xd struct{}
+
+// Name returns the decoder's short display name.
+func (s390xd) Name() string { return "s390x" }
+
+// Step returns the resynchronization stride after decode errors.
+func (s390xd) Step() int { return 2 }
+
+// Decode decodes one s390x instruction at addr.
+func (s390xd) Decode(code []byte, addr uint64) (out Inst, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = Inst{}, fmt.Errorf("s390x decode panic: %v", r)
+		}
+	}()
+	if len(code) < 2 {
+		return Inst{}, fmt.Errorf("short read")
+	}
+	inst, derr := s390xasm.Decode(code)
+	if derr != nil {
+		return Inst{}, derr
+	}
+	n := inst.Len
+	if n == 0 || n > len(code) {
+		n = 2
+	}
+	text := s390xasm.GNUSyntax(inst, addr)
+	return Inst{Addr: addr, Bytes: code[:n], Text: text, Class: Classify(text)}, nil
+}
+
+// loong64d adapts x/arch's LoongArch 64 decoder. Instructions are a fixed 4 bytes,
+// little-endian.
+type loong64d struct{}
+
+// Name returns the decoder's short display name.
+func (loong64d) Name() string { return "loong64" }
+
+// Step returns the resynchronization stride after decode errors.
+func (loong64d) Step() int { return 4 }
+
+// Decode decodes one LoongArch 64 instruction at addr.
+func (loong64d) Decode(code []byte, addr uint64) (out Inst, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = Inst{}, fmt.Errorf("loong64 decode panic: %v", r)
+		}
+	}()
+	if len(code) < 4 {
+		return Inst{}, fmt.Errorf("short read")
+	}
+	inst, derr := loong64asm.Decode(code)
+	if derr != nil {
+		return Inst{}, derr
+	}
+	text := resolveRelTargets(loong64asm.GNUSyntax(inst), addr)
+	return Inst{Addr: addr, Bytes: code[:4], Text: text, Class: Classify(text)}, nil // fixed 4-byte
 }
 
 // resolveRelTargets rewrites PC-relative branch operands that the ARM64/RISC-V

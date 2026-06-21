@@ -81,7 +81,7 @@ func (f *File) loadELF() error {
 	}
 	f.Format = FormatELF
 	f.entry = ef.Entry
-	f.arch = elfArch(ef.Machine)
+	f.arch = elfArch(ef)
 	if ef.Class == elf.ELFCLASS32 {
 		f.addrWidth = 8
 	} else {
@@ -117,7 +117,7 @@ func (f *File) loadELF() error {
 	}
 	seen := map[symKey]bool{}
 	add := func(s elf.Symbol) {
-		if s.Name == "" || isELFMappingSymbol(s.Name) {
+		if s.Name == "" || isELFMappingSymbol(s.Name) || isELFLocalLabel(s) {
 			return
 		}
 		key := symKey{s.Name, s.Value}
@@ -385,8 +385,21 @@ func isELFMappingSymbol(name string) bool {
 	return false
 }
 
-func elfArch(m elf.Machine) arch.Arch {
-	switch m {
+// isELFLocalLabel reports whether s is a compiler/assembler-internal local label
+// — the ".L…" convention used by GNU as and LLVM (".L0", ".LBB1_2", ".LCPI0_0").
+// These aren't program symbols; RISC-V keeps them in .symtab for linker
+// relaxation, where they otherwise flood the table (often all literally ".L0")
+// and shadow real function labels in the disassembly view.
+func isELFLocalLabel(s elf.Symbol) bool {
+	return elf.ST_BIND(s.Info) == elf.STB_LOCAL &&
+		elf.ST_TYPE(s.Info) == elf.STT_NOTYPE &&
+		strings.HasPrefix(s.Name, ".L")
+}
+
+func elfArch(ef *elf.File) arch.Arch {
+	le := ef.ByteOrder == binary.LittleEndian
+	is64 := ef.Class == elf.ELFCLASS64
+	switch ef.Machine {
 	case elf.EM_X86_64:
 		return arch.ArchAMD64
 	case elf.EM_386:
@@ -395,6 +408,31 @@ func elfArch(m elf.Machine) arch.Arch {
 		return arch.ArchARM64
 	case elf.EM_RISCV:
 		return arch.ArchRISCV64
+	case elf.EM_ARM:
+		// armasm decodes little-endian A32. Big-endian ARM (armeb) is BE-8 on
+		// modern toolchains, which keeps instructions little-endian in memory, so
+		// the same decoder applies. (Legacy BE-32, with big-endian instruction
+		// words, is effectively extinct.)
+		return arch.ArchARM
+	case elf.EM_PPC:
+		if le {
+			return arch.ArchPPCLE
+		}
+		return arch.ArchPPC
+	case elf.EM_PPC64:
+		if le {
+			return arch.ArchPPC64LE
+		}
+		return arch.ArchPPC64
+	case elf.EM_S390:
+		// EM_S390 covers 31-bit s390 and 64-bit s390x; x/arch decodes s390x.
+		if is64 {
+			return arch.ArchS390X
+		}
+	case elf.EM_LOONGARCH:
+		if le && is64 {
+			return arch.ArchLoong64
+		}
 	}
 	return arch.ArchUnknown
 }

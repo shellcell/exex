@@ -231,6 +231,18 @@ func (m *Model) followPointerAt(data []byte, pos int) {
 	m.gotoAddr(v)
 }
 
+// byteViewportRows is the number of byte rows visible in the hex/raw view (the
+// body minus the one sticky title row).
+func (m *Model) byteViewportRows() int {
+	return max(1, m.bodyHeight()-1)
+}
+
+// bytePageRows is how many rows pgup/pgdown advance the hex/raw view: one screen
+// minus a row, so a line of context carries over between pages.
+func (m *Model) bytePageRows() int {
+	return max(1, m.byteViewportRows()-1)
+}
+
 // moveByteCursor applies a navigation key to a byte cursor over n bytes.
 func (m *Model) moveByteCursor(key string, cur, n int) int {
 	row := bytesPerHexRow
@@ -252,9 +264,9 @@ func (m *Model) moveByteCursor(key string, cur, n int) int {
 			cur += row
 		}
 	case "pgup":
-		cur = max(0, cur-row*m.bodyHeight())
+		cur = max(0, cur-row*m.bytePageRows())
 	case "pgdown":
-		cur = min(n-1, cur+row*m.bodyHeight())
+		cur = min(n-1, cur+row*m.bytePageRows())
 	case "home", "g g":
 		cur = 0
 	case "end", "G":

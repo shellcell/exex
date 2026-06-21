@@ -23,7 +23,7 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 	if n == 0 {
 		return m, nil
 	}
-	if navKey(&m.libsCur, n, m.bodyHeight(), key) {
+	if navKey(&m.libsCur, n, m.listPage(), key) {
 		return m, nil
 	}
 	switch key {
@@ -119,6 +119,7 @@ func (m *Model) renderLibs() string {
 	}
 	top := m.visualTopForView(m.libsCur, m.libsTop, len(info.DynamicLibs), visible, rowHeight)
 	m.libsTop = top
+	m.pageRows = pageStep(top, len(info.DynamicLibs), visible, rowHeight)
 	m.renderedLibsTop = top
 	for i := top; i < len(info.DynamicLibs); i++ {
 		line := m.libRow(i, i == m.libsCur)

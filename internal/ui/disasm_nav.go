@@ -179,7 +179,12 @@ func (m *Model) stepDisasm(forward bool) bool {
 }
 
 func (m *Model) moveDisasmPage(forward bool) {
-	steps := max(1, m.bodyHeight())
+	// Advance by one screenful of instructions: the number that fill the scroller
+	// height at the current top, accounting for multi-line (wrapped) rows.
+	w := m.disasmRenderWidth()
+	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
+	steps := pageStep(m.disasmTop, len(m.disasmInst), m.disasmViewportHeight(), rowHeight)
+	steps = max(1, steps-1) // keep one instruction of context between pages
 	for i := 0; i < steps; i++ {
 		if !m.stepDisasm(forward) {
 			return

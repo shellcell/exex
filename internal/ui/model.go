@@ -333,6 +333,11 @@ type interactionState struct {
 	renderedLibsTop     int
 	renderedSrcTop      int
 
+	// pageRows is the active view's page size (items per screen) recorded at the
+	// last render, so pgup/pgdown ([ / ]) advance by exactly one screen instead
+	// of overshooting on chrome rows or wrapped multi-line entries.
+	pageRows int
+
 	// helpActive toggles the keybinding cheat-sheet overlay.
 	helpActive bool
 

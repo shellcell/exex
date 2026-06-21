@@ -9,6 +9,51 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// pageStep returns how many list items make up one screen "page": the number of
+// items whose stacked rendered heights fill visibleLines, starting at item from
+// (the current top of the viewport), clamped to at least 1. rowHeight gives each
+// item's line count (1 for single-line rows). Paging by this many items advances
+// the view by about one screen instead of overshooting when rows carry chrome
+// (header/filter lines reduce visibleLines) or wrap onto multiple lines.
+func pageStep(from, n, visibleLines int, rowHeight func(int) int) int {
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+	used, count := 0, 0
+	for i := from; i < n; i++ {
+		h := rowHeight(i)
+		if h < 1 {
+			h = 1
+		}
+		if count > 0 && used+h > visibleLines {
+			break
+		}
+		used += h
+		count++
+		if used >= visibleLines {
+			break
+		}
+	}
+	if count < 1 {
+		count = 1
+	}
+	return count
+}
+
+// listPage is the page size (in items) for the current list view's pgup/pgdown,
+// as measured at the last render. It advances by one screenful minus one item so
+// a row of context carries over between pages. Falls back to a sane estimate
+// before the first render has recorded a value.
+func (m *Model) listPage() int {
+	if m.pageRows > 1 {
+		return m.pageRows - 1 // keep one item of context
+	}
+	if m.pageRows == 1 {
+		return 1
+	}
+	return max(1, m.bodyHeight()-3)
+}
+
 // navKey applies a standard list-navigation key (up/down/k/j, pgup/pgdown,
 // home/end/G) to a cursor over n items, paging by page rows. It returns true
 // when it consumed the key (so the caller can stop), and always leaves the

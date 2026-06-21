@@ -159,7 +159,7 @@ func (m *Model) updateSources(key string) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 	n := len(m.sourcesFiltered)
-	if navKey(&m.sourcesCur, n, m.bodyHeight(), key) {
+	if navKey(&m.sourcesCur, n, m.listPage(), key) {
 		return m, nil
 	}
 	switch key {
@@ -229,10 +229,10 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 			m.syncSourceAsm()
 		}
 	case "pgup":
-		m.srcCur = max(1, m.srcCur-m.bodyHeight())
+		m.srcCur = max(1, m.srcCur-m.listPage())
 		m.syncSourceAsm()
 	case "pgdown":
-		m.srcCur = min(n, m.srcCur+m.bodyHeight())
+		m.srcCur = min(n, m.srcCur+m.listPage())
 		m.syncSourceAsm()
 	case "home":
 		m.srcCur = 1
@@ -413,6 +413,7 @@ func (m *Model) renderSourceList(bodyH int) string {
 	top := m.visualTopForView(m.sourcesCur, m.sourcesTop, len(m.sourcesFiltered), visible, func(int) int { return 1 })
 	m.sourcesTop = top
 	m.renderedSourcesTop = top
+	m.pageRows = pageStep(top, len(m.sourcesFiltered), visible, func(int) int { return 1 })
 	end := top + visible
 	if end > len(m.sourcesFiltered) {
 		end = len(m.sourcesFiltered)
@@ -458,6 +459,7 @@ func (m *Model) renderSourceText(w, h int) string {
 	top = m.visualTopForView(m.srcCur-1, top, len(src), contentH, m.sourceRowHeight(w))
 	m.srcTop = top + 1
 	m.renderedSrcTop = top
+	m.pageRows = pageStep(top, len(src), contentH, m.sourceRowHeight(w))
 
 	var b strings.Builder
 	suffix := fmt.Sprintf(":%d", m.srcCur)

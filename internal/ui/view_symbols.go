@@ -116,7 +116,7 @@ func (m *Model) applySymbolSort() {
 }
 
 func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
-	if navKey(&m.symbolsCur, len(m.symbolsFiltered), m.bodyHeight(), key) {
+	if navKey(&m.symbolsCur, len(m.symbolsFiltered), m.listPage(), key) {
 		return m, nil
 	}
 	switch key {
@@ -311,6 +311,7 @@ func (m *Model) renderSymbols() string {
 	top := m.visualTopForView(m.symbolsCur, m.symbolsTop, len(m.symbolsFiltered), visible, rowHeight)
 	m.symbolsTop = top
 	m.renderedSymbolsTop = top
+	m.pageRows = pageStep(top, len(m.symbolsFiltered), visible, rowHeight)
 
 	rows := []string{filterRow, header}
 	for i := top; i < len(m.symbolsFiltered); i++ {

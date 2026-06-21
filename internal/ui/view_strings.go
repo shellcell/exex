@@ -81,7 +81,7 @@ func (m *Model) currentString() (binfile.StringEntry, bool) {
 
 func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	m.ensureStrings()
-	if navKey(&m.stringsCur, len(m.stringsFiltered), m.bodyHeight(), key) {
+	if navKey(&m.stringsCur, len(m.stringsFiltered), m.listPage(), key) {
 		return m, nil
 	}
 	switch key {
@@ -143,6 +143,7 @@ func (m *Model) renderStrings() string {
 	top := m.visualTopForView(m.stringsCur, m.stringsTop, len(m.stringsFiltered), visible, rowHeight)
 	m.stringsTop = top
 	m.renderedStringsTop = top
+	m.pageRows = pageStep(top, len(m.stringsFiltered), visible, rowHeight)
 
 	rows := []string{filterRow, header}
 	for i := top; i < len(m.stringsFiltered); i++ {

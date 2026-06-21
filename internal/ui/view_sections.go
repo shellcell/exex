@@ -45,7 +45,7 @@ func (m *Model) recomputeSections() {
 
 func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 	n := len(m.sectionsFiltered)
-	if navKey(&m.sectionsCur, n, m.bodyHeight(), key) {
+	if navKey(&m.sectionsCur, n, m.listPage(), key) {
 		return m, nil
 	}
 	switch key {
@@ -197,6 +197,7 @@ func (m *Model) renderSections() string {
 		return m.sectionRowHeight(i)
 	}
 	top := m.visualTopForView(m.sectionsCur, m.sectionsTop, len(m.sectionsFiltered), visible, rowHeight)
+	m.pageRows = pageStep(top, len(m.sectionsFiltered), visible, rowHeight)
 	m.sectionsTop = top
 	m.renderedSectionsTop = top
 

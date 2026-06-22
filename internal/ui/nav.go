@@ -119,6 +119,32 @@ func hasFoldPrefixLower(s, prefix string) bool {
 	return true
 }
 
+// containsFoldBytes is containsFold over a byte slice (substr already lowercased),
+// so the strings filter can scan zero-copy slices into the file image without
+// allocating a string per entry.
+func containsFoldBytes(b []byte, substr string) bool {
+	if substr == "" {
+		return true
+	}
+	for i := 0; i+len(substr) <= len(b); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			c := b[i+j]
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != substr[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 // toggleWrap flips the global long-line wrap and reports it in the footer.
 func (m *Model) toggleWrap() {
 	m.wrap = !m.wrap

@@ -296,9 +296,9 @@ func Strings(f *binfile.File) string {
 	var b strings.Builder
 	for _, e := range f.Strings() {
 		if e.HasAddr {
-			fmt.Fprintf(&b, "0x%0*x  %s\n", addrW, e.Addr, e.Text)
+			fmt.Fprintf(&b, "0x%0*x  %s\n", addrW, e.Addr, f.StringText(e))
 		} else {
-			fmt.Fprintf(&b, "@0x%-*x  %s\n", addrW, e.Offset, e.Text)
+			fmt.Fprintf(&b, "@0x%-*x  %s\n", addrW, e.Offset, f.StringText(e))
 		}
 	}
 	return b.String()

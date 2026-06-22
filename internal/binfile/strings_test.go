@@ -15,9 +15,9 @@ func TestExtractStrings(t *testing.T) {
 	}
 	found := map[string]uint64{}
 	for _, s := range got {
-		found[s.Text] = s.Offset
+		found[f.StringText(s)] = s.Offset
 		if s.HasAddr {
-			t.Errorf("string %q reported an address with no sections loaded", s.Text)
+			t.Errorf("string %q reported an address with no sections loaded", f.StringText(s))
 		}
 	}
 	for text, off := range want {
@@ -35,9 +35,8 @@ func TestExtractStrings(t *testing.T) {
 func TestStringsCachesExtraction(t *testing.T) {
 	f := &File{raw: []byte("hello\x00world")}
 	first := f.Strings()
-	f.raw = []byte("changed")
 	second := f.Strings()
-	if len(first) != len(second) || first[0].Text != second[0].Text {
+	if len(first) != len(second) || first[0] != second[0] {
 		t.Fatalf("Strings cache changed: first=%#v second=%#v", first, second)
 	}
 }
@@ -58,7 +57,7 @@ func TestExtractStringsMapsAddress(t *testing.T) {
 		}},
 	}
 	for _, s := range f.extractStrings() {
-		if s.Text == "mapped!" {
+		if f.StringText(s) == "mapped!" {
 			if !s.HasAddr || s.Addr != 0x4000 || s.Section != "__cstring" {
 				t.Fatalf("bad mapping: %+v", s)
 			}

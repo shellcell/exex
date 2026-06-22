@@ -319,13 +319,15 @@ func TestPageDownWrapLongLinesSymbols(t *testing.T) {
 func TestPageDownWrapLongLinesStrings(t *testing.T) {
 	long := strings.Repeat("a_long_printable_string_segment_", 6) // ~190 chars
 	var list []binfile.StringEntry
+	raw := make([]byte, 300*256)
 	for i := 0; i < 300; i++ {
-		list = append(list, binfile.StringEntry{
-			Offset: uint64(i * 256),
-			Text:   fmt.Sprintf("%s%03d", long, i),
-		})
+		txt := fmt.Sprintf("%s%03d", long, i)
+		off := i * 256
+		copy(raw[off:], txt)
+		list = append(list, binfile.StringEntry{Offset: uint64(off), Len: uint32(len(txt))})
 	}
-	f := &binfile.File{Format: binfile.FormatELF}
+	f := binfile.NewRawFile(raw)
+	f.Format = binfile.FormatELF
 	m, err := New(f)
 	if err != nil {
 		t.Fatalf("New: %v", err)

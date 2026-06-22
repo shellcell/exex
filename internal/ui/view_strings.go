@@ -32,7 +32,9 @@ func (m *Model) recomputeStrings() {
 	needle := strings.ToLower(m.stringsFilter.Value())
 	m.stringsFiltered = m.stringsFiltered[:0]
 	for i, s := range m.stringsList {
-		if needle == "" || containsFold(s.Text, needle) || containsFold(s.Section, needle) {
+		// Filter on the raw bytes (zero-copy) so scanning millions of strings on
+		// each keystroke doesn't allocate a copy per entry.
+		if needle == "" || containsFoldBytes(m.file.StringBytes(s), needle) || containsFold(s.Section, needle) {
 			m.stringsFiltered = append(m.stringsFiltered, i)
 		}
 	}
@@ -107,7 +109,7 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		if s, ok := m.currentString(); ok {
-			m.copyToClipboard(s.Text, "string")
+			m.copyToClipboard(m.file.StringText(s), "string")
 		}
 	}
 	return m, nil
@@ -191,9 +193,10 @@ func (m *Model) stringRow(i, addrW int) string {
 	if s.HasAddr {
 		addr = fmt.Sprintf("0x%0*x", addrW, s.Addr)
 	}
-	text := sanitizeString(s.Text)
+	full := m.file.StringText(s)
+	text := sanitizeString(full)
 	if m.wrap {
-		text = s.Text
+		text = full
 	}
 	line := fmt.Sprintf(" %s %s %s  %s",
 		m.theme.addrStyle.Render(fmt.Sprintf("0x%-8x", s.Offset)),

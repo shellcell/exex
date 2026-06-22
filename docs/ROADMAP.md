@@ -270,7 +270,9 @@ thunk), mirroring `appendELFImportSymbols` / `machoImportSymbols`.
 Mark somehow pathes that present and can be opened. Add filter for this criteria
 in the view. Same about libs.
 
-## 26. Sortings / filters for strings view
+## 26. Sortings / filters for strings view, also one-page view
+
+view all the strings in single page one after other with middle dot separator
 
 ## 27. Buttons unification
 
@@ -324,7 +326,7 @@ shift+s - copy
 shift+p - copy pointer in hex, raw view
 shift+c - copy symbol (instructions) in disasm view
 
-== ACTIONS ==
+== SEARCH / FILTER / SORT ==
 
 = search =
 
@@ -337,3 +339,4 @@ n, N - next / prev occurence in disasm, hex, raw
 
 = sort =
 
+r - reverse current sorting in sections, symbols, strings, libs, sources

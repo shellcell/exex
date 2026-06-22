@@ -129,6 +129,7 @@ Output streams, so `| head` returns immediately even on large binaries.
 | `d` | disassemble selected address (when executable) |
 | `t` | Symbols/Sources/Libs: toggle a collapsible namespace/path **tree** ↔ flat list |
 | `←`/`→` · `Enter` · `+`/`−` | tree: collapse / expand group (`←` on a leaf folds its branch) · expand/collapse all below · all (keys rebindable) |
+| `e` / `.` | collapse long `(…)`/`<…>` argument & template lists to `...` (short ones like `<int>` kept) — `e` all (also from Disasm/Hex/Raw, abbreviating their symbol annotations), `.` current Symbols row |
 | `a` / `s` | copy address / name |
 | `w` | toggle long-line wrap |
 | `Tab` / `⇧Tab` | show-hide / swap the disasm source pane |

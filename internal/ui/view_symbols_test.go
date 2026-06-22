@@ -36,6 +36,95 @@ func TestSymbolScopeFilter(t *testing.T) {
 	}
 }
 
+func TestAbbrevBrackets(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain_name", "plain_name"},
+		// Inner content of 5 bytes or fewer is kept verbatim; longer content collapses.
+		{"Foo<A>", "Foo<A>"},
+		{"Foo<int>", "Foo<int>"},
+		{"Foo<int8>", "Foo<int8>"},   // inner "int8" = 4 bytes: kept
+		{"Foo<int16>", "Foo<int16>"}, // inner "int16" = 5 bytes: kept
+		{"Foo<uint16>", "Foo<...>"},  // inner "uint16" = 6 bytes: collapsed
+		{"std::vector<int>::push_back", "std::vector<int>::push_back"},
+		{"f<int, char>(a, b)", "f<...>(a, b)"}, // "<int, char>" collapses, "(a, b)" kept
+		{"foo()", "foo()"},                     // empty parens unchanged
+		{"std::map<K, V>::find()", "std::map<K, V>::find()"},
+		{"a<b<c>>(d)", "a<b<c>>(d)"}, // both inners < 5
+		{"vector<std::pair<int, long>>", "vector<...>"},
+		{"x[1]", "x[1]"}, // square brackets untouched
+		// C++ operator names: punctuation passed through, long groups still collapse.
+		{"std::vector<int>::operator<<(std::ostream&)", "std::vector<int>::operator<<(...)"},
+		{"Foo<Bar>::operator->()", "Foo<Bar>::operator->()"},
+		{"std::map<K, V>::operator[](const K&)", "std::map<K, V>::operator[](...)"},
+		// Trailing-return "->" arrows must not be read as a bracket close.
+		{"f<A>(x: Int) -> Pair<A>", "f<A>(...) -> Pair<A>"},
+		{"closure #1 <A>(B<A>) -> C<A> in foo.bar(baz: D<A>) -> E<A>",
+			"closure #1 <A>(B<A>) -> C<A> in foo.bar(...) -> E<A>"},
+	}
+	for _, c := range cases {
+		if got := abbrevBrackets(c.in); got != c.want {
+			t.Errorf("abbrevBrackets(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSymbolAbbrevToggles(t *testing.T) {
+	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
+		{Name: "alpha<Integer>", Addr: 0x1000},
+		{Name: "beta<Character>", Addr: 0x2000},
+	}}}
+	m.symbolsFilter = newPromptInput("", "/ ")
+	m.recomputeSymbols()
+
+	label := func(row int) string { return m.symbolLabel(m.symbolsRows[row].node) }
+
+	// Default: full names.
+	if label(0) != "alpha<Integer>" {
+		t.Fatalf("default label = %q, want alpha<Integer>", label(0))
+	}
+	// Global toggle abbreviates every row (both inners are > 5 bytes).
+	m.toggleSymbolAbbrevAll()
+	if label(0) != "alpha<...>" || label(1) != "beta<...>" {
+		t.Fatalf("after toggle-all: %q, %q", label(0), label(1))
+	}
+	// Per-row override inverts just that row back to full.
+	m.symbolsCur = 0
+	m.toggleSymbolAbbrev()
+	if label(0) != "alpha<Integer>" {
+		t.Fatalf("per-row override label = %q, want alpha<Integer>", label(0))
+	}
+	if label(1) != "beta<...>" {
+		t.Fatalf("sibling row changed: %q", label(1))
+	}
+	// A fresh global toggle clears per-row overrides (back to uniform, here expanded).
+	m.toggleSymbolAbbrevAll()
+	if label(0) != "alpha<Integer>" || label(1) != "beta<Character>" {
+		t.Fatalf("after second toggle-all: %q, %q", label(0), label(1))
+	}
+}
+
+func TestDisplaySymbolNameUsesGlobalAbbrevOnly(t *testing.T) {
+	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
+		{Name: "raw", Demangled: "foo<LongArgList>(int, char)", Addr: 0x1000},
+	}}}
+	s := m.file.Symbols[0]
+
+	// Off by default: the full demangled name (used by disasm/hex annotations).
+	if got := m.displaySymbolName(s); got != "foo<LongArgList>(int, char)" {
+		t.Fatalf("default = %q", got)
+	}
+	// Global toggle on: bracket lists collapse everywhere the helper is used.
+	m.symbolsAbbrev = true
+	if got := m.displaySymbolName(s); got != "foo<...>(...)" {
+		t.Fatalf("global on = %q", got)
+	}
+	// Symbols-list per-row overrides are list-specific and must not leak here.
+	m.symbolsAbbrevExcept = map[string]bool{"s0": true}
+	if got := m.displaySymbolName(s); got != "foo<...>(...)" {
+		t.Fatalf("per-row override leaked into shared helper = %q", got)
+	}
+}
+
 func TestSymbolSortAndBind(t *testing.T) {
 	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
 		{Name: "a", Addr: 0x1000, Size: 10, Bind: binfile.BindLocal},

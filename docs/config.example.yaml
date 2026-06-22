@@ -202,6 +202,12 @@ behavior:
   # Start every tree fully collapsed (top-level groups only). `+`/`−` expand or
   # collapse all for the session.
   tree_collapsed: false
+  # Start the Symbols view with long "(…)"/"<…>" contents (parameter lists and
+  # template arguments) shown as "..."; short ones (≤5 chars, e.g. "<int>") are kept.
+  # `e` toggles all rows and `.` toggles the row under the cursor for the session;
+  # the all-rows toggle also abbreviates symbol names in the disasm/hex/pointer
+  # annotations. Toggle/save live from the settings popup (,).
+  abbrev_args: false
   # Where the disasm view lands by default (and redirects to when asked to show
   # a non-executable address): lowest, text, main, start, or entry. Defaults to
   # lowest (the lowest executable address). Unresolvable choices fall back.

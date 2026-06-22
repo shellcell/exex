@@ -323,6 +323,8 @@ func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
 		m.runSearch(true, false)
 	case "N":
 		m.runSearch(false, false)
+	case "e":
+		m.toggleSymbolAbbrevAll()
 	default:
 		m.hexCur = m.moveByteCursor(key, m.hexCur, len(data))
 	}
@@ -432,6 +434,8 @@ func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
 		m.runSearch(true, false)
 	case "N":
 		m.runSearch(false, false)
+	case "e":
+		m.toggleSymbolAbbrevAll()
 	default:
 		m.rawCur = m.moveByteCursor(key, m.rawCur, len(m.rawData))
 	}
@@ -921,7 +925,7 @@ func (m *Model) renderHexRow(md mode, data []byte, cur int, span hexRowSpan, add
 		if syms := m.file.SymbolsInRange(addr, endAddr); len(syms) != 0 {
 			for _, sym := range syms {
 				line.WriteString(" [")
-				line.WriteString(m.theme.addrStyle.Render(sym.Display()))
+				line.WriteString(m.theme.addrStyle.Render(m.displaySymbolName(sym)))
 				line.WriteString("]")
 			}
 		} else if sec := m.file.SectionAt(addr); sec != nil && sec.Addr == addr {

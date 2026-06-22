@@ -60,6 +60,10 @@ type Behavior struct {
 	// TreeCollapsed starts every tree fully collapsed (top-level groups only); the
 	// `+`/`−` keys expand/collapse all for the session.
 	TreeCollapsed bool `yaml:"tree_collapsed"`
+	// AbbrevArgs starts the symbols view with "(…)"/"<…>" contents shown as "..."
+	// (template arguments and parameter lists hidden). `d` toggles all and `.`
+	// toggles the row under the cursor for the session.
+	AbbrevArgs bool `yaml:"abbrev_args"`
 }
 
 // Colors lists every visual element the user can re-skin. Empty strings mean
@@ -381,6 +385,7 @@ func Save(theme string, beh Behavior) (string, error) {
 	yamlBool("tree_sources", beh.TreeSources)
 	yamlBool("tree_libs", beh.TreeLibs)
 	yamlBool("tree_collapsed", beh.TreeCollapsed)
+	yamlBool("abbrev_args", beh.AbbrevArgs)
 
 	out, err := yaml.Marshal(&doc)
 	if err != nil {

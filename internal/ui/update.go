@@ -73,6 +73,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.symbolsTreeInit = false
 		m.symbolsCollapsed = nil
 		m.recomputeSymbols()
+		// Demangled names also appear in the disasm "<name>:" labels and the
+		// disasm/hex annotations, whose cached instruction heights wrap by name
+		// length — drop them so they re-measure against the readable names.
+		m.clearSymbolNameCaches()
 		return m, nil
 
 	default:

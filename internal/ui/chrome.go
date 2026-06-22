@@ -117,6 +117,7 @@ func (m *Model) renderHelpModal() string {
 		row("t", "toggle namespace tree / flat table"),
 		row("←/→", "tree: collapse / expand group (← on a leaf folds its branch)"),
 		row("↵ · +/−", "tree: expand/collapse all below · all"),
+		row("e / .", "collapse (…)/<…> to ... · all / current row"),
 		row("Esc", "clear library filter"),
 	}
 	right := []helpEntry{
@@ -127,6 +128,7 @@ func (m *Model) renderHelpModal() string {
 		row("Enter / dbl-clk", "follow address"),
 		row("x", "find references (xrefs)"),
 		row("a / s / c", "copy addr / symbol / function asm"),
+		row("e", "collapse (…)/<…> in symbol names"),
 		row("/  n/N", "search · next/prev"),
 		row("Tab", "show / hide right pane"),
 		row("⇧Tab", "swap source / disasm"),
@@ -141,6 +143,7 @@ func (m *Model) renderHelpModal() string {
 		row("Enter", "follow pointer at cursor"),
 		row("a / s / v", "copy address / symbol / pointer"),
 		row("w", "wrap long rows"),
+		row("e", "collapse (…)/<…> in symbol names"),
 		row("/  n/N", "search bytes/\"text\"/0x…"),
 		blank,
 		head("Sources"),

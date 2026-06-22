@@ -121,9 +121,9 @@ func isAddrLoadOp(op string) bool {
 func (m *Model) targetAnnotation(addr uint64) string {
 	if sym, ok := m.file.SymbolAt(addr); ok {
 		if addr == sym.Addr {
-			return sym.Display()
+			return m.displaySymbolName(sym)
 		}
-		return fmt.Sprintf("%s+0x%x", sym.Display(), addr-sym.Addr)
+		return fmt.Sprintf("%s+0x%x", m.displaySymbolName(sym), addr-sym.Addr)
 	}
 	if sec := m.file.SectionAt(addr); sec != nil {
 		return sec.Name
@@ -182,9 +182,9 @@ func (m *Model) renderStickySymbol(w int) string {
 	if sym, ok := m.file.SymbolAt(addr); ok {
 		off := addr - sym.Addr
 		if off == 0 {
-			text = fmt.Sprintf(" %s   @  0x%0*x", sym.Display(), m.file.AddrHexWidth(), addr)
+			text = fmt.Sprintf(" %s   @  0x%0*x", m.displaySymbolName(sym), m.file.AddrHexWidth(), addr)
 		} else {
-			text = fmt.Sprintf(" %s + 0x%x   @  0x%0*x", sym.Display(), off, m.file.AddrHexWidth(), addr)
+			text = fmt.Sprintf(" %s + 0x%x   @  0x%0*x", m.displaySymbolName(sym), off, m.file.AddrHexWidth(), addr)
 		}
 	} else {
 		text = fmt.Sprintf(" (no symbol)   @  0x%0*x", m.file.AddrHexWidth(), addr)
@@ -231,7 +231,7 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 			}
 		}
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			for _, row := range m.disasmLabelRows(sym.Display(), w) {
+			for _, row := range m.disasmLabelRows(m.displaySymbolName(sym), w) {
 				if len(rows) >= h {
 					break
 				}
@@ -282,7 +282,7 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	}
 	if m.disasmIsSymbolStart(i) {
 		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			h += len(m.disasmLabelRows(sym.Display(), w))
+			h += len(m.disasmLabelRows(m.displaySymbolName(sym), w))
 		} else {
 			h++
 		}

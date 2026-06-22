@@ -13,7 +13,7 @@ BASHCOMPDIR ?= /usr/local/etc/bash_completion.d
 ZSHCOMPDIR ?= /usr/local/share/zsh/site-functions
 FISHCOMPDIR ?= /usr/local/share/fish/vendor_completions.d
 
-.PHONY: build lite install install-man install-completions test test-cross clean release
+.PHONY: build lite install install-man install-completions test test-cross lint-docs clean release
 
 # Full build: includes Chroma syntax highlighting (source pane + asm colours).
 build:
@@ -42,6 +42,13 @@ install-completions:
 test:
 	go test ./...
 	go vet -tags lite ./...
+
+# Lint the man page with mandoc. STYLE-level notes are not fatal; WARNING and
+# ERROR are (so malformed roff fails the build). mandoc ships with macOS/BSD and is
+# `apt-get install mandoc` on Debian/Ubuntu.
+lint-docs:
+	@command -v mandoc >/dev/null 2>&1 || { echo "mandoc not found (brew install mandoc / apt-get install mandoc)"; exit 1; }
+	mandoc -T lint -W warning $(MANPAGE)
 
 # Slow, toolchain-dependent end-to-end test: cross-compile a tiny program with Go
 # and Zig for every target exex can read, then parse/disassemble each. Needs the

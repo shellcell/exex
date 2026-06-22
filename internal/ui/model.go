@@ -89,27 +89,29 @@ type rowCacheKey struct {
 
 // symbolsState stores list/filter state for the Symbols view.
 type symbolsState struct {
-	symbolsFilter     textinput.Model
-	symbolsFiltered   []int // indices into file.Symbols (sorted by name)
-	symbolsCur        int
-	symbolsTop        int
-	symbolsKind       binfile.SymKind
-	symbolsKindOn     bool
-	symbolsBind       binfile.SymBind
-	symbolsBindOn     bool
-	symbolsScope      symbolScope     // all / internal (defined here) / imported (from libs)
-	symbolsSort       symbolSort      // view order: name / address / size
-	symbolsSortDesc   bool            // reverse the active sort (descending)
-	symbolsLib        string          // when set, show only imports bound to this library
-	symbolsTree       bool            // group names into a collapsible namespace tree (name sort)
-	symbolsCollapsed  map[string]bool // collapsed tree node paths (persist across rebuilds)
-	symbolsRoots      []*treeNode     // built tree; cached so collapse toggles only re-flatten
-	symbolsRows       []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
-	symbolsTreeInit   bool            // collapse-default applied once
-	symbolsByDisplay  []int           // all symbol indices sorted by Display(); built lazily
-	symbolFacets      []facetHit      // clickable toggle buttons on the status line (x ranges)
-	symbolRowCache    map[rowCacheKey][]string
-	symbolHeightCache map[rowCacheKey]int
+	symbolsFilter       textinput.Model
+	symbolsFiltered     []int // indices into file.Symbols (sorted by name)
+	symbolsCur          int
+	symbolsTop          int
+	symbolsKind         binfile.SymKind
+	symbolsKindOn       bool
+	symbolsBind         binfile.SymBind
+	symbolsBindOn       bool
+	symbolsScope        symbolScope     // all / internal (defined here) / imported (from libs)
+	symbolsSort         symbolSort      // view order: name / address / size
+	symbolsSortDesc     bool            // reverse the active sort (descending)
+	symbolsLib          string          // when set, show only imports bound to this library
+	symbolsTree         bool            // group names into a collapsible namespace tree (name sort)
+	symbolsAbbrev       bool            // global: render "(…)"/"<…>" contents as "..."
+	symbolsAbbrevExcept map[string]bool // per-row overrides inverting symbolsAbbrev
+	symbolsCollapsed    map[string]bool // collapsed tree node paths (persist across rebuilds)
+	symbolsRoots        []*treeNode     // built tree; cached so collapse toggles only re-flatten
+	symbolsRows         []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
+	symbolsTreeInit     bool            // collapse-default applied once
+	symbolsByDisplay    []int           // all symbol indices sorted by Display(); built lazily
+	symbolFacets        []facetHit      // clickable toggle buttons on the status line (x ranges)
+	symbolRowCache      map[rowCacheKey][]string
+	symbolHeightCache   map[rowCacheKey]int
 }
 
 // facetKind identifies a clickable toggle button on the symbols status line.
@@ -122,6 +124,7 @@ const (
 	facetSortDir
 	facetBind
 	facetTree
+	facetAbbrev
 )
 
 // facetHit is the screen-column span [start,end) of one clickable toggle button.
@@ -134,6 +137,16 @@ type facetHit struct {
 func (m *Model) clearSymbolCaches() {
 	m.symbolRowCache = nil
 	m.symbolHeightCache = nil
+}
+
+// clearSymbolNameCaches drops caches whose layout depends on how symbol names
+// render. Disasm instruction heights bake in the wrapped height of the "<name>:"
+// label and the address annotations, so they must be recomputed when names change
+// form — the background demangle finishing, or the global argument-abbreviation
+// toggle. (Hex/raw and the disasm annotations themselves render live; the asm
+// colour cache is keyed by raw instruction text, which carries no symbol name.)
+func (m *Model) clearSymbolNameCaches() {
+	m.disasmHeightCache = nil
 }
 
 // clearSectionCaches drops cached section rows and heights.

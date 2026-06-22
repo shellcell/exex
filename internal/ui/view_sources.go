@@ -758,7 +758,7 @@ func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
 	if anchor >= 0 && anchor < len(m.disasmInst) {
 		addr := m.disasmInst[anchor].Addr
 		if sym, ok := m.file.SymbolAt(addr); ok {
-			name = sym.Display()
+			name = m.displaySymbolName(sym)
 			if off := addr - sym.Addr; off > 0 {
 				name = fmt.Sprintf("%s+0x%x", name, off)
 			}

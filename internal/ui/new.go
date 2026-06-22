@@ -50,6 +50,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 		symbolsState: symbolsState{
 			symbolsFilter: filter,
 			symbolsTree:   cfg.Behavior.TreeSymbols,
+			symbolsAbbrev: cfg.Behavior.AbbrevArgs,
 		},
 		disasmState: disasmState{
 			disasmMaxBytes:      defaultDisasmMaxBytes,

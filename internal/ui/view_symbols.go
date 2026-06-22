@@ -7,6 +7,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,6 +31,11 @@ func (m *Model) clickSymbolFacet(x int) bool {
 
 // toggleSymbolFacet advances the clicked toggle, mirroring its keyboard binding.
 func (m *Model) toggleSymbolFacet(k facetKind) {
+	if k == facetAbbrev {
+		// Abbreviation is a pure render change: keep the cursor and skip the rebuild.
+		m.toggleSymbolAbbrevAll()
+		return
+	}
 	m.symbolsCur, m.symbolsTop = 0, 0
 	switch k {
 	case facetType:
@@ -52,6 +58,242 @@ func (m *Model) toggleSymbolFacet(k facetKind) {
 
 // treeIndent is the per-depth indentation of a tree row.
 const treeIndent = 2
+
+// abbrevMinInner is the smallest "(…)"/"<…>" content (in bytes, brackets excluded)
+// worth collapsing: only content longer than 5 bytes is replaced with "...". Short
+// inner text (e.g. "<int>", "<A>", "<int16>", "(d)") is kept verbatim — it's
+// readable as-is and "<...>" would barely shorten it.
+const abbrevMinInner = 6
+
+// abbrevBrackets replaces the contents of every top-level "(…)" and "<…>" group in
+// s whose inner text is at least abbrevMinInner bytes with "..." — "f<Alloc, Traits>"
+// becomes "f<...>" while "Foo<A>" and "find(x)" are left as-is. "[…]" is untouched.
+// C++ "operator" names (operator<<, operator->, operator(), …) are passed through
+// whole so their punctuation isn't mistaken for template/parameter brackets. If the
+// "()"/"<>" nesting doesn't balance, s is returned unchanged so a pathological name
+// is never truncated.
+func abbrevBrackets(s string) string {
+	if !bracketsBalanced(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if ol := operatorTokenLen(s, i); ol > 0 {
+			b.WriteString(s[i : i+ol])
+			i += ol
+			continue
+		}
+		// The outer loop only ever runs at bracket depth 0 (groups are jumped over
+		// whole), so any "("/"<" here opens a top-level group and any ">" is a "->"
+		// arrow, never a close.
+		if c := s[i]; c == '(' || c == '<' {
+			j := matchClose(s, i)
+			if j < 0 { // unreachable after bracketsBalanced; stay safe
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			if j-i-1 < abbrevMinInner {
+				b.WriteString(s[i : j+1]) // short content: keep verbatim
+			} else {
+				b.WriteByte(c)
+				b.WriteString("...")
+				b.WriteByte(s[j])
+			}
+			i = j + 1
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// matchClose returns the index of the bracket that closes the "("/"<" at open,
+// honouring nested groups, "operator" tokens and "->" arrows, or -1 if unbalanced.
+func matchClose(s string, open int) int {
+	depth := 0
+	for k := open; k < len(s); {
+		if ol := operatorTokenLen(s, k); ol > 0 {
+			k += ol
+			continue
+		}
+		switch s[k] {
+		case '(', '<':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return k
+			}
+		case '>':
+			if k > 0 && s[k-1] == '-' { // "->" arrow, not a close
+				break
+			}
+			depth--
+			if depth == 0 {
+				return k
+			}
+		}
+		k++
+	}
+	return -1
+}
+
+// bracketsBalanced reports whether s has at least one "("/"<" group and its
+// "()"/"<>" nesting balances under a single depth counter, skipping "operator"
+// punctuation. "[]" is ignored.
+func bracketsBalanced(s string) bool {
+	depth, seen := 0, false
+	for i := 0; i < len(s); {
+		if ol := operatorTokenLen(s, i); ol > 0 {
+			i += ol
+			continue
+		}
+		switch s[i] {
+		case '(', '<':
+			depth++
+			seen = true
+		case '>':
+			if i > 0 && s[i-1] == '-' { // "->" arrow, not a close
+				break
+			}
+			depth--
+			if depth < 0 {
+				return false
+			}
+		case ')':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+		i++
+	}
+	return depth == 0 && seen
+}
+
+// operatorTokenLen returns the byte length of a C++ "operator…" name starting at
+// s[i] — the word "operator" plus its symbol form ("operator<<", "operator()",
+// "operator->", "operator<=>") — or 0 when s[i] does not begin such a token. The
+// operator's punctuation must be consumed wholesale so its "<"/">"/"(" are not read
+// as template or parameter brackets. "operator" spelt out as part of a longer
+// identifier, or followed by a word (conversion / new / delete), returns 0.
+func operatorTokenLen(s string, i int) int {
+	const kw = "operator"
+	if i > 0 && isIdentByte(s[i-1]) {
+		return 0
+	}
+	if !strings.HasPrefix(s[i:], kw) {
+		return 0
+	}
+	j := i + len(kw)
+	if j < len(s) && s[j] == ' ' { // tolerate "operator <"
+		j++
+	}
+	// operator() and operator[] (and their array-new/delete cousins are handled by
+	// the punctuation run below since "[]" isn't tracked anyway).
+	if j+1 < len(s) && (s[j] == '(' && s[j+1] == ')' || s[j] == '[' && s[j+1] == ']') {
+		return j + 2 - i
+	}
+	k := j
+	for k < len(s) && isOpPunct(s[k]) {
+		k++
+	}
+	if k == j {
+		return 0 // "operator" + a name (conversion op, new, delete): nothing to skip
+	}
+	return k - i
+}
+
+// isOpPunct reports whether c is punctuation that can form an overloaded operator's
+// name (excluding "()"/"[]", handled separately).
+func isOpPunct(c byte) bool {
+	switch c {
+	case '<', '>', '=', '!', '+', '-', '*', '/', '%', '^', '&', '|', '~', ',':
+		return true
+	}
+	return false
+}
+
+// isIdentByte reports whether c can appear inside a C identifier.
+func isIdentByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// abbrevKey is the stable per-row key for a node's individual abbreviation
+// override: the symbol index for a leaf, the (unique) path for a group node.
+func abbrevKey(n *treeNode) string {
+	if n.leaf >= 0 {
+		return "s" + strconv.Itoa(n.leaf)
+	}
+	return "g" + n.path
+}
+
+// symbolAbbrevActive reports whether n's brackets should be abbreviated, combining
+// the global setting with any per-row override (the override inverts the global).
+func (m *Model) symbolAbbrevActive(n *treeNode) bool {
+	on := m.symbolsAbbrev
+	if m.symbolsAbbrevExcept[abbrevKey(n)] {
+		on = !on
+	}
+	return on
+}
+
+// symbolLabel returns n's display label with bracket abbreviation applied when it
+// is in effect for that row.
+func (m *Model) symbolLabel(n *treeNode) string {
+	if m.symbolAbbrevActive(n) {
+		return abbrevBrackets(n.label)
+	}
+	return n.label
+}
+
+// displaySymbolName returns a symbol's display name with bracketed argument and
+// template lists abbreviated (see abbrevBrackets) when the global Symbols-view
+// "args" collapse is on, so a symbol reads the same in the disasm, hex/raw and
+// pointer-follow annotations as it does in the Symbols list. The Symbols view's
+// per-row overrides are list-specific and intentionally don't apply here.
+func (m *Model) displaySymbolName(s binfile.Symbol) string {
+	if m.symbolsAbbrev {
+		return abbrevBrackets(s.Display())
+	}
+	return s.Display()
+}
+
+// toggleSymbolAbbrev flips bracket abbreviation for just the row under the cursor.
+func (m *Model) toggleSymbolAbbrev() {
+	if m.symbolsCur < 0 || m.symbolsCur >= len(m.symbolsRows) {
+		return
+	}
+	n := m.symbolsRows[m.symbolsCur].node
+	if m.symbolsAbbrevExcept == nil {
+		m.symbolsAbbrevExcept = map[string]bool{}
+	}
+	k := abbrevKey(n)
+	m.symbolsAbbrevExcept[k] = !m.symbolsAbbrevExcept[k]
+	m.clearSymbolCaches()
+	if m.symbolAbbrevActive(n) {
+		m.setStatus("arguments collapsed (this row)", false)
+	} else {
+		m.setStatus("arguments expanded (this row)", false)
+	}
+}
+
+// toggleSymbolAbbrevAll flips bracket abbreviation globally, clearing any per-row
+// overrides so every row returns to the uniform state.
+func (m *Model) toggleSymbolAbbrevAll() {
+	m.symbolsAbbrev = !m.symbolsAbbrev
+	m.symbolsAbbrevExcept = nil
+	m.clearSymbolCaches()
+	m.clearSymbolNameCaches() // the toggle also moves disasm/hex/source annotations
+	if m.symbolsAbbrev {
+		m.setStatus("arguments collapsed (all)", false)
+	} else {
+		m.setStatus("arguments expanded (all)", false)
+	}
+}
 
 // splitStyledRows splits wrapped output into lines, dropping a trailing newline
 // and never returning an empty slice.
@@ -392,6 +634,12 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 	case "w":
 		m.toggleWrap()
 		return m, nil
+	case "e":
+		m.toggleSymbolAbbrevAll()
+		return m, nil
+	case ".":
+		m.toggleSymbolAbbrev()
+		return m, nil
 	case "enter", " ":
 		m.activateSymbolRow()
 	case "a":
@@ -589,6 +837,11 @@ func (m *Model) renderSymbols() string {
 		}
 		button("r", dir, facetSortDir)
 		button("t", treeLabel, facetTree)
+		argsLabel := "args:full"
+		if m.symbolsAbbrev {
+			argsLabel = "args:…"
+		}
+		button("e", argsLabel, facetAbbrev)
 		if m.symbolsLib != "" {
 			plain("lib:" + m.symbolsLib + " (Esc clears)   ")
 		}
@@ -599,7 +852,7 @@ func (m *Model) renderSymbols() string {
 	addrW := m.file.AddrHexWidth()
 	var header string
 	if m.symbolTreeActive() {
-		header = m.theme.footerStyle.Render(" tree · ←/→ fold · ↵ all below · +/− expand/collapse all · t flat")
+		header = m.theme.footerStyle.Render(" tree · ←/→ fold · ↵ all below · +/− expand/collapse all · . args · t flat")
 	} else {
 		addrCol := 2 + addrW
 		header = m.tableHeader(fmt.Sprintf(" %-*s %9s %6s %7s  %s", addrCol, "Address", "Size", "Bind", "Type", "Name"))
@@ -625,7 +878,7 @@ func (m *Model) renderSymbols() string {
 			if i == m.symbolsCur {
 				if node.leaf < 0 {
 					// Group node: highlight the arrow only (no full-width white bar).
-					row = m.treeNodeRow(m.symbolsRows[i].depth, node.label, node.count, m.isSymbolCollapsed(node.path), true, "", m.width)
+					row = m.treeNodeRow(m.symbolsRows[i].depth, m.symbolLabel(node), node.count, m.isSymbolCollapsed(node.path), true, "", m.width)
 				} else {
 					row = m.theme.tableSelStyle.Render(ansi.Strip(row))
 				}
@@ -672,10 +925,11 @@ func (m *Model) symbolRows(i, addrW int) []string {
 	indentW := row.depth * treeIndent
 	indent := strings.Repeat(" ", indentW)
 
+	label := m.symbolLabel(n)
 	var rows []string
 	if n.leaf < 0 {
 		// Internal (group) node: arrow + highlighted, underlined segment.
-		rows = []string{m.treeNodeRow(row.depth, n.label, n.count, m.isSymbolCollapsed(n.path), false, "", m.width)}
+		rows = []string{m.treeNodeRow(row.depth, label, n.count, m.isSymbolCollapsed(n.path), false, "", m.width)}
 	} else {
 		s := m.file.Symbols[n.leaf]
 		rowStyle := m.theme.styleForSymbol(s.Kind, s.Bind)
@@ -688,12 +942,12 @@ func (m *Model) symbolRows(i, addrW int) []string {
 		}
 		var parts []string
 		if m.wrap {
-			parts = splitStyledRows(ansi.Wrap(n.label, nameW, sep))
+			parts = splitStyledRows(ansi.Wrap(label, nameW, sep))
 			for k := range parts {
 				parts[k] = rowStyle.Render(parts[k])
 			}
 		} else {
-			parts = []string{rowStyle.Render(truncateMiddle(n.label, nameW))}
+			parts = []string{rowStyle.Render(truncateMiddle(label, nameW))}
 		}
 		rows = make([]string, 0, len(parts))
 		for j, part := range parts {

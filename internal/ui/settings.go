@@ -16,7 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/theme"
 )
 
-const settingsFieldCount = 8
+const settingsFieldCount = 9
 
 // settingsViewNames is the cycle for the "default view" setting.
 var settingsViewNames = []string{
@@ -101,6 +101,12 @@ func (m *Model) cycleSetting(dir int) {
 		m.setAllSymbolsCollapsed(m.treeCollapseDefault)
 		m.setAllSourcesCollapsed(m.treeCollapseDefault)
 		m.setAllLibsCollapsed(m.treeCollapseDefault)
+	case 8:
+		m.cfg.Behavior.AbbrevArgs = !m.cfg.Behavior.AbbrevArgs
+		m.symbolsAbbrev = m.cfg.Behavior.AbbrevArgs
+		m.symbolsAbbrevExcept = nil
+		m.clearSymbolCaches()
+		m.clearSymbolNameCaches()
 	}
 }
 
@@ -168,6 +174,7 @@ func (m *Model) renderSettingsModal() string {
 		{"Tree: sources", onOff(m.cfg.Behavior.TreeSources)},
 		{"Tree: libs", onOff(m.cfg.Behavior.TreeLibs)},
 		{"Tree collapsed", onOff(m.cfg.Behavior.TreeCollapsed)},
+		{"Abbrev args", onOff(m.cfg.Behavior.AbbrevArgs)},
 	}
 
 	const rowW = 44

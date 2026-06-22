@@ -28,3 +28,25 @@ jobs:
 
       - name: go build (smoke)
         run: go build ./...
+
+      - name: build binaries + report sizes
+        run: |
+          make build && mv exex exex-full
+          make lite && mv exex exex-lite
+          {
+            echo "### Binary sizes (uncompressed, stripped)"
+            echo ""
+            echo "| variant | bytes | size (MB) |"
+            echo "| --- | ---: | ---: |"
+            for v in full lite; do
+              bytes=$(stat -c%s "exex-$v")
+              mb=$(awk "BEGIN{printf \"%.2f\", $bytes/1048576}")
+              printf '| %s | %s | %s |\n' "$v" "$bytes" "$mb"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: install mandoc
+        run: sudo apt-get update && sudo apt-get install -y mandoc
+
+      - name: lint docs (man page)
+        run: make lint-docs

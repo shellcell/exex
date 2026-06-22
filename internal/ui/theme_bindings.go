@@ -119,7 +119,7 @@ var colorBindings = []colorBinding{
 	{"help_key_fg", "214", func(t *Theme) *lipgloss.Style { return &t.helpKeyStyle }, false, func(d derived) string { return d.primary }},
 	{"help_desc_fg", "252", func(t *Theme) *lipgloss.Style { return &t.helpDescStyle }, false, func(d derived) string { return d.p.Foreground }},
 	{"help_head_fg", "117", func(t *Theme) *lipgloss.Style { return &t.helpHeadStyle }, false, func(d derived) string { return d.header }},
-	{"tree_node_fg", "141", func(t *Theme) *lipgloss.Style { return &t.treeNodeStyle }, false, func(d derived) string { return d.p.Type }},
+	{"tree_node_fg", "75", func(t *Theme) *lipgloss.Style { return &t.treeNodeStyle }, false, func(d derived) string { return d.p.Name }},
 	// Status footer.
 	{"status_error_fg", "203", func(t *Theme) *lipgloss.Style { return &t.errorStyle }, false, func(d derived) string { return d.p.Error }},
 	{"status_info_fg", "114", func(t *Theme) *lipgloss.Style { return &t.infoStyle }, false, func(d derived) string { return d.p.String }},

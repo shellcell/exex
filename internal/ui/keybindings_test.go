@@ -1003,6 +1003,53 @@ func TestKeysActivate(t *testing.T) {
 	}
 }
 
+// --- tab doubles as the mode-toggle (t) outside disasm ---------------------
+
+func TestKeysTabTogglesMode(t *testing.T) {
+	h := newKeyHarness(t, systemBinary(t))
+
+	// Sections: tab toggles sections <-> segments, same as t.
+	if len(h.m().segments) > 0 {
+		h.goView(modeSections, "2")
+		seg0 := h.m().showSegments
+		h.press("tab")
+		if h.m().showSegments == seg0 {
+			t.Fatal("tab did not toggle sections/segments")
+		}
+	}
+
+	// Symbols: tab toggles the tree.
+	if len(h.m().file.Symbols) > 0 {
+		h.goView(modeSymbols, "3")
+		tr0 := h.m().symbolsTree
+		h.press("tab")
+		if h.m().symbolsTree == tr0 {
+			t.Fatal("tab did not toggle the symbol tree")
+		}
+	}
+
+	// Hex: tab toggles the ascii/pointer column.
+	h.goView(modeHex, "5")
+	pw0 := h.m().hexWords
+	h.press("tab")
+	if h.m().hexWords == pw0 {
+		t.Fatal("tab did not toggle the hex pointer column")
+	}
+
+	// Disasm: tab still drives the source pane, NOT a mode toggle. With no DWARF
+	// it reports unavailable; with DWARF it toggles showSource. Either way the
+	// view stays disasm and nothing panics.
+	h.goView(modeDisasm, "4")
+	show0 := h.m().showSource
+	h.press("tab")
+	if h.m().mode != modeDisasm {
+		t.Fatal("tab in disasm changed the view")
+	}
+	if h.m().file.HasDWARF() && h.m().showSource == show0 {
+		t.Fatal("tab in disasm did not toggle the source pane")
+	}
+}
+
 // --- esc clears search + every filter, in each list view -------------------
 
 func TestKeysEscClears(t *testing.T) {

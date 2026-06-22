@@ -63,6 +63,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpActive = true
 		return m, nil
 	}
+	// `tab` doubles as the mode-toggle (the `t` key) in every non-disasm view —
+	// arches in Info, sections/segments in Sections, tree/flat in Symbols/Libs/
+	// Sources, ascii/pointers in Hex/Raw. In the disasm view `tab` drives the
+	// source pane, which handleDisasmPaneKey already consumed above, so this only
+	// fires for the other views.
+	if key == "tab" {
+		key = "t"
+	}
 	if model, cmd, ok := m.handleGlobalAction(key); ok {
 		return model, cmd
 	}

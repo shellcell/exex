@@ -44,7 +44,7 @@ func (m *Model) treeNodeRow(depth int, label string, count int, collapsed, selec
 // and children; leaves carry the index of the underlying item (symbol/file/lib).
 type treeNode struct {
 	label    string // segment shown for this node; internal nodes keep the trailing separator
-	path     string // full path from the root, unique — the collapse-state key
+	path     string // internal nodes only: full path from the root, the collapse-state key. Left empty for leaves (never read for them — collapse keys off the item index), which avoids a prefix+label concatenation per leaf (tens of MB on a 100k+-symbol tree).
 	leaf     int    // item index for a leaf, -1 for an internal node
 	count    int    // number of leaf descendants (for the collapsed "(n)" hint)
 	children []*treeNode
@@ -205,7 +205,7 @@ func buildScopedLevel(idxs []int, label func(int) string, prefixLen int, prefix 
 				continue
 			}
 		}
-		nodes = append(nodes, &treeNode{label: rem, path: prefix + rem, leaf: rest[i], count: 1})
+		nodes = append(nodes, &treeNode{label: rem, leaf: rest[i], count: 1}) // leaves need no path
 		i++
 	}
 
@@ -244,7 +244,7 @@ func buildTreeLevel(idxs []int, label func(int) string, seg segFunc, prefixLen i
 		rem := label(idxs[i])[prefixLen:]
 		sl := seg(rem)
 		if sl < 0 {
-			nodes = append(nodes, &treeNode{label: rem, path: prefix + rem, leaf: idxs[i], count: 1})
+			nodes = append(nodes, &treeNode{label: rem, leaf: idxs[i], count: 1}) // leaves need no path
 			i++
 			continue
 		}
@@ -260,7 +260,7 @@ func buildTreeLevel(idxs []int, label func(int) string, seg segFunc, prefixLen i
 		}
 		if j-i == 1 {
 			// A segment owned by a single item needs no group: show it whole as a leaf.
-			nodes = append(nodes, &treeNode{label: rem, path: prefix + rem, leaf: idxs[i], count: 1})
+			nodes = append(nodes, &treeNode{label: rem, leaf: idxs[i], count: 1}) // leaves need no path
 			i++
 			continue
 		}

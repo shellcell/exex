@@ -91,13 +91,23 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("no in-file address to follow", true)
 		}
-	case "a":
+	case "h":
+		if len(m.disasmInst) == 0 {
+			return m, nil
+		}
+		m.jumpHexAtAddr(m.disasmInst[m.disasmCur].Addr)
+	case "m":
+		if len(m.disasmInst) == 0 {
+			return m, nil
+		}
+		m.jumpRawAtAddr(m.disasmInst[m.disasmCur].Addr)
+	case "A":
 		if len(m.disasmInst) == 0 {
 			return m, nil
 		}
 		addr := m.disasmInst[m.disasmCur].Addr
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
-	case "s":
+	case "S":
 		if len(m.disasmInst) == 0 {
 			return m, nil
 		}
@@ -107,7 +117,7 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("no symbol at this address", true)
 		}
-	case "c":
+	case "C":
 		m.copyFunctionDisasm()
 	case "e":
 		m.toggleSymbolAbbrevAll()

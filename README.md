@@ -106,7 +106,7 @@ Flags (accepted in any position):
 |------|-------------|
 | `-s STRING` | search printable strings; opens the match in Hex, or the Strings view filtered when several match |
 | `-debug PATH` / `-d PATH` | external debug-symbols file or directory (ELF `.debug` companion, or a Mach-O `.dSYM` bundle/file) |
-| `-arch NAME` | for a universal (fat) Mach-O, which architecture slice to open (e.g. `x86_64`, `arm64`); defaults to the host arch. The Info view lists all slices; press `a` there to switch |
+| `-arch NAME` | for a universal (fat) Mach-O, which architecture slice to open (e.g. `x86_64`, `arm64`); defaults to the host arch. The Info view lists all slices; press `t` there to switch |
 | `-o VIEW` | print a view to stdout and exit (non-interactive): `info`, `sections`, `segments`, `symbols`, `strings`, `libs`, `sources`, `disasm`, `disasm-all` |
 | `-o` (bare) | print the `goto` symbol/address's function disassembly to stdout and exit |
 
@@ -126,11 +126,14 @@ Output streams, so `| head` returns immediately even on large binaries.
 | `g` | go to address or symbol |
 | `[` / `]` | page up / down in list views; previous / next section (Hex/Raw) or symbol (Disasm) |
 | `⇧[` / `⇧]` | previous / next non-zero byte (Hex/Raw) |
-| `d` | disassemble selected address (when executable) |
-| `t` | Symbols/Sources/Libs: toggle a collapsible namespace/path **tree** ↔ flat list |
+| `d` / `h` / `m` | go to the address under the cursor in the Disasm / Hex / Raw view |
+| `s` / `r` | Sections & Symbols: cycle sort field · reverse it |
+| `⌥t` / `⌥s` / `⌥b` | Symbols: filter by type / scope / bind · `⌥s` filters Strings by section · `⌥a` filters Libs/Sources by availability (needs Option-as-Alt in the terminal) |
+| `t` | Symbols/Sources/Libs: toggle a collapsible namespace/path **tree** ↔ flat list; Sections: sections ↔ segments; Hex/Raw: ascii ↔ pointer decode |
 | `←`/`→` · `Enter` · `+`/`−` | tree: collapse / expand group (`←` on a leaf folds its branch) · expand/collapse all below · all (keys rebindable) |
 | `e` / `.` | collapse long `(…)`/`<…>` argument & template lists to `...` (short ones like `<int>` kept) — `e` all (also from Disasm/Hex/Raw, abbreviating their symbol annotations), `.` current Symbols row |
-| `a` / `s` | copy address / name |
+| `⇧a` / `⇧s` / `⇧p` / `⇧c` | copy address / name (section, symbol, string, library, path) / pointer (Hex/Raw) / function disassembly (Disasm) |
+| `⇧l` | copy the whole current row (all columns) — every row-based view |
 | `w` | toggle long-line wrap |
 | `Tab` / `⇧Tab` | show-hide / swap the disasm source pane |
 | `?` | full key reference · `q` quit |

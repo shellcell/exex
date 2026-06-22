@@ -137,10 +137,6 @@ Open, follow, or jump.
 .B g
 Go to an address or symbol.
 .TP
-.B a
-In the Info view of a universal (fat) Mach-O, switch to the next architecture
-slice.
-.TP
 .B ,
 Open the settings popup (theme, background, default wrap, default view); changes
 apply live and are saved to the config file when it is writable.
@@ -149,14 +145,50 @@ apply live and are saved to the config file when it is writable.
 Page up/down in the list views; previous/next section (Hex, Raw) or symbol
 (Disasm).
 .TP
-.B d
-Disassemble the selected address when it is executable.
+.BR d / h / m
+Go to the address under the cursor in the Disassembly, Hex or Raw view
+(from the Sections, Symbols, Strings, Hex, Raw and Disassembly views).
+Disassembly requires the target to be executable; Raw requires it to have
+bytes on disk.
+.TP
+.BR s / r
+In the Sections and Symbols views, cycle the sort field
+.RB ( s )
+and reverse the current order
+.RB ( r ).
+Sections sort by index, name, address or size; Symbols by name, address or size.
+.TP
+.BR \[u2325]t / \[u2325]s / \[u2325]b / \[u2325]f / \[u2325]a
+Cycle a column filter (Option/Alt + the column's first letter). Symbols:
+.B \[u2325]t
+type,
+.B \[u2325]s
+scope,
+.B \[u2325]b
+bind. Sections:
+.B \[u2325]t
+type,
+.B \[u2325]f
+flags. Strings:
+.B \[u2325]s
+owning section. Libraries and Sources:
+.B \[u2325]a
+availability. Requires the terminal to send Alt for Option (e.g. ghostty's
+.BR macos-option-as-alt ).
+A search box
+.RB ( / )
+filters every list view (Sections, Symbols, Strings, Libraries, Sources), and
+.B Esc
+clears the search text and all column filters at once.
 .TP
 .B t
-In the Symbols, Sources and Libraries views, toggle a collapsible tree that
-groups names by namespace/path (C++/Swift scopes, or
+In the Info view, switch to the next architecture slice of a universal (fat)
+Mach-O. In the Symbols, Sources and Libraries views, toggle a collapsible tree
+that groups names by namespace/path (C++/Swift scopes, or
 .RB \(dq / \(dq
-path components) instead of a flat list. In the tree,
+path components) instead of a flat list; in the Sections view it toggles between
+sections and segments, and in the Hex/Raw views between the ascii column and the
+pointer-word decode. In the tree,
 .BR \[u2190] / \[u2192]
 collapse/expand the current group one level (Left on a leaf folds its branch),
 .B Enter
@@ -194,8 +226,19 @@ also toggles it from the Disassembly, Hex and Raw views. The
 .B abbrev_args
 config option (and the settings popup) sets the startup default.
 .TP
-.BR a / s
-Copy address / name.
+.BR Shift-a / Shift-s / Shift-p / Shift-c
+Copy: address
+.RB ( Shift-a );
+name
+.RB ( Shift-s ,
+the section/segment, symbol, string, library or source path of the current row);
+the pointer word at the cursor
+.RB ( Shift-p ,
+Hex/Raw); the disassembly of the current function
+.RB ( Shift-c ,
+Disasm); and the whole current row, every column
+.RB ( Shift-l ,
+all row-based views).
 .TP
 .B x
 Find cross-references to the address under the cursor (Disasm).

@@ -134,7 +134,7 @@ func DefaultTheme() Theme {
 		headerKey:          lipgloss.NewStyle().Bold(true),
 		tableHeaderStyle:   lipgloss.NewStyle().Bold(true),
 		tableSelStyle:      lipgloss.NewStyle().Bold(true),
-		symbolNameStyle:    lipgloss.NewStyle().Bold(true),
+		symbolNameStyle:    lipgloss.NewStyle(),
 		sectionStyle:       lipgloss.NewStyle().AlignHorizontal(lipgloss.Center).Bold(true),
 		srcCurLineStyle:    lipgloss.NewStyle().Bold(true),
 		modalStyle:         border().Padding(1, 2),

@@ -3,13 +3,16 @@ package binfile
 import "testing"
 
 func TestSourceFilesAndLineToAddr(t *testing.T) {
-	f := &File{lines: []lineEntry{
-		{Addr: 0x1000, File: "a.c", Line: 10, Col: 5},
-		{Addr: 0x1010, File: "a.c", Line: 11, Col: 2},
-		{Addr: 0x1020, File: "b.c", Line: 5},
-		{Addr: 0x1030, File: "a.c", Line: 11, Col: 9},
-		{Addr: 0x1040, File: "a.c", Line: 12},
-	}}
+	f := &File{
+		lineFiles: []string{"a.c", "b.c"},
+		lines: []lineEntry{
+			{Addr: 0x1000, File: 0, Line: 10, Col: 5},
+			{Addr: 0x1010, File: 0, Line: 11, Col: 2},
+			{Addr: 0x1020, File: 1, Line: 5},
+			{Addr: 0x1030, File: 0, Line: 11, Col: 9},
+			{Addr: 0x1040, File: 0, Line: 12},
+		},
+	}
 
 	files := f.SourceFiles()
 	if len(files) != 2 || files[0] != "a.c" || files[1] != "b.c" {

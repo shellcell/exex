@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -30,6 +31,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	secFilter := newPromptInput("type to filter…", "/ ")
 	srcFilter := newPromptInput("type to filter…", "/ ")
 	strFilter := newPromptInput("type to filter…", "/ ")
+	libFilter := newPromptInput("type to filter…", "/ ")
 	gotoInput := newPromptInput("0x401000 or symbol name", "→ ")
 	searchInput := newPromptInput("hex bytes (de ad be ef) or text", "/ ")
 
@@ -67,7 +69,8 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 			sourcesTree:   cfg.Behavior.TreeSources,
 		},
 		libsState: libsState{
-			libsTree: cfg.Behavior.TreeLibs,
+			libsTree:   cfg.Behavior.TreeLibs,
+			libsFilter: libFilter,
 		},
 		gotoState: gotoState{
 			gotoInput: gotoInput,
@@ -83,7 +86,9 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 		},
 		keyState: newKeyState(cfg.Keys),
 	}
+	m.keyLog = os.Getenv("EXEX_KEYLOG") == "1"
 	m.recomputeSymbols()
+	m.buildSectionFacets()
 	m.recomputeSections()
 
 	// The disassembly is decoded lazily on first open (it can be large); record
@@ -141,14 +146,31 @@ func newKeyState(cfg config.Keys) keyState {
 			}
 		}
 	}
-	addAlias(cfg.CopyAddress, "a")
-	addAlias(cfg.CopySymbol, "s")
+	addAlias(cfg.CopyAddress, "A")
+	addAlias(cfg.CopySymbol, "S")
+	addAlias(cfg.CopyPath, "S")
+	addAlias(cfg.CopyPointer, "P")
+	addAlias(cfg.CopyFunction, "C")
+	addAlias(cfg.CopyLine, "L")
 	addAlias(cfg.Next, "]")
 	addAlias(cfg.Prev, "[")
-	addAlias(cfg.CopyPath, "c")
 	addAlias(cfg.OpenDisasm, "d")
+	addAlias(cfg.JumpHex, "h")
+	addAlias(cfg.JumpRaw, "m")
 	addAlias(cfg.Wrap, "w")
-	addAlias(cfg.FilterType, "y")
+	addAlias(cfg.Sort, "s")
+	addAlias(cfg.SortReverse, "r")
+	addAlias(cfg.FilterType, "alt+t")
+	addAlias(cfg.FilterScope, "alt+s")
+	addAlias(cfg.FilterBind, "alt+b")
+	addAlias(cfg.FilterSection, "alt+s")
+	addAlias(cfg.FilterFlags, "alt+f")
+	addAlias(cfg.FilterAvail, "alt+a")
+	addAlias(cfg.ToggleMode, "t")
+	addAlias(cfg.AbbrevArgs, "e")
+	addAlias(cfg.Inspector, "i")
+	addAlias(cfg.Xref, "x")
+	addAlias(cfg.OpenPrimary, "o")
 	// Tree expand/collapse aliases onto the canonical keys the list views handle.
 	addAlias(cfg.TreeExpand, "right")
 	addAlias(cfg.TreeCollapse, "left")

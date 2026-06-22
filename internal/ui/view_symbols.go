@@ -558,30 +558,37 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 		m.symbolsFilter.Focus()
 		return m, nil
 	case "esc":
-		if m.symbolsLib != "" {
-			m.symbolsLib = ""
-			m.symbolsCur, m.symbolsTop = 0, 0
-			m.recomputeSymbols()
-			m.setStatus("library filter cleared", false)
+		dirty := m.symbolsLib != "" || m.symbolsKindOn || m.symbolsBindOn ||
+			m.symbolsScope != scopeAll || m.symbolsFilter.Value() != "" || m.symbolsFilter.Focused()
+		m.symbolsFilter.SetValue("")
+		m.symbolsFilter.Blur()
+		m.symbolsLib = ""
+		m.symbolsKindOn = false
+		m.symbolsBindOn = false
+		m.symbolsScope = scopeAll
+		m.symbolsCur, m.symbolsTop = 0, 0
+		m.recomputeSymbols()
+		if dirty {
+			m.setStatus("filters cleared", false)
 		}
 		return m, nil
-	case "y":
+	case "alt+t":
 		m.cycleSymbolKindFilter()
 		m.symbolsCur, m.symbolsTop = 0, 0
 		m.recomputeSymbols()
 		return m, nil
-	case "i":
+	case "alt+s":
 		m.symbolsScope = (m.symbolsScope + 1) % 3
 		m.symbolsCur, m.symbolsTop = 0, 0
 		m.recomputeSymbols()
 		m.setStatus("symbol scope: "+m.symbolsScope.String(), false)
 		return m, nil
-	case "b":
+	case "alt+b":
 		m.cycleSymbolBindFilter()
 		m.symbolsCur, m.symbolsTop = 0, 0
 		m.recomputeSymbols()
 		return m, nil
-	case "o":
+	case "s":
 		m.symbolsSort = (m.symbolsSort + 1) % 3
 		m.symbolsCur, m.symbolsTop = 0, 0
 		m.recomputeSymbols()
@@ -597,7 +604,7 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 		}
 		m.setStatus("sort order: "+dir, false)
 		return m, nil
-	case "t", "f":
+	case "t":
 		m.symbolsTree = !m.symbolsTree
 		m.symbolsCur, m.symbolsTop = 0, 0
 		m.recomputeSymbols()
@@ -615,7 +622,7 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 		m.setAllSymbolsCollapsed(false)
 		m.setStatus("expanded all", false)
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.symbolTreeActive() {
 			m.ensureSymbolsCollapsed()
 			if treeExpandOne(m.symbolsRows, &m.symbolsCur, m.symbolsCollapsed) {
@@ -623,7 +630,7 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "left", "h":
+	case "left":
 		if m.symbolTreeActive() {
 			m.ensureSymbolsCollapsed()
 			if treeCollapseOne(m.symbolsRows, &m.symbolsCur, m.symbolsCollapsed) {
@@ -642,11 +649,23 @@ func (m *Model) updateSymbols(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter", " ":
 		m.activateSymbolRow()
-	case "a":
+	case "d":
+		if sym, ok := m.currentSymbol(); ok {
+			m.jumpDisasmAtAddr(sym.Addr)
+		}
+	case "h":
+		if sym, ok := m.currentSymbol(); ok {
+			m.jumpHexAtAddr(sym.Addr)
+		}
+	case "m":
+		if sym, ok := m.currentSymbol(); ok {
+			m.jumpRawAtAddr(sym.Addr)
+		}
+	case "A":
 		if sym, ok := m.currentSymbol(); ok {
 			m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), sym.Addr), "address")
 		}
-	case "s":
+	case "S":
 		if sym, ok := m.currentSymbol(); ok {
 			m.copyToClipboard(sym.Name, "symbol")
 		}
@@ -827,10 +846,10 @@ func (m *Model) renderSymbols() string {
 			treeLabel = "view:tree"
 		}
 		plain("/ " + m.symbolsFilter.Value() + "   ")
-		button("y", "type:"+kind, facetType)
-		button("i", "scope:"+m.symbolsScope.String(), facetScope)
-		button("b", "bind:"+bind, facetBind)
-		button("o", "sort:"+m.symbolsSort.String(), facetSort)
+		button("⌥t", "type:"+kind, facetType)
+		button("⌥s", "scope:"+m.symbolsScope.String(), facetScope)
+		button("⌥b", "bind:"+bind, facetBind)
+		button("s", "sort:"+m.symbolsSort.String(), facetSort)
 		dir := "↑asc"
 		if m.symbolsSortDesc {
 			dir = "↓desc"

@@ -35,9 +35,10 @@ func (t Theme) styleForClass(c disasm.InstClass) lipgloss.Style {
 }
 
 // styleForSymbol picks the row colour for a symbol based on its neutral kind.
-// Bind (LOCAL/GLOBAL/WEAK) is folded in: globals are bold, weaks are italic,
-// locals stay plain — so the same colour family stays consistent for the kind
-// while letting the eye spot scope at a glance.
+// Bind (LOCAL/GLOBAL/WEAK) is folded in: weaks are italic, globals and locals
+// stay plain — so the same colour family stays consistent for the kind while
+// letting the eye spot weak symbols. Symbols are never bold (it made most of the
+// table heavy, since most symbols are global).
 func (t Theme) styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Style {
 	var base lipgloss.Style
 	switch k {
@@ -56,10 +57,7 @@ func (t Theme) styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Sty
 	default:
 		base = t.symOtherStyle
 	}
-	switch b {
-	case binfile.BindGlobal:
-		base = base.Bold(true)
-	case binfile.BindWeak:
+	if b == binfile.BindWeak {
 		base = base.Italic(true)
 	}
 	return base

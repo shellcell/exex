@@ -64,8 +64,8 @@ func TestSymbolsTreeGrouping(t *testing.T) {
 		t.Fatalf("expand all: %d rows, want %d", len(m.symbolsRows), full)
 	}
 
-	// f toggles back to the flat table: one row per symbol, full names.
-	m.updateSymbols("f")
+	// t toggles back to the flat table: one row per symbol, full names.
+	m.updateSymbols("t")
 	if len(m.symbolsRows) != len(syms) {
 		t.Fatalf("flat view: %d rows, want %d", len(m.symbolsRows), len(syms))
 	}

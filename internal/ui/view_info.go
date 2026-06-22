@@ -35,7 +35,9 @@ func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "a":
+	case "t":
+		// Toggle to the next architecture slice of a fat Mach-O (doc #27: `t`
+		// toggles arches in Info, mirroring its toggle role in the other views).
 		if len(m.file.FatArches) > 1 {
 			return m.switchFatArch()
 		}

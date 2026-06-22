@@ -23,9 +23,23 @@ func (m *Model) sortedLibIdxs() ([]int, []string) {
 	if m.file.Info != nil {
 		libs = m.file.Info.DynamicLibs
 	}
-	idxs := make([]int, len(libs))
-	for i := range idxs {
-		idxs[i] = i
+	needle := strings.ToLower(m.libsFilter.Value())
+	idxs := make([]int, 0, len(libs))
+	for i := range libs {
+		switch m.libsAvail {
+		case availPresent:
+			if m.libAvail(libs[i]) != libOnDisk {
+				continue
+			}
+		case availCache:
+			if m.libAvail(libs[i]) != libInCache {
+				continue
+			}
+		}
+		if needle != "" && !containsFold(libs[i], needle) {
+			continue
+		}
+		idxs = append(idxs, i)
 	}
 	sort.Slice(idxs, func(a, b int) bool { return libs[idxs[a]] < libs[idxs[b]] })
 	return idxs, libs
@@ -116,9 +130,34 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "/":
+		m.libsFilter.Focus()
+	case "esc":
+		dirty := m.libsAvail != availAll || m.libsFilter.Value() != "" || m.libsFilter.Focused()
+		m.libsFilter.SetValue("")
+		m.libsFilter.Blur()
+		m.libsAvail = availAll
+		m.libsCur, m.libsTop = 0, 0
+		m.buildLibRows()
+		if dirty {
+			m.setStatus("filters cleared", false)
+		}
 	case "w":
 		m.toggleWrap()
-	case "t", "f":
+	case "alt+a":
+		// cycle availability filter: all → on-disk → in-cache → all
+		switch m.libsAvail {
+		case availAll:
+			m.libsAvail = availPresent
+		case availPresent:
+			m.libsAvail = availCache
+		default:
+			m.libsAvail = availAll
+		}
+		m.libsCur, m.libsTop = 0, 0
+		m.buildLibRows()
+		m.setStatus("libs: "+availLabel(m.libsAvail), false)
+	case "t":
 		m.libsTree = !m.libsTree
 		m.libsCur, m.libsTop = 0, 0
 		m.buildLibRows()
@@ -133,21 +172,21 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 	case "+", "=":
 		m.setAllLibsCollapsed(false)
 		m.setStatus("expanded all", false)
-	case "right", "l":
+	case "right":
 		if m.libsTree {
 			m.ensureLibsCollapsed()
 			if treeExpandOne(m.libsRows, &m.libsCur, m.libsCollapsed) {
 				m.buildLibRows()
 			}
 		}
-	case "left", "h":
+	case "left":
 		if m.libsTree {
 			m.ensureLibsCollapsed()
 			if treeCollapseOne(m.libsRows, &m.libsCur, m.libsCollapsed) {
 				m.buildLibRows()
 			}
 		}
-	case "c", "s":
+	case "S":
 		if lib, ok := m.libAt(m.libsCur); ok {
 			m.copyToClipboard(lib, "library")
 		}
@@ -289,7 +328,17 @@ func (m *Model) renderLibsHeader() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+	if m.libsFilter.Focused() {
+		b.WriteString(m.libsFilter.View())
+		b.WriteString("\n")
+	} else if m.libsFilter.Value() != "" {
+		b.WriteString(m.theme.footerStyle.Render("/ " + m.libsFilter.Value()))
+		b.WriteString("\n")
+	}
 	hdr := " Needed libraries"
+	if m.libsAvail != availAll {
+		hdr += "  " + m.theme.helpKeyStyle.Render("⌥a") + m.theme.footerStyle.Render(" "+availLabel(m.libsAvail))
+	}
 	if m.libsTree {
 		hdr += "  " + m.theme.footerStyle.Render("(tree · ←/→ fold · ↵ all below · +/− all · t flat)")
 	}
@@ -322,10 +371,23 @@ func (m *Model) libRow(i int, selected bool) string {
 	indent := strings.Repeat(" ", row.depth*treeIndent)
 	lib := m.file.Info.DynamicLibs[n.leaf]
 	display := n.label // basename in tree mode, full path in flat mode
-	if !m.wrap {
-		display = truncateMiddle(display, max(1, m.width-len(indent)-2))
+	// Mark libs that aren't openable on disk: dim them and tag the reason.
+	tag := ""
+	switch m.libAvail(lib) {
+	case libInCache:
+		tag = "  ·cache"
+	case libMissing:
+		tag = "  ·missing"
 	}
-	line := " " + indent + m.theme.colorPathByPrefix(lib, display)
+	if !m.wrap {
+		display = truncateMiddle(display, max(1, m.width-len(indent)-2-len(tag)))
+	}
+	var line string
+	if tag != "" {
+		line = " " + indent + m.theme.srcShadowStyle.Render(display+tag)
+	} else {
+		line = " " + indent + m.theme.colorPathByPrefix(lib, display)
+	}
 	if selected {
 		return m.theme.tableSelStyle.Render(ansi.Strip(line))
 	}

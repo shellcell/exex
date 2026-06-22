@@ -253,7 +253,7 @@ current symbol's extent (decoding the window if needed), renders them as plain
 or writes `=<symbol>.asm`. Consider a second key for "copy as the rendered,
 coloured view".
 
-## 25. PE import symbols (IAT)  (new)
+## ✅ 25. PE import symbols (IAT)  (new)
 
 **Goal.** Bring PE up to ELF/Mach-O parity. ELF and Mach-O synthesise named
 symbols for imports (PLT/GOT / stubs) so call targets resolve and the Symbols
@@ -265,21 +265,34 @@ imported function, synthesise a `Symbol` at its IAT slot address with
 `Library` set to the owning DLL and `Kind = SymObject` (or `SymFunc` for the
 thunk), mirroring `appendELFImportSymbols` / `machoImportSymbols`.
 
-## 25. Pathes libs presence / openability
-
-Mark somehow pathes that present and can be opened. Add filter for this criteria
-in the view. Same about libs.
-
 ## 26. Sortings / filters for strings view, also one-page view
 
 view all the strings in single page one after other with middle dot separator
 
-## 27. Buttons unification
+## 27. Keyboard / Mouse actions
+
+> **Status: done.** The breaking keymap pass is implemented and exhaustively
+> tested (one driving test per binding per view, plus a config-override test):
+> copy moved to `⇧a/⇧s/⇧p/⇧c` and copy-whole-row `⇧l` (freeing `a/s`); sort-cycle
+> on `s` (was `o`) with reverse `r`; per-column filters on `⌥<letter>`
+> (`⌥t/⌥s/⌥b` symbols; `⌥t/⌥f` sections type/flags; `⌥s` strings-section; `⌥a`
+> libs/sources availability); tree nav via arrows only (freed `h/l`); cross-view
+> jumps `d/h/m` (disasm/hex/raw); hex/raw pointer toggle on `t`; `t` switches the
+> fat-Mach-O arch in Info (was `a`); `/` search and `Esc`-clears-everything in all
+> five list views (Sections, Symbols, Strings, Libs, Sources); `o` opens a source
+> in the disasm source-first view. Page/top/bottom chords match the spec
+> (`ctrl/⌥+↑↓` page, `cmd+↑↓` / `ctrl+a,e` top/bottom). The raw-jump uses `m` (not
+> `r`, which stays reverse-sort). Every binding is rebindable via `config.Keys`.
+> `⌥`/`option` chords are decoded from the key's modifier bits (not its rendered
+> string), so they fire however the terminal delivers Option — as Alt, as Alt with
+> a composed character (macOS Kitty protocol, e.g. ⌥t → "†"), or as Super/Cmd;
+> shift+letter chords arrive as the uppercase letter. Still **not** implemented
+> from the spec below: Strings sort-by.
 
 == GLOBAL ==
 
 g - goto
-q - quit
+q, ctrl+c - quit
 w - wrap lines
 ? - help
 , - settings
@@ -288,8 +301,9 @@ w - wrap lines
 
 1..9 - go to view (tab) by number
 d - go to caret addres in disasm view from section / symbol / hex / raw / string
-h - go to caret addres in hex view from section / symbol / disasm / raw / string 
-r - go to caret addres in raw view from section / symbol / disasm / hex / string
+h - go to caret addres in hex view from section / symbol / disasm / string
+m - go to caret addres in raw view from section / symbol / disasm / hex / string
+    (m, not r: r is reverse-sort in the list views)
 
 == SWITCH MODE ==
 
@@ -301,13 +315,15 @@ t - toggle
 e - collapse / expand args in symbol names in symbols, disasm, hex, raw
 tab - turn on / of sources pane in disasm view
 shift+tab - switch disasm first / sources first modes in disasm view
+o - open lib as primary, open source in disasm source-first view
 
 == NAVIGATION ==
 
+up/down j/k - move line in sections, symbols, disasm, hex, raw, strings, libs, sources
 ctrl+up, option+up, pageup - page up in sections, symbols, disasm, hex, raw, strings, libs, sources
 ctrl+down, option+down, pagedown - page down in sections, symbols, disasm, hex, raw, strings, libs, sources
 home, ctrl+a, cmd+up - go to top in sections, symbols, disasm, hex, raw, strings, libs, sources
-end, ctrl_e, cmd+down - got to botton in sections, symbols, disasm, hex, raw, strings, libs, sources
+end, ctrl+e, cmd+down - got to botton in sections, symbols, disasm, hex, raw, strings, libs, sources
 [] -  page down / up in sections, symbols, strings, libs, sources
       next / prev symbol in disasm
       next / prev mapped in source-first view disasm
@@ -325,18 +341,116 @@ shift+s - copy
           path in sources
 shift+p - copy pointer in hex, raw view
 shift+c - copy symbol (instructions) in disasm view
+shift+l - copy whole current row (every column) in sections, segments, symbols,
+          disasm, hex, raw, strings, libs, sources
 
-== SEARCH / FILTER / SORT ==
+Note: shift+letter chords are delivered by terminals as the uppercase letter
+(e.g. shift+a == "A"), which is what the handlers match.
+
+Every binding above is rebindable in config (config.Keys / config.yaml): each
+action has a key (copy_address, copy_line, sort, sort_reverse, filter_scope,
+filter_bind, filter_section, filter_avail, jump_hex, jump_raw, toggle_mode,
+abbrev_args, inspector, xref, open_primary, …). A configured key is added
+alongside the built-in default.
+
+== SEARCH MODAL == (disasm, hex, raw)
+
+/ - open search modal
+n, N - next / prev occurence in disasm, hex, raw
+
+== SEARCH / FILTER / SORT LISTS == (symbols, sections, strings, libs, sources)
+
+esc - clear search requests, search field and all filters
 
 = search =
 
-/ - search in sections, symbols, disasm, hex, raw, strings, libs, sources (think about regexp support)
-n, N - next / prev occurence in disasm, hex, raw
+/ - search in sections, symbols, strings, libs, sources (think about regexp support)
 
 = filter =
 
+alt+[first letter of column title] / option+[first letter of column title] - 
+    switch filter for this column (use option+s for scope in symbols)
 
+sections: by type, flags
+symbols: by scope, bind, type
+strings: by section
+libs: by availability: present on disk / in dyld cache / all
+sources: by availability: present / missing / all
 
 = sort =
 
+s - switch sorted by (address, name, size, ...)
 r - reverse current sorting in sections, symbols, strings, libs, sources
+
+sections: name, address, size
+symbols: name, address, size
+strings: offset, address, string
+libs: by name
+sources: by name
+
+== TREE == (symbols, libs, sources)
+
+right - expand node and move caret to first child
+left - collaps parent node
+enter - expand all below
++ / - - expand / collapse all
+
+mouse click - expand node (without moving caret to child)
+mouse double click - expand all below
+
+== INFO ==
+
+enter / mouse double click - open entry in disasm or hex if not mapped
+
+== SECTIONS ==
+
+enter / mouse double click - open in hex / raw
+
+== SYMBOLS ==
+
+enter / mouse double click on symbol - open in disasm / hex
+
+== DISASM ==
+
+right / left - history forwand / back
+enter / mouse double click - follow address
+x - find xrefs
+shift+up / shift+down - scroll right pane
+
+== HEX / RAW ==
+
+enter / mouse double click - follow pointer
+i - data inspector
+
+== STRINGS ==
+
+enter / mouse double click - open in raw
+
+== LIBS == 
+
+enter / mouse double click - open imported symbols (symbols view)
+
+== SOURCES ==
+
+enter / mouse double click - open source file i disasm source-first view
+
+
+## 28. Extract syscalls
+
+Extract all the syscalls used in binary
+
+## ✅ 29. Do not use bold font in symbols
+
+Symbols are no longer bold: dropped the global-symbol bold in `styleForSymbol`
+(it made most of the table heavy) and the bold on `symbolNameStyle` (disasm
+labels). Weak symbols stay italic.
+
+## ✅ 30. Pathes libs presence / openability
+
+Sources and Libs now mark availability and filter on it (`v` cycles the filter):
+- **Sources:** files not present on disk are dimmed; `v` cycles all → present →
+  missing (`SourceExists` does cheap cached stat resolution).
+- **Libs:** libraries served from the dyld shared cache (`·cache`) or not found
+  (`·missing`) are dimmed and tagged; on-disk (openable) libs render normally;
+  `v` cycles all → on-disk → in-cache (`libAvail` via `explorer.ResolveLibPath`
+  / `IsDyldSharedCacheLib`).

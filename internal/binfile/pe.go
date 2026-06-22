@@ -4,10 +4,17 @@ import (
 	"bytes"
 	"debug/dwarf"
 	"debug/pe"
+	"encoding/binary"
 	"fmt"
 	"strings"
 
 	"github.com/rabarbra/exex/internal/arch"
+)
+
+// PE data-directory indices used here.
+const (
+	dirImport      = 1  // IMAGE_DIRECTORY_ENTRY_IMPORT
+	dirDelayImport = 13 // IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT
 )
 
 // PE section characteristics (not exported by debug/pe).
@@ -108,6 +115,11 @@ func (f *File) loadPE() error {
 		})
 	}
 
+	// Synthesise symbols for imported functions at their IAT slot addresses, so
+	// call targets through the IAT resolve and the Symbols view's imported/library
+	// filters work — mirroring appendELFImportSymbols / machoImportSymbols.
+	f.loadPEImports(pf, imageBase)
+
 	if d := peDWARF(pf); d != nil {
 		f.dwarf = d // line table decoded lazily on first source lookup
 	}
@@ -115,6 +127,137 @@ func (f *File) loadPE() error {
 	f.loadPEInfo(pf, dllChars)
 	f.header = f.peHeaderInfo(pf)
 	return nil
+}
+
+// loadPEImports walks the import (and delay-import) directories, synthesising a
+// Symbol at each import's IAT slot address: Name = the imported function (or
+// "DLL!ordinalN"), Library = the owning DLL, Kind = SymObject (the slot is a
+// function-pointer data cell). Best-effort: malformed tables are skipped.
+func (f *File) loadPEImports(pf *pe.File, imageBase uint64) {
+	ptr := f.addrWidth / 2 // 8 bytes for PE32+, 4 for PE32
+	bo := binary.LittleEndian
+
+	at := func(rva uint32, n int) []byte {
+		off, ok := peRVAOffset(pf, rva)
+		if !ok || off < 0 || off+n > len(f.raw) {
+			return nil
+		}
+		return f.raw[off : off+n]
+	}
+	str := func(rva uint32) string {
+		off, ok := peRVAOffset(pf, rva)
+		if !ok || off < 0 || off >= len(f.raw) {
+			return ""
+		}
+		b := f.raw[off:]
+		if i := bytes.IndexByte(b, 0); i >= 0 {
+			return string(b[:i])
+		}
+		return ""
+	}
+	ordinalFlag := uint64(1) << (uint(ptr)*8 - 1)
+
+	// walkThunks emits one symbol per non-null thunk entry. iltRVA names the
+	// lookup table (function names/ordinals); iatRVA is where the resolved slot
+	// addresses live (what call sites reference).
+	walkThunks := func(dll string, iltRVA, iatRVA uint32) {
+		for j := 0; ; j++ {
+			tb := at(iltRVA+uint32(j*ptr), ptr)
+			if len(tb) < ptr {
+				break
+			}
+			var v uint64
+			if ptr == 8 {
+				v = bo.Uint64(tb)
+			} else {
+				v = uint64(bo.Uint32(tb))
+			}
+			if v == 0 {
+				break // null terminator
+			}
+			name := ""
+			if v&ordinalFlag != 0 {
+				name = fmt.Sprintf("%s!ordinal%d", strings.TrimSuffix(dll, ".dll"), v&0xffff)
+			} else if name = str(uint32(v) + 2); name == "" { // skip 2-byte hint
+				continue
+			}
+			f.Symbols = append(f.Symbols, Symbol{
+				Name:    name,
+				Addr:    imageBase + uint64(iatRVA) + uint64(j*ptr),
+				Kind:    SymObject,
+				Bind:    BindGlobal,
+				Library: dll,
+			})
+		}
+	}
+
+	// Regular imports: IMAGE_IMPORT_DESCRIPTOR is 20 bytes, array ends at a zero
+	// entry. Fields: [0]OriginalFirstThunk(ILT) [12]Name [16]FirstThunk(IAT).
+	if dir, ok := peDataDir(pf, dirImport); ok {
+		for i := 0; ; i++ {
+			d := at(dir.VirtualAddress+uint32(i*20), 20)
+			if len(d) < 20 {
+				break
+			}
+			ilt, nameRVA, iat := bo.Uint32(d[0:]), bo.Uint32(d[12:]), bo.Uint32(d[16:])
+			if nameRVA == 0 && iat == 0 {
+				break
+			}
+			if ilt == 0 {
+				ilt = iat // bound imports may zero the ILT; the IAT still holds names pre-bind
+			}
+			walkThunks(str(nameRVA), ilt, iat)
+		}
+	}
+
+	// Delay imports: IMAGE_DELAYLOAD_DESCRIPTOR is 32 bytes; the RVAs here are
+	// already RVAs in modern images. Fields: [4]DllName [16]ImportNameTable
+	// [12]ImportAddressTable.
+	if dir, ok := peDataDir(pf, dirDelayImport); ok {
+		for i := 0; ; i++ {
+			d := at(dir.VirtualAddress+uint32(i*32), 32)
+			if len(d) < 32 {
+				break
+			}
+			nameRVA, iat, ilt := bo.Uint32(d[4:]), bo.Uint32(d[12:]), bo.Uint32(d[16:])
+			if nameRVA == 0 && iat == 0 {
+				break
+			}
+			if ilt == 0 {
+				ilt = iat
+			}
+			walkThunks(str(nameRVA), ilt, iat)
+		}
+	}
+}
+
+// peDataDir returns data-directory entry idx, across PE32/PE32+ optional headers.
+func peDataDir(pf *pe.File, idx int) (pe.DataDirectory, bool) {
+	switch oh := pf.OptionalHeader.(type) {
+	case *pe.OptionalHeader64:
+		if idx < len(oh.DataDirectory) {
+			return oh.DataDirectory[idx], true
+		}
+	case *pe.OptionalHeader32:
+		if idx < len(oh.DataDirectory) {
+			return oh.DataDirectory[idx], true
+		}
+	}
+	return pe.DataDirectory{}, false
+}
+
+// peRVAOffset maps a virtual address (RVA) to a file offset via the section table.
+func peRVAOffset(pf *pe.File, rva uint32) (int, bool) {
+	for _, s := range pf.Sections {
+		size := s.VirtualSize
+		if size < s.Size {
+			size = s.Size
+		}
+		if rva >= s.VirtualAddress && rva < s.VirtualAddress+size {
+			return int(s.Offset + (rva - s.VirtualAddress)), true
+		}
+	}
+	return 0, false
 }
 
 func peArch(m uint16) arch.Arch {

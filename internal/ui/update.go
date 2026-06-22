@@ -20,7 +20,31 @@ func (m *Model) Init() tea.Cmd {
 	if m.disasmDecoding && !m.disasmBuilt && m.dis != nil {
 		cmds = append(cmds, m.decodeDisasmCmd(m.disasmPendingAddr))
 	}
+	// Pre-warm the deferred work (disasm decode, DWARF/line tables) right after the
+	// first frame so opening those views is instant. The cmd returns immediately,
+	// so its prewarmMsg is processed once the initial render is on screen.
+	cmds = append(cmds, func() tea.Msg { return prewarmMsg{} })
 	return tea.Batch(cmds...)
+}
+
+// prewarmMsg fires just after the first render to kick the deferred background
+// work (so it's ready before the user navigates to it).
+type prewarmMsg struct{}
+
+// handlePrewarm starts the deferred disasm decode and DWARF/line-table build in
+// the background, unless already done/in-flight (e.g. the default view is disasm).
+func (m *Model) handlePrewarm() (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if m.dis != nil && !m.disasmBuilt && !m.disasmDecoding {
+		m.disasmDecoding = true
+		m.disasmPendingAddr = m.disasmInitAddr
+		cmds = append(cmds, m.decodeDisasmCmd(m.disasmInitAddr))
+	}
+	if m.file.HasDWARF() {
+		f := m.file
+		cmds = append(cmds, func() tea.Msg { f.WarmDebugInfo(); return nil })
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m *Model) setStatus(s string, isError bool) {
@@ -48,6 +72,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case keyTickMsg:
 		return m.handleKeyTick()
+
+	case prewarmMsg:
+		return m.handlePrewarm()
 
 	case disasmReadyMsg:
 		return m.handleDisasmReady(msg)
@@ -156,6 +183,12 @@ func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	m.disasmBuilt = true
 	m.disasmDecoding = false
 	m.disasmPendingAddr = 0
+	// A prewarm decode (the user isn't in the disasm view yet) only stores the
+	// window — it must not switch the view or post a status. Positioning happens
+	// when the user actually opens disasm (switchMode sees disasmBuilt).
+	if m.mode != modeDisasm {
+		return m, nil
+	}
 	if len(m.disasmInst) == 0 {
 		m.setStatus("no executable code to disassemble", true)
 		return m, nil
@@ -214,6 +247,7 @@ func (m *Model) demangleCmd() tea.Cmd {
 // copyToClipboard puts text on the system clipboard and reports success or
 // failure to the user via the status footer.
 func (m *Model) copyToClipboard(text, what string) {
+	m.lastCopy = text // test seam: records the last copy regardless of clipboard availability
 	if err := clipboard.WriteAll(text); err != nil {
 		m.setStatus(fmt.Sprintf("clipboard: %v", err), true)
 		return
@@ -225,6 +259,7 @@ func (m *Model) copyToClipboard(text, what string) {
 // summary (not the payload) in the footer — for content too big to echo, like a
 // whole function's disassembly.
 func (m *Model) copyBlob(text, summary string) {
+	m.lastCopy = text // test seam (see copyToClipboard)
 	if err := clipboard.WriteAll(text); err != nil {
 		m.setStatus(fmt.Sprintf("clipboard: %v", err), true)
 		return

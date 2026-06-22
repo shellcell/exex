@@ -51,3 +51,37 @@ func TestOpenPE(t *testing.T) {
 	t.Logf("PE: arch=%d entry=0x%x sections=%d symbols=%d go=%s",
 		f.Arch(), f.Entry(), len(f.Sections), len(f.Symbols), f.Info.GoVersion)
 }
+
+// TestPEImportSymbols checks that the PE loader synthesises symbols for IAT
+// imports (Library set, addressed at the IAT slot) — a Go PE imports kernel32.
+func TestPEImportSymbols(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	bin := filepath.Join(dir, "prog.exe")
+	if err := os.WriteFile(src, []byte("package main\nimport \"fmt\"\nfunc main(){ fmt.Println(\"hi\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-o", bin, src)
+	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("cross-compile failed: %v\n%s", err, out)
+	}
+
+	f, err := Open(bin)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	imports := 0
+	for _, s := range f.Symbols {
+		if s.Library != "" {
+			imports++
+			if s.Addr == 0 {
+				t.Errorf("import %q has no IAT address", s.Name)
+			}
+		}
+	}
+	if imports == 0 {
+		t.Fatal("no imported symbols synthesised (expected kernel32 imports)")
+	}
+	t.Logf("synthesised %d PE import symbols", imports)
+}

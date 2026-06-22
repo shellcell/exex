@@ -298,12 +298,47 @@ type Keys struct {
 	// Open the settings popup. (default: ,)
 	Settings StringOrSlice `yaml:"settings"`
 	// Tree views (symbols/sources/libs): expand / collapse the current group one
-	// level. (defaults: right/l and left/h)
+	// level. (defaults: right and left)
 	TreeExpand   StringOrSlice `yaml:"tree_expand"`
 	TreeCollapse StringOrSlice `yaml:"tree_collapse"`
 	// Tree views: expand / collapse every group. (defaults: + and -)
 	TreeExpandAll   StringOrSlice `yaml:"tree_expand_all"`
 	TreeCollapseAll StringOrSlice `yaml:"tree_collapse_all"`
+	// Copy the pointer-sized word under the cursor (hex/raw). (default: shift+p)
+	CopyPointer StringOrSlice `yaml:"copy_pointer"`
+	// Copy the disassembly of the current function (disasm). (default: shift+c)
+	CopyFunction StringOrSlice `yaml:"copy_function"`
+	// Copy the full current row, every column (all row views). (default: shift+l)
+	CopyLine StringOrSlice `yaml:"copy_line"`
+	// Go to the address under the cursor in the Hex view. (default: h)
+	JumpHex StringOrSlice `yaml:"jump_hex"`
+	// Go to the address under the cursor in the Raw view. (default: m)
+	JumpRaw StringOrSlice `yaml:"jump_raw"`
+	// Cycle the sort field (sections, symbols). (default: s)
+	Sort StringOrSlice `yaml:"sort"`
+	// Reverse the current sort order. (default: r)
+	SortReverse StringOrSlice `yaml:"sort_reverse"`
+	// Cycle the scope filter (symbols). (default: alt+s)
+	FilterScope StringOrSlice `yaml:"filter_scope"`
+	// Cycle the bind filter (symbols). (default: alt+b)
+	FilterBind StringOrSlice `yaml:"filter_bind"`
+	// Cycle the section filter (strings). (default: alt+s)
+	FilterSection StringOrSlice `yaml:"filter_section"`
+	// Cycle the flags filter (sections). (default: alt+f)
+	FilterFlags StringOrSlice `yaml:"filter_flags"`
+	// Cycle the availability filter (libs, sources). (default: alt+a)
+	FilterAvail StringOrSlice `yaml:"filter_avail"`
+	// Toggle the view's mode: tree/flat, sections/segments, ascii/pointers.
+	// (default: t)
+	ToggleMode StringOrSlice `yaml:"toggle_mode"`
+	// Collapse/expand argument & template lists in symbol names. (default: e)
+	AbbrevArgs StringOrSlice `yaml:"abbrev_args"`
+	// Toggle the data inspector (hex, raw). (default: i)
+	Inspector StringOrSlice `yaml:"inspector"`
+	// Find cross-references to the cursor address (disasm). (default: x)
+	Xref StringOrSlice `yaml:"xref"`
+	// Open the selected library as primary / source in disasm. (default: o)
+	OpenPrimary StringOrSlice `yaml:"open_primary"`
 }
 
 // StringOrSlice accepts either a YAML scalar ("q") or a sequence (["q",

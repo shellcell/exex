@@ -73,6 +73,14 @@ type sectionsState struct {
 	sectionsFiltered   []int // indices into the active slice (sections or segments)
 	sectionsCur        int
 	sectionsTop        int
+	sectionsSort       sectionSort // sort field for the (filtered) list
+	sectionsSortDesc   bool        // reverse the active sort
+	sectionsTypeOn     bool        // type-name column filter active
+	sectionsType       string      // the type name it restricts to
+	sectionsTypes      []string    // distinct type names, for cycling
+	sectionsFlagsOn    bool        // flags column filter active
+	sectionsFlags      string      // the flag string it restricts to
+	sectionsFlagsList  []string    // distinct flag strings, for cycling
 	sectionRowCache    map[rowCacheKey]string
 	sectionHeightCache map[rowCacheKey]int
 }
@@ -278,15 +286,21 @@ type libsState struct {
 	libsCollapsed map[string]bool // collapsed directory paths
 	libsRows      []treeRow       // flattened visible rows (dirs + libs)
 	libsTreeInit  bool
+	libsAvail     availFilter     // availability filter: all / on-disk / in cache
+	libsAvailKind map[string]availKind
+	libsFilter    textinput.Model // name search (the `/` filter)
 }
 
 // stringsState stores list, filter and cache state for printable strings.
 type stringsState struct {
 	stringsList       []binfile.StringEntry
 	stringsFilter     textinput.Model
-	stringsFiltered   []int // indices into stringsList
-	stringsCur        int   // index into stringsFiltered
+	stringsFiltered   []int    // indices into stringsList
+	stringsCur        int      // index into stringsFiltered
 	stringsTop        int
+	stringsSections   []string // distinct owning-section names, for the section filter
+	stringsSecOn      bool     // section filter active
+	stringsSec        string   // the section name the filter restricts to
 	stringRowCache    map[rowCacheKey]string
 	stringHeightCache map[rowCacheKey]int
 }
@@ -299,6 +313,7 @@ type sourcesState struct {
 	sourcesCur         int
 	sourcesTop         int
 	sourcesTree        bool            // show the file list as a directory tree
+	sourcesAvail       availFilter     // availability filter: all / present / missing
 	sourcesCollapsed   map[string]bool // collapsed directory paths
 	sourcesRows        []treeRow       // flattened visible rows (dirs + files)
 	sourcesTreeInit    bool
@@ -448,6 +463,8 @@ type settingsState struct {
 type statusState struct {
 	status      string
 	statusError bool
+	lastCopy    string // last text sent to the clipboard (test seam; see copyToClipboard)
+	keyLog      bool   // EXEX_KEYLOG=1: echo each decoded keypress to the footer
 }
 
 // keyState stores resolved key bindings and aliases.

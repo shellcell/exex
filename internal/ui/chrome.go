@@ -102,23 +102,33 @@ func (m *Model) renderHelpModal() string {
 		row("Home/End", "begin/end  (^A / ^E)"),
 		row("/", "filter / search"),
 		row("Enter", "open / jump"),
-		row("a / s", "copy address / name"),
+		row("d / h / m", "go to addr in disasm / hex / raw"),
+		row("⇧a / ⇧s", "copy address / name"),
+		row("⇧l", "copy the whole current row"),
+		row("Esc", "clear filters"),
 		row("w", "toggle long-line wrap"),
+		blank,
+		head("Info"),
+		row("Enter", "open entry point"),
+		row("t", "switch fat-Mach-O arch slice"),
 		blank,
 		head("Sections"),
 		row("Enter", "open in Hex"),
-		row("d", "disassemble (if exec)"),
+		row("d / h / m", "go to addr in disasm / hex / raw"),
+		row("s / r", "sort (index/name/addr/size) · reverse"),
+		row("⌥t / ⌥f", "filter by type / flags"),
 		row("t", "toggle sections / segments"),
 		blank,
 		head("Symbols"),
-		row("y / b", "filter by type / bind"),
-		row("i", "scope: all/internal/imported"),
-		row("o / r", "sort field · reverse (asc/desc)"),
+		row("↵ / d / h / m", "open · go to disasm / hex / raw"),
+		row("⌥t / ⌥b", "filter by type / bind"),
+		row("⌥s", "scope: all/internal/imported"),
+		row("s / r", "sort field · reverse (asc/desc)"),
 		row("t", "toggle namespace tree / flat table"),
 		row("←/→", "tree: collapse / expand group (← on a leaf folds its branch)"),
 		row("↵ · +/−", "tree: expand/collapse all below · all"),
 		row("e / .", "collapse (…)/<…> to ... · all / current row"),
-		row("Esc", "clear library filter"),
+		row("Esc", "clear filters (type/scope/bind/lib/text)"),
 	}
 	right := []helpEntry{
 		head("Disassembly"),
@@ -127,7 +137,8 @@ func (m *Model) renderHelpModal() string {
 		row("[ / ]", "previous / next symbol"),
 		row("Enter / dbl-clk", "follow address"),
 		row("x", "find references (xrefs)"),
-		row("a / s / c", "copy addr / symbol / function asm"),
+		row("h / m", "go to addr in hex / raw"),
+		row("⇧a / ⇧s / ⇧c", "copy addr / symbol / function asm"),
 		row("e", "collapse (…)/<…> in symbol names"),
 		row("/  n/N", "search · next/prev"),
 		row("Tab", "show / hide right pane"),
@@ -135,27 +146,34 @@ func (m *Model) renderHelpModal() string {
 		row("⇧↑/⇧↓", "scroll right pane"),
 		blank,
 		head("Hex / Raw"),
-		row("↑/↓/←/→", "move byte cursor"),
-		row("d", "disassemble (if exec)"),
+		row("↑/↓/←/→  h/l", "move byte cursor"),
+		row("d  ·  m", "go to addr in disasm  ·  raw (hex only)"),
 		row("[ / ]", "prev / next section"),
 		row("⇧[ / ⇧]", "prev / next nonzero"),
-		row("p / i", "pointer decode / data inspector"),
+		row("t / i", "pointer decode / data inspector"),
 		row("Enter", "follow pointer at cursor"),
-		row("a / s / v", "copy address / symbol / pointer"),
+		row("⇧a / ⇧s / ⇧p", "copy address / symbol / pointer"),
 		row("w", "wrap long rows"),
 		row("e", "collapse (…)/<…> in symbol names"),
 		row("/  n/N", "search bytes/\"text\"/0x…"),
 		blank,
 		head("Sources"),
-		row("Enter", "open · jump to disasm"),
+		row("Enter / o", "open in disasm source-first view"),
 		row("[ / ]", "prev / next mapped line"),
 		row("/  ^F", "find in file · grep all"),
+		row("⌥a", "filter: all / present / missing"),
 		row("t", "toggle directory tree / flat list"),
-		row("c  ·  g", "copy path · goto symbol"),
+		row("⇧s  ·  g", "copy path · goto symbol"),
 		blank,
 		head("Libraries"),
 		row("Enter", "imported symbols"),
-		row("o  ·  c", "open as primary · copy"),
+		row("o  ·  ⇧s", "open as primary · copy"),
+		row("/  ·  ⌥a", "search · filter all/on-disk/in dyld cache"),
+		blank,
+		head("Strings"),
+		row("d / h / m", "go to addr in disasm / hex / raw"),
+		row("⌥s", "filter by section"),
+		row("⇧a / ⇧s", "copy address / string"),
 	}
 
 	leftLines := m.helpColumn(left)
@@ -419,16 +437,16 @@ func (m *Model) viewHints() []footerHint {
 	case modeInfo:
 		hints := []footerHint{{"↵", "disasm entry"}}
 		if len(m.file.FatArches) > 1 {
-			hints = append(hints, footerHint{"a", "switch arch"})
+			hints = append(hints, footerHint{"t", "switch arch"})
 		}
 		return hints
 	case modeSections:
-		return []footerHint{{"↵", "open"}, {"d", "disasm"}, {"t", "sec/seg"}, {"/", "filter"}}
+		return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"⌥t/⌥f", "type/flags"}, {"t", "sec/seg"}, {"/", "filter"}}
 	case modeSymbols:
 		if m.symbolTreeActive() {
 			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"/", "filter"}, {"t", "flat"}}
 		}
-		return []footerHint{{"↵", "jump"}, {"/", "filter"}, {"y/b", "type/bind"}, {"i", "scope"}, {"o/r", "sort/rev"}, {"t", "tree"}, {"a/s", "copy"}}
+		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"/", "filter"}, {"⌥t/⌥s/⌥b", "type/scope/bind"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"⇧a/⇧s", "copy"}}
 	case modeDisasm:
 		dwarf := m.file.HasDWARF()
 		switch {
@@ -436,30 +454,32 @@ func (m *Model) viewHints() []footerHint {
 			return []footerHint{{"esc", "cancel"}, {"[ ]", "sym"}, {"←/→", "history"}, {"/", "search"}}
 		case m.sourceFirst && m.srcFile != "":
 			// Source navigation leads: no disasm history, and [ ] steps mapped lines.
-			return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"^f", "grep"}, {"c", "copy"}}
+			return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"^f", "grep"}, {"⇧s", "copy"}}
 		case m.showSource && dwarf:
 			// Disasm-first with the source pane open.
-			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"a/s", "copy"}, {"c", "copy fn"}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}}
+			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"h/m", "hex/raw"}, {"⇧a/⇧s", "copy"}, {"⇧c", "copy fn"}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}}
 		default:
 			// Disasm-first, no pane. Offer tab to open the pane only when there is
 			// debug info to show.
-			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"a/s", "copy"}, {"c", "copy fn"}, {"/", "search"}}
+			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"h/m", "hex/raw"}, {"⇧a/⇧s", "copy"}, {"⇧c", "copy fn"}, {"/", "search"}}
 			if dwarf {
 				hints = append(hints, footerHint{"tab", "pane"})
 			}
 			return hints
 		}
-	case modeHex, modeRaw:
-		return []footerHint{{"↵", "follow ptr"}, {"[ ]", "section"}, {"p", "ptrs"}, {"i", "inspect"}, {"/", "search"}, {"a/s/v", "copy"}}
+	case modeHex:
+		return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"[ ]", "section"}, {"t", "ptrs"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+	case modeRaw:
+		return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t", "ptrs"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 	case modeStrings:
-		return []footerHint{{"↵", "jump"}, {"/", "filter"}, {"a/s", "copy"}}
+		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"/", "filter"}, {"⌥s", "section"}, {"⇧a/⇧s", "copy"}}
 	case modeSources:
 		if m.sourcesTree {
-			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {"+/−", "all"}, {"/", "filter"}, {"t", "flat"}}
+			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {"/", "filter"}, {"⌥a", "present"}, {"t", "flat"}}
 		}
-		return []footerHint{{"↵", "open"}, {"/", "filter"}, {"^f", "grep all"}, {"t", "tree"}, {"c", "copy"}}
+		return []footerHint{{"↵", "open"}, {"/", "filter"}, {"⌥a", "present"}, {"^f", "grep all"}, {"t", "tree"}, {"⇧s", "copy"}}
 	case modeLibs:
-		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"c", "copy"}}
+		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"/", "filter"}, {"⌥a", "avail"}, {"⇧s", "copy"}}
 	}
 	return nil
 }

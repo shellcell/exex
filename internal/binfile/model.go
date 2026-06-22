@@ -179,29 +179,35 @@ type File struct {
 	lowerName      []string // lazily-built lowercased Symbols[i].Name (for filtering)
 	lowerDemangled []string // lazily-built lowercased Symbols[i].Demangled
 
-	dwarf      *dwarf.Data
-	dwarfAvail bool               // DWARF is present (cheap check); HasDWARF without parsing
-	dwarfBuild func() *dwarf.Data // builds dwarf lazily on first line/source lookup
-	dwarfOnce  sync.Once          // guards the lazy DWARF decode
-	lines      []lineEntry        // sorted by Addr (loaded lazily from dwarf)
-	linesOnce  sync.Once          // guards the lazy line-table decode
-	indexOnce  sync.Once          // builds line lookup indexes from lines
-	lineCols   map[lineKey][]int  // distinct DWARF columns by source file:line
-	lineMap    map[string]map[int]bool
-	lineAddr   map[lineKey]uint64  // lowest mapped address per source file:line
-	fileLines  map[string][]int    // sorted distinct mapped line numbers per file
-	sources    map[string][]string // resolved file -> lines
+	dwarf        *dwarf.Data
+	dwarfAvail   bool               // DWARF is present (cheap check); HasDWARF without parsing
+	dwarfBuild   func() *dwarf.Data // builds dwarf lazily on first line/source lookup
+	dwarfOnce    sync.Once          // guards the lazy DWARF decode
+	lines        []lineEntry        // sorted by Addr (loaded lazily from dwarf)
+	lineFiles    []string           // file-name table; lineEntry.File indexes into this
+	linesOnce    sync.Once          // guards the lazy line-table decode
+	indexOnce    sync.Once          // builds line lookup indexes from lines
+	lineCols     map[lineKey][]int  // distinct DWARF columns by source file:line
+	lineMap      map[string]map[int]bool
+	lineAddr     map[lineKey]uint64  // lowest mapped address per source file:line
+	fileLines    map[string][]int    // sorted distinct mapped line numbers per file
+	sources      map[string][]string // resolved file -> lines
+	sourceExists map[string]bool     // resolved file -> exists on disk (cheap presence)
 
 	vaImage   *Image        // all mapped sections, in VA order (lazy)
 	execImage *Image        // executable sections only, in VA order (lazy)
 	strings   []StringEntry // printable strings, extracted lazily
 }
 
+// lineEntry maps a code address to a source location. File is an index into
+// File.lineFiles rather than a string, and Line/Col are int32 — this keeps each
+// entry at 24 bytes instead of 40, which matters because rich debug binaries
+// produce millions of them.
 type lineEntry struct {
 	Addr uint64
-	File string
-	Line int
-	Col  int
+	File int32
+	Line int32
+	Col  int32
 }
 
 type lineKey struct {
@@ -214,9 +220,9 @@ type lineKey struct {
 // table, so callers run it separately (ComputeDemangled/ApplyDemangled) off the
 // critical path; until then Display() falls back to the raw name.
 func (f *File) finalizeSymbols() {
-	// slices.SortFunc is generic — no per-swap reflection, unlike sort.Slice — a
-	// noticeable win sorting hundreds of thousands of symbols at startup.
-	slices.SortFunc(f.Symbols, func(a, b Symbol) int { return strings.Compare(a.Name, b.Name) })
+	// Parallel chunk-sort + k-way merge; falls back to a plain sort for small
+	// tables. One of the larger Open costs on big symbol tables.
+	sortSymbolsByName(f.Symbols)
 
 	addrIdx := make([]int, 0, len(f.Symbols))
 	for i, s := range f.Symbols {
@@ -356,7 +362,7 @@ func (f *File) lineEntries() []lineEntry {
 	f.linesOnce.Do(func() {
 		f.ensureDWARF()
 		if f.dwarf != nil {
-			f.lines = loadLines(f.dwarf)
+			f.lines, f.lineFiles = loadLines(f.dwarf)
 		}
 	})
 	return f.lines
@@ -373,6 +379,19 @@ func (f *File) ensureDWARF() {
 	})
 }
 
+// WarmDebugInfo eagerly performs the normally-lazy DWARF *parse* (dwarf.Data) so
+// the source pane / Sources view start from a warm decode. It deliberately does
+// NOT build the address→line table and lookup maps: those are large (hundreds of
+// MB and millions of entries on a rich debug binary) and would be wasted heap if
+// the user never opens source — they stay lazy until first source access. Safe
+// from a background goroutine (Once-guarded); a no-op without debug info.
+func (f *File) WarmDebugInfo() {
+	if !f.HasDWARF() {
+		return
+	}
+	f.ensureDWARF()
+}
+
 // ensureLineIndexes builds source-line lookup maps from the lazy DWARF line table.
 func (f *File) ensureLineIndexes() {
 	f.indexOnce.Do(func() {
@@ -380,14 +399,16 @@ func (f *File) ensureLineIndexes() {
 		lineMap := map[string]map[int]bool{}
 		lineAddr := map[lineKey]uint64{}
 		for _, le := range f.lineEntries() {
-			if le.File == "" || le.Line == 0 {
+			file := f.lineFileName(le.File)
+			if file == "" || le.Line == 0 {
 				continue
 			}
-			if lineMap[le.File] == nil {
-				lineMap[le.File] = map[int]bool{}
+			line := int(le.Line)
+			if lineMap[file] == nil {
+				lineMap[file] = map[int]bool{}
 			}
-			lineMap[le.File][le.Line] = true
-			key := lineKey{File: le.File, Line: le.Line}
+			lineMap[file][line] = true
+			key := lineKey{File: file, Line: line}
 			if a, ok := lineAddr[key]; !ok || le.Addr < a {
 				lineAddr[key] = le.Addr
 			}
@@ -395,7 +416,7 @@ func (f *File) ensureLineIndexes() {
 				if colsSeen[key] == nil {
 					colsSeen[key] = map[int]bool{}
 				}
-				colsSeen[key][le.Col] = true
+				colsSeen[key][int(le.Col)] = true
 			}
 		}
 		lineCols := make(map[lineKey][]int, len(colsSeen))
@@ -435,9 +456,29 @@ func (f *File) sectionData(s *Section) []byte {
 	return f.raw[s.Offset:end]
 }
 
-// loadLines extracts and sorts DWARF line-table entries.
-func loadLines(d *dwarf.Data) []lineEntry {
+// lineFileName resolves a lineEntry.File index to its source file name.
+func (f *File) lineFileName(i int32) string {
+	if i < 0 || int(i) >= len(f.lineFiles) {
+		return ""
+	}
+	return f.lineFiles[i]
+}
+
+// loadLines extracts and sorts DWARF line-table entries, returning the entries
+// and the interned file-name table they index into.
+func loadLines(d *dwarf.Data) ([]lineEntry, []string) {
 	var out []lineEntry
+	var files []string
+	fileIdx := map[string]int32{}
+	intern := func(name string) int32 {
+		if i, ok := fileIdx[name]; ok {
+			return i
+		}
+		i := int32(len(files))
+		files = append(files, name)
+		fileIdx[name] = i
+		return i
+	}
 	r := d.Reader()
 	for {
 		cu, err := r.Next()
@@ -461,25 +502,20 @@ func loadLines(d *dwarf.Data) []lineEntry {
 			if le.File == nil {
 				continue
 			}
-			out = append(out, lineEntry{Addr: le.Address, File: le.File.Name, Line: le.Line, Col: le.Column})
+			out = append(out, lineEntry{Addr: le.Address, File: intern(le.File.Name), Line: int32(le.Line), Col: int32(le.Column)})
 		}
 		r.SkipChildren()
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Addr < out[j].Addr })
-	return out
+	return out, files
 }
 
 // SourceFiles returns the sorted, de-duplicated set of source files referenced
 // by the DWARF line table.
 func (f *File) SourceFiles() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, le := range f.lineEntries() {
-		if le.File != "" && !seen[le.File] {
-			seen[le.File] = true
-			out = append(out, le.File)
-		}
-	}
+	f.lineEntries() // populates f.lineFiles (already de-duplicated by interning)
+	out := make([]string, len(f.lineFiles))
+	copy(out, f.lineFiles)
 	sort.Strings(out)
 	return out
 }
@@ -518,7 +554,7 @@ func (f *File) LookupAddrCol(addr uint64) (file string, line, col int) {
 		return "", 0, 0
 	}
 	le := lines[i-1]
-	return le.File, le.Line, le.Col
+	return f.lineFileName(le.File), int(le.Line), int(le.Col)
 }
 
 // MappedLines returns the set of line numbers in file that have any machine
@@ -648,6 +684,40 @@ func (f *File) IsMapped(addr uint64) bool { return f.SectionAt(addr) != nil }
 func IsExecSection(s *Section) bool { return s != nil && s.Exec && s.Size > 0 }
 
 // SourceLines returns the source file's lines, searching common locations.
+// SourceExists reports whether the source file name resolves to a readable file
+// on disk, using the same candidate resolution as SourceLines but only stat-ing
+// (cheap) rather than reading. Result is cached.
+func (f *File) SourceExists(name string) bool {
+	if name == "" {
+		return false
+	}
+	if f.sourceExists == nil {
+		f.sourceExists = map[string]bool{}
+	}
+	if v, ok := f.sourceExists[name]; ok {
+		return v
+	}
+	ok := false
+	for _, c := range f.sourceCandidates(name) {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			ok = true
+			break
+		}
+	}
+	f.sourceExists[name] = ok
+	return ok
+}
+
+// sourceCandidates lists the on-disk paths tried for a DWARF source name, in
+// order, shared by SourceLines and SourceExists.
+func (f *File) sourceCandidates(name string) []string {
+	candidates := []string{name}
+	if !filepath.IsAbs(name) {
+		candidates = append(candidates, filepath.Join(filepath.Dir(f.Path), name))
+	}
+	return append(candidates, filepath.Base(name))
+}
+
 func (f *File) SourceLines(name string) []string {
 	if name == "" {
 		return nil
@@ -658,12 +728,7 @@ func (f *File) SourceLines(name string) []string {
 	if v, ok := f.sources[name]; ok {
 		return v
 	}
-	candidates := []string{name}
-	if !filepath.IsAbs(name) {
-		candidates = append(candidates, filepath.Join(filepath.Dir(f.Path), name))
-	}
-	candidates = append(candidates, filepath.Base(name))
-	for _, c := range candidates {
+	for _, c := range f.sourceCandidates(name) {
 		if b, err := os.ReadFile(c); err == nil {
 			lines := strings.Split(string(b), "\n")
 			f.sources[name] = lines

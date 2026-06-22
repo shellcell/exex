@@ -247,11 +247,11 @@ func (m *Model) bytePageRows() int {
 func (m *Model) moveByteCursor(key string, cur, n int) int {
 	row := bytesPerHexRow
 	switch key {
-	case "left", "h":
+	case "left":
 		if cur > 0 {
 			cur--
 		}
-	case "right", "l":
+	case "right":
 		if cur < n-1 {
 			cur++
 		}
@@ -289,20 +289,22 @@ func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("address is not executable", true)
 		}
+	case "m":
+		m.jumpRawAtAddr(m.hexImg.AddrAt(m.hexCur))
 	case "w":
 		m.toggleWrap()
-	case "p":
+	case "t":
 		m.toggleHexWords()
 	case "i":
 		m.toggleHexInspect()
-	case "v":
+	case "P":
 		m.copyPointerAt(data, m.pointerWordStart(m.hexImg.AddrAt(m.hexCur), m.hexCur))
 	case "enter":
 		m.followPointerAt(data, m.pointerWordStart(m.hexImg.AddrAt(m.hexCur), m.hexCur))
-	case "a":
+	case "A":
 		addr := m.hexImg.AddrAt(m.hexCur)
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
-	case "s":
+	case "S":
 		addr := m.hexImg.AddrAt(m.hexCur)
 		if sym, ok := m.file.SymbolAt(addr); ok {
 			m.copyToClipboard(sym.Name, "symbol")
@@ -416,19 +418,31 @@ func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "d":
+		if addr, ok := m.addrForOffset(uint64(m.rawCur)); ok {
+			m.jumpDisasmAtAddr(addr)
+		} else {
+			m.setStatus("offset has no mapped address", true)
+		}
+	case "h":
+		if addr, ok := m.addrForOffset(uint64(m.rawCur)); ok {
+			m.jumpHexAtAddr(addr)
+		} else {
+			m.setStatus("offset has no mapped address", true)
+		}
 	case "w":
 		m.toggleWrap()
-	case "p":
+	case "t":
 		m.toggleHexWords()
 	case "i":
 		m.toggleHexInspect()
-	case "v":
+	case "P":
 		m.copyPointerAt(rawBytes(m.rawData), m.pointerWordStart(uint64(m.rawCur), m.rawCur))
 	case "enter":
 		m.followPointerAt(rawBytes(m.rawData), m.pointerWordStart(uint64(m.rawCur), m.rawCur))
-	case "a":
+	case "A":
 		m.copyToClipboard(fmt.Sprintf("0x%x", m.rawCur), "offset")
-	case "s":
+	case "S":
 		if sec := m.sectionAtOffset(uint64(m.rawCur)); sec != nil {
 			m.copyToClipboard(sec.Name, "section name")
 		} else {

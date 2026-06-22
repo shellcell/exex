@@ -163,12 +163,10 @@ func filterCapture(in *textinput.Model, key string, msg tea.KeyMsg, recompute fu
 	}
 	switch key {
 	case "esc":
-		// Esc clears the filter (and unfocuses), so the list returns to showing
-		// everything; Enter just confirms the current filter and unfocuses.
-		in.SetValue("")
-		in.Blur()
-		recompute()
-		return nil, true
+		// Esc falls through to the view's own esc handler, which clears the search
+		// text *and* every column filter in one press (doc #27). It blurs the input
+		// there too.
+		return nil, false
 	case "enter":
 		in.Blur()
 		return nil, true

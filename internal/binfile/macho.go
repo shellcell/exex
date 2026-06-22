@@ -103,6 +103,27 @@ func machoCPUName(c macho.Cpu) string {
 	return fmt.Sprintf("cpu(0x%x)", uint32(c))
 }
 
+// machoArchName is the conventional slice name including the CPU subtype, so fat
+// slices that share a CPU type stay distinct — e.g. x86_64 vs x86_64h, arm64 vs
+// arm64e. Without the subtype these collapse to one name and selecting / cycling
+// fat slices (sqlite3 ships x86_64 + x86_64h + arm64e) is broken.
+func machoArchName(c macho.Cpu, sub uint32) string {
+	sub &^= 0x80000000 // CPU_SUBTYPE_LIB64
+	switch c {
+	case macho.CpuAmd64:
+		if sub == 8 { // CPU_SUBTYPE_X86_64_H (Haswell)
+			return "x86_64h"
+		}
+		return "x86_64"
+	case macho.CpuArm64:
+		if sub == 2 { // CPU_SUBTYPE_ARM64E
+			return "arm64e"
+		}
+		return "arm64"
+	}
+	return machoCPUName(c)
+}
+
 // loadMachO parses f.raw as a Mach-O object and populates the neutral model.
 // For universal ("fat") binaries it selects the slice named by f.reqArch, else
 // the host architecture's slice, else the first.
@@ -278,7 +299,7 @@ func parseMachO(raw []byte, want string) (mf *macho.File, base uint64, arches []
 				typ = fa.File.Type.String()
 			}
 			arches = append(arches, FatArchInfo{
-				Name:   machoCPUName(fa.Cpu),
+				Name:   machoArchName(fa.Cpu, fa.SubCpu),
 				Type:   typ,
 				Bits:   bits,
 				Offset: uint64(fa.Offset),
@@ -286,13 +307,13 @@ func parseMachO(raw []byte, want string) (mf *macho.File, base uint64, arches []
 			})
 		}
 		fa := pickFatArch(ff, want)
-		return fa.File, uint64(fa.Offset), arches, machoCPUName(fa.Cpu), nil
+		return fa.File, uint64(fa.Offset), arches, machoArchName(fa.Cpu, fa.SubCpu), nil
 	}
 	mf, err = macho.NewFile(ra)
 	if err != nil {
 		return nil, 0, nil, "", err
 	}
-	return mf, 0, nil, machoCPUName(mf.Cpu), nil
+	return mf, 0, nil, machoArchName(mf.Cpu, mf.SubCpu), nil
 }
 
 // machoDWARF returns DWARF for the binary: embedded if present, otherwise from
@@ -386,7 +407,7 @@ func (f *File) dsymDebugCandidates(base string) []string {
 func pickFatArch(ff *macho.FatFile, want string) macho.FatArch {
 	if want != "" {
 		for _, fa := range ff.Arches {
-			if machoCPUName(fa.Cpu) == want {
+			if machoArchName(fa.Cpu, fa.SubCpu) == want {
 				return fa
 			}
 		}

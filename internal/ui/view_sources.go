@@ -63,9 +63,20 @@ func (m *Model) recomputeSourceFiles() {
 	needle := strings.ToLower(m.sourcesFilter.Value())
 	m.sourcesFiltered = m.sourcesFiltered[:0]
 	for i, f := range m.sourcesFiles {
-		if needle == "" || containsFold(f, needle) {
-			m.sourcesFiltered = append(m.sourcesFiltered, i)
+		if needle != "" && !containsFold(f, needle) {
+			continue
 		}
+		switch m.sourcesAvail {
+		case availPresent:
+			if !m.file.SourceExists(f) {
+				continue
+			}
+		case availMissing:
+			if m.file.SourceExists(f) {
+				continue
+			}
+		}
+		m.sourcesFiltered = append(m.sourcesFiltered, i)
 	}
 	m.buildSourceRows()
 	if m.sourcesCur >= len(m.sourcesRows) {
@@ -255,11 +266,36 @@ func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 	case "/":
 		m.sourcesFilter.Focus()
 		return m, nil
+	case "esc":
+		dirty := m.sourcesAvail != availAll || m.sourcesFilter.Value() != "" || m.sourcesFilter.Focused()
+		m.sourcesFilter.SetValue("")
+		m.sourcesFilter.Blur()
+		m.sourcesAvail = availAll
+		m.sourcesCur, m.sourcesTop = 0, 0
+		m.recomputeSourceFiles()
+		if dirty {
+			m.setStatus("filters cleared", false)
+		}
+		return m, nil
 	case "ctrl+f":
 		m.srcSearchAll = true
 		m.openSearch()
 		return m, nil
-	case "t", "f":
+	case "alt+a":
+		// cycle availability filter: all → present → missing → all
+		switch m.sourcesAvail {
+		case availAll:
+			m.sourcesAvail = availPresent
+		case availPresent:
+			m.sourcesAvail = availMissing
+		default:
+			m.sourcesAvail = availAll
+		}
+		m.sourcesCur, m.sourcesTop = 0, 0
+		m.recomputeSourceFiles()
+		m.setStatus("sources: "+availLabel(m.sourcesAvail), false)
+		return m, nil
+	case "t":
 		m.sourcesTree = !m.sourcesTree
 		m.sourcesCur, m.sourcesTop = 0, 0
 		m.recomputeSourceFiles()
@@ -274,23 +310,32 @@ func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 	case "+", "=":
 		m.setAllSourcesCollapsed(false)
 		m.setStatus("expanded all", false)
-	case "right", "l":
+	case "right":
 		if m.sourcesTree {
 			m.ensureSourcesCollapsed()
 			if treeExpandOne(m.sourcesRows, &m.sourcesCur, m.sourcesCollapsed) {
 				m.buildSourceRows()
 			}
 		}
-	case "left", "h":
+	case "left":
 		if m.sourcesTree {
 			m.ensureSourcesCollapsed()
 			if treeCollapseOne(m.sourcesRows, &m.sourcesCur, m.sourcesCollapsed) {
 				m.buildSourceRows()
 			}
 		}
-	case "c":
+	case "S":
 		if f, ok := m.sourceFileAt(m.sourcesCur); ok {
 			m.copyToClipboard(f, "source path")
+		}
+	case "o":
+		// Open the selected file in the disasm source-first view (doc #27: `o`
+		// opens a source there, mirroring its "open lib as primary" role in Libs).
+		if f, ok := m.sourceFileAt(m.sourcesCur); ok {
+			m.openSourceFile(f, 1)
+			m.setMode(modeDisasm)
+			m.showSource = true
+			m.sourceFirst = true
 		}
 	case "w":
 		m.toggleWrap()
@@ -333,7 +378,7 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 		m.srcSearchAll = true
 		m.openSearch()
 		return m, nil
-	case "c":
+	case "S":
 		m.copyToClipboard(m.srcFile, "source path")
 		return m, nil
 	case "w":
@@ -535,8 +580,11 @@ func (m *Model) renderSourceList(bodyH int) string {
 		if m.sourcesTree {
 			facet = "  tree"
 		}
-		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)%s",
-			m.sourcesFilter.Value(), len(m.sourcesFiltered), len(m.sourcesFiles), facet))
+		if m.sourcesAvail != availAll {
+			facet += "  " + m.theme.helpKeyStyle.Render("⌥a") + " " + availLabel(m.sourcesAvail)
+		}
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)",
+			m.sourcesFilter.Value(), len(m.sourcesFiltered), len(m.sourcesFiles))) + m.theme.footerStyle.Render(facet)
 	}
 
 	visible := bodyH - 1
@@ -572,7 +620,11 @@ func (m *Model) renderSourceList(bodyH int) string {
 		}
 		full := m.sourcesFiles[n.leaf]
 		indent := strings.Repeat(" ", row.depth*treeIndent)
-		name := m.theme.colorPathByPrefix(full, truncateMiddle(n.label, max(8, m.width-len(indent)-2)))
+		trunc := truncateMiddle(n.label, max(8, m.width-len(indent)-2))
+		name := m.theme.colorPathByPrefix(full, trunc)
+		if !m.file.SourceExists(full) { // not on disk: dim it (can't be opened)
+			name = m.theme.srcShadowStyle.Render(trunc)
+		}
 		line := padRight(" "+indent+name, m.width)
 		if selected {
 			b.WriteString(m.theme.tableSelStyle.Render(ansi.Strip(line)))

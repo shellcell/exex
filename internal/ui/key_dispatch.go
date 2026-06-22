@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,7 +10,15 @@ import (
 
 // handleKey routes a key message through modal, global, and active-view handlers.
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := canonicalKeyString(msg.String())
+	key := keyName(msg)
+
+	// Diagnostic for terminal-specific key issues: with EXEX_KEYLOG=1 the footer
+	// shows how each keypress was decoded, so an unmapped chord can be reported.
+	if m.keyLog {
+		k := msg.Key()
+		m.setStatus(fmt.Sprintf("KEY str=%q code=%d text=%q mod=%d → %q",
+			msg.String(), k.Code, k.Text, k.Mod, key), false)
+	}
 
 	// A keypress cancels any in-flight wheel momentum so it can't keep scrolling
 	// after the user has moved on.
@@ -59,9 +68,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	key = m.normalizeNavKey(key)
-	// Apply user key aliases (copy/next/prev) onto canonical tokens.
+	// Apply user key aliases (copy/jump/sort/filter/…) onto canonical tokens.
 	if c, ok := m.keyAlias[key]; ok {
 		key = c
+	}
+
+	// shift+l (delivered as "L", or any configured copy-line key now aliased to it)
+	// copies the whole current row in every row-based view; handled centrally so
+	// the behaviour is identical across views.
+	if key == "L" && m.copyCurrentLine() {
+		return m, nil
 	}
 	// Coalesce held navigation keys so a key-repeat flood can't block input.
 	if m.isRepeatNavKey(key) {
@@ -148,6 +164,51 @@ func canonicalKeyString(key string) string {
 		return strings.ToLower(key)
 	}
 	return key
+}
+
+// macOptionGlyph maps the characters a US-layout macOS keyboard produces for
+// Option+<letter> back to the base letter. With ghostty's default
+// (macos-option-as-alt = false) Option+t arrives as "†" with *no* modifier bit,
+// so this glyph table is the only way to recover the intended ⌥ chord without
+// asking the user to reconfigure the terminal.
+var macOptionGlyph = map[rune]rune{
+	'å': 'a', '∫': 'b', 'ç': 'c', '∂': 'd', 'ƒ': 'f', '©': 'g', '˙': 'h',
+	'∆': 'j', '˚': 'k', '¬': 'l', 'µ': 'm', 'ø': 'o', 'π': 'p', 'œ': 'q',
+	'®': 'r', 'ß': 's', '†': 't', '√': 'v', '∑': 'w', '≈': 'x', '¥': 'y', 'Ω': 'z',
+}
+
+// keyName derives the canonical key token the handlers match on, robustly across
+// terminals — the documented ⌥ (Option) chords are the hard part on macOS, where
+// Option+letter reaches us in any of three shapes depending on the terminal:
+//   - Alt/Super/Meta modifier + base letter (option-as-alt, or Cmd) → "alt+<l>"
+//   - Alt modifier + a composed Text (Kitty protocol, e.g. ⌥t → "†")  → "alt+<l>"
+//   - no modifier at all, just the composed glyph (ghostty default)   → "alt+<l>"
+// tea.Key.String() returns the composed Text and drops the modifier, so it can't
+// be trusted for these; we read the modifier bits and the glyph table instead.
+// Shift-only and unmodified keys keep String(), so "A" (Shift+a) and the special
+// keys ("enter", "tab", …) are unchanged.
+func keyName(msg tea.KeyMsg) string {
+	k := msg.Key()
+	// The composed-glyph case (may carry no modifier): map the glyph to its letter.
+	glyph := k.Code
+	if k.Text != "" {
+		glyph = []rune(k.Text)[0]
+	}
+	if base, ok := macOptionGlyph[glyph]; ok {
+		return "alt+" + string(base)
+	}
+	if k.Mod&(tea.ModAlt|tea.ModSuper|tea.ModMeta) != 0 {
+		if c := k.Code; c >= 'a' && c <= 'z' {
+			return "alt+" + string(c)
+		}
+		if c := k.Code; c >= 'A' && c <= 'Z' {
+			return "alt+" + string(c-'A'+'a')
+		}
+	}
+	if k.Mod&^tea.ModShift != 0 {
+		return canonicalKeyString(k.Keystroke())
+	}
+	return canonicalKeyString(msg.String())
 }
 
 // cursorState snapshots cursor fields that should reattach a detached viewport.
@@ -284,6 +345,8 @@ func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) 
 		return filterCapture(&m.sectionsFilter, key, msg, m.recomputeSections)
 	case modeStrings:
 		return filterCapture(&m.stringsFilter, key, msg, m.recomputeStrings)
+	case modeLibs:
+		return filterCapture(&m.libsFilter, key, msg, m.buildLibRows)
 	case modeSources:
 		if m.srcFile == "" {
 			return filterCapture(&m.sourcesFilter, key, msg, m.recomputeSourceFiles)
@@ -404,18 +467,21 @@ func (m *Model) ensureSourcePaneAvailable() bool {
 // normalizeNavKey maps platform-specific navigation aliases to canonical keys.
 func (m *Model) normalizeNavKey(key string) string {
 	key = canonicalKeyString(key)
-	// macOS keyboards often lack Home/End and dedicated PgUp/PgDn; accept the
-	// emacs-style ctrl+a / ctrl+e as begin/end and Cmd+Up / Cmd+Down as page
-	// up / page down (modals and filter inputs were handled above, so this only
-	// affects view navigation).
+	// macOS keyboards often lack Home/End and dedicated PgUp/PgDn (doc #27):
+	//   page up:   ctrl+up,  option/alt+up,   PgUp
+	//   page down: ctrl+down, option/alt+down, PgDn
+	//   top:       Home, ctrl+a, cmd+up
+	//   bottom:    End,  ctrl+e, cmd+down
+	// (Modals and filter inputs were handled above, so this only affects view
+	// navigation.)
 	switch key {
-	case "ctrl+a":
+	case "ctrl+a", "cmd+up", "super+up":
 		return "home"
-	case "ctrl+e":
+	case "ctrl+e", "cmd+down", "super+down":
 		return "end"
-	case "cmd+up", "super+up", "alt+up":
+	case "ctrl+up", "alt+up":
 		return "pgup"
-	case "cmd+down", "super+down", "alt+down":
+	case "ctrl+down", "alt+down":
 		return "pgdown"
 	}
 	return key

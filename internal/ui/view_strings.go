@@ -7,6 +7,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,8 +22,50 @@ import (
 func (m *Model) ensureStrings() {
 	if m.stringsList == nil {
 		m.stringsList = m.file.Strings()
+		m.buildStringSections()
 		m.recomputeStrings()
 	}
+}
+
+// buildStringSections collects the distinct owning-section names (sorted) so the
+// alt+s filter can cycle through them.
+func (m *Model) buildStringSections() {
+	seen := map[string]bool{}
+	m.stringsSections = m.stringsSections[:0]
+	for _, s := range m.stringsList {
+		if s.Section != "" && !seen[s.Section] {
+			seen[s.Section] = true
+			m.stringsSections = append(m.stringsSections, s.Section)
+		}
+	}
+	sort.Strings(m.stringsSections)
+}
+
+// cycleStringSectionFilter steps the section filter off → first → … → last → off.
+func (m *Model) cycleStringSectionFilter() {
+	if len(m.stringsSections) == 0 {
+		m.setStatus("no section info for strings", false)
+		return
+	}
+	if !m.stringsSecOn {
+		m.stringsSecOn = true
+		m.stringsSec = m.stringsSections[0]
+		m.setStatus("string section filter: "+m.stringsSec, false)
+		return
+	}
+	for i, sec := range m.stringsSections {
+		if sec == m.stringsSec {
+			if i == len(m.stringsSections)-1 {
+				m.stringsSecOn = false
+				m.setStatus("string section filter: all", false)
+				return
+			}
+			m.stringsSec = m.stringsSections[i+1]
+			m.setStatus("string section filter: "+m.stringsSec, false)
+			return
+		}
+	}
+	m.stringsSecOn = false
 }
 
 // recomputeStrings rebuilds stringsFiltered from the current filter text,
@@ -32,6 +75,9 @@ func (m *Model) recomputeStrings() {
 	needle := strings.ToLower(m.stringsFilter.Value())
 	m.stringsFiltered = m.stringsFiltered[:0]
 	for i, s := range m.stringsList {
+		if m.stringsSecOn && s.Section != m.stringsSec {
+			continue
+		}
 		// Filter on the raw bytes (zero-copy) so scanning millions of strings on
 		// each keystroke doesn't allocate a copy per entry.
 		if needle == "" || containsFoldBytes(m.file.StringBytes(s), needle) || containsFold(s.Section, needle) {
@@ -89,8 +135,38 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "/":
 		m.stringsFilter.Focus()
+	case "esc":
+		dirty := m.stringsSecOn || m.stringsFilter.Value() != "" || m.stringsFilter.Focused()
+		m.stringsSecOn = false
+		m.stringsFilter.SetValue("")
+		m.stringsFilter.Blur()
+		m.stringsCur, m.stringsTop = 0, 0
+		m.recomputeStrings()
+		if dirty {
+			m.setStatus("filters cleared", false)
+		}
+	case "alt+s":
+		m.cycleStringSectionFilter()
+		m.stringsCur, m.stringsTop = 0, 0
+		m.recomputeStrings()
 	case "w":
 		m.toggleWrap()
+	case "d":
+		if s, ok := m.currentString(); ok && s.HasAddr {
+			m.jumpDisasmAtAddr(s.Addr)
+		} else {
+			m.setStatus("string has no mapped address", true)
+		}
+	case "h":
+		if s, ok := m.currentString(); ok && s.HasAddr {
+			m.jumpHexAtAddr(s.Addr)
+		} else {
+			m.setStatus("string has no mapped address", true)
+		}
+	case "m":
+		if s, ok := m.currentString(); ok {
+			m.openRawAt(s.Offset)
+		}
 	case "enter":
 		if s, ok := m.currentString(); ok {
 			if s.HasAddr {
@@ -99,7 +175,7 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 				m.openRawAt(s.Offset)
 			}
 		}
-	case "a":
+	case "A":
 		if s, ok := m.currentString(); ok {
 			if s.HasAddr {
 				m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), s.Addr), "address")
@@ -107,7 +183,7 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 				m.copyToClipboard(fmt.Sprintf("0x%x", s.Offset), "offset")
 			}
 		}
-	case "s":
+	case "S":
 		if s, ok := m.currentString(); ok {
 			m.copyToClipboard(m.file.StringText(s), "string")
 		}
@@ -127,8 +203,12 @@ func (m *Model) renderStrings() string {
 
 	filterRow := m.stringsFilter.View()
 	if !m.stringsFilter.Focused() {
-		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)",
-			m.stringsFilter.Value(), len(m.stringsFiltered), len(m.stringsList)))
+		secLabel := "all"
+		if m.stringsSecOn {
+			secLabel = m.stringsSec
+		}
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)   ", m.stringsFilter.Value(), len(m.stringsFiltered), len(m.stringsList))) +
+			m.theme.helpKeyStyle.Render("⌥s") + m.theme.footerStyle.Render(" section:"+secLabel)
 	}
 
 	addrW := m.file.AddrHexWidth()

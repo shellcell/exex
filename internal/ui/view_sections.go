@@ -7,6 +7,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,6 +15,112 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 )
+
+// sectionSort is the display order of the (filtered) section/segment list.
+type sectionSort uint8
+
+const (
+	secSortIndex sectionSort = iota // file order (the natural section index)
+	secSortName
+	secSortAddr
+	secSortSize
+)
+
+// String returns the sort's filter-status label.
+func (s sectionSort) String() string {
+	switch s {
+	case secSortName:
+		return "name"
+	case secSortAddr:
+		return "address"
+	case secSortSize:
+		return "size"
+	}
+	return "index"
+}
+
+// secSortValue returns the name/addr/size of the active table's row idx, for the
+// sort comparators (works for both the section and segment tables).
+func (m *Model) secSortValue(idx int) (name string, addr, size uint64) {
+	if m.showSegments {
+		s := m.segments[idx]
+		return s.Name, s.Addr, s.Size
+	}
+	s := m.sections[idx]
+	return s.Name, s.Addr, s.Size
+}
+
+// applySectionSort orders sectionsFiltered by the active field. Index order is
+// the slice's natural order, so it only needs reversing for descending.
+func (m *Model) applySectionSort() {
+	desc := m.sectionsSortDesc
+	if m.sectionsSort == secSortIndex {
+		if desc {
+			reverseInts(m.sectionsFiltered)
+		}
+		return
+	}
+	sort.SliceStable(m.sectionsFiltered, func(a, b int) bool {
+		na, aa, sa := m.secSortValue(m.sectionsFiltered[a])
+		nb, ab, sb := m.secSortValue(m.sectionsFiltered[b])
+		var less bool
+		switch m.sectionsSort {
+		case secSortName:
+			less = na < nb
+		case secSortAddr:
+			less = aa < ab
+		case secSortSize:
+			less = sa < sb
+		}
+		if desc {
+			return !less
+		}
+		return less
+	})
+}
+
+// buildSectionFacets collects the distinct type names and flag strings of the
+// section table, so the alt+t / alt+f filters can cycle through them.
+func (m *Model) buildSectionFacets() {
+	seenT, seenF := map[string]bool{}, map[string]bool{}
+	m.sectionsTypes = m.sectionsTypes[:0]
+	m.sectionsFlagsList = m.sectionsFlagsList[:0]
+	for i := range m.sections {
+		if t := m.sections[i].TypeName; t != "" && !seenT[t] {
+			seenT[t] = true
+			m.sectionsTypes = append(m.sectionsTypes, t)
+		}
+		if fl := m.sections[i].Flags; fl != "" && !seenF[fl] {
+			seenF[fl] = true
+			m.sectionsFlagsList = append(m.sectionsFlagsList, fl)
+		}
+	}
+	sort.Strings(m.sectionsTypes)
+	sort.Strings(m.sectionsFlagsList)
+}
+
+// cycleStringList steps a value through off → list[0] → … → list[n-1] → off,
+// shared by the section type/flags filters.
+func cycleStringList(on *bool, cur *string, list []string) {
+	if len(list) == 0 {
+		return
+	}
+	if !*on {
+		*on, *cur = true, list[0]
+		return
+	}
+	for i, v := range list {
+		if v == *cur {
+			if i == len(list)-1 {
+				*on = false
+				return
+			}
+			*cur = list[i+1]
+			return
+		}
+	}
+	*on = false
+}
 
 // recomputeSections rebuilds sectionsFiltered from the current filter text,
 // matching on the name of the active table (sections or segments).
@@ -33,11 +140,19 @@ func (m *Model) recomputeSections() {
 			name = m.segments[i].Name
 		} else {
 			name = m.sections[i].Name
+			// The type/flags filters only apply to the section table.
+			if m.sectionsTypeOn && m.sections[i].TypeName != m.sectionsType {
+				continue
+			}
+			if m.sectionsFlagsOn && m.sections[i].Flags != m.sectionsFlags {
+				continue
+			}
 		}
 		if needle == "" || containsFold(name, needle) {
 			m.sectionsFiltered = append(m.sectionsFiltered, i)
 		}
 	}
+	m.applySectionSort()
 	if m.sectionsCur >= len(m.sectionsFiltered) {
 		m.sectionsCur = max(0, len(m.sectionsFiltered)-1)
 	}
@@ -51,6 +166,44 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "/":
 		m.sectionsFilter.Focus()
+		return m, nil
+	case "esc":
+		dirty := m.sectionsTypeOn || m.sectionsFlagsOn || m.sectionsFilter.Value() != "" || m.sectionsFilter.Focused()
+		m.sectionsFilter.SetValue("")
+		m.sectionsFilter.Blur()
+		m.sectionsTypeOn = false
+		m.sectionsFlagsOn = false
+		m.sectionsCur, m.sectionsTop = 0, 0
+		m.recomputeSections()
+		if dirty {
+			m.setStatus("filters cleared", false)
+		}
+		return m, nil
+	case "alt+t":
+		if m.showSegments {
+			return m, nil
+		}
+		cycleStringList(&m.sectionsTypeOn, &m.sectionsType, m.sectionsTypes)
+		m.sectionsCur, m.sectionsTop = 0, 0
+		m.recomputeSections()
+		if m.sectionsTypeOn {
+			m.setStatus("section type filter: "+m.sectionsType, false)
+		} else {
+			m.setStatus("section type filter: all", false)
+		}
+		return m, nil
+	case "alt+f":
+		if m.showSegments {
+			return m, nil
+		}
+		cycleStringList(&m.sectionsFlagsOn, &m.sectionsFlags, m.sectionsFlagsList)
+		m.sectionsCur, m.sectionsTop = 0, 0
+		m.recomputeSections()
+		if m.sectionsFlagsOn {
+			m.setStatus("section flags filter: "+m.sectionsFlags, false)
+		} else {
+			m.setStatus("section flags filter: all", false)
+		}
 		return m, nil
 	case "t":
 		// Toggle sections ⇄ segments. No segments (e.g. PE) → stay on sections.
@@ -106,9 +259,31 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("section is not executable", true)
 		}
+	case "h":
+		if addr, ok := m.currentSectionAddr(); ok {
+			m.jumpHexAtAddr(addr)
+		}
+	case "m":
+		if addr, ok := m.currentSectionAddr(); ok {
+			m.jumpRawAtAddr(addr)
+		}
+	case "s":
+		m.sectionsSort = (m.sectionsSort + 1) % 4
+		m.sectionsCur, m.sectionsTop = 0, 0
+		m.recomputeSections()
+		m.setStatus("sort: "+m.sectionsSort.String(), false)
+	case "r":
+		m.sectionsSortDesc = !m.sectionsSortDesc
+		m.sectionsCur, m.sectionsTop = 0, 0
+		m.recomputeSections()
+		dir := "ascending"
+		if m.sectionsSortDesc {
+			dir = "descending"
+		}
+		m.setStatus("sort order: "+dir, false)
 	case "w":
 		m.toggleWrap()
-	case "a":
+	case "A":
 		if m.showSegments {
 			if seg, ok := m.currentSegment(); ok {
 				m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), seg.Addr), "address")
@@ -118,7 +293,7 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		if sec, ok := m.currentSection(); ok {
 			m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), sec.Addr), "address")
 		}
-	case "s":
+	case "S":
 		if m.showSegments {
 			if seg, ok := m.currentSegment(); ok {
 				m.copyToClipboard(seg.Name, "segment name")
@@ -130,6 +305,21 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// currentSectionAddr returns the virtual address of the selected row (section or
+// segment), for the h/m cross-view jumps.
+func (m *Model) currentSectionAddr() (uint64, bool) {
+	if m.showSegments {
+		if seg, ok := m.currentSegment(); ok {
+			return seg.Addr, true
+		}
+		return 0, false
+	}
+	if sec, ok := m.currentSection(); ok {
+		return sec.Addr, true
+	}
+	return 0, false
 }
 
 // currentSection returns the selected section through the active filter.
@@ -162,8 +352,23 @@ func (m *Model) renderSections() string {
 	}
 	filterRow := m.sectionsFilter.View()
 	if !m.sectionsFilter.Focused() {
-		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   %s (%d / %d)   t: toggle",
-			m.sectionsFilter.Value(), kind, len(m.sectionsFiltered), total))
+		dir := "↑"
+		if m.sectionsSortDesc {
+			dir = "↓"
+		}
+		extra := ""
+		if !m.showSegments {
+			tf, ff := "all", "all"
+			if m.sectionsTypeOn {
+				tf = m.sectionsType
+			}
+			if m.sectionsFlagsOn {
+				ff = m.sectionsFlags
+			}
+			extra = fmt.Sprintf("   ⌥t type:%s   ⌥f flags:%s", tf, ff)
+		}
+		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   %s (%d / %d)   t: toggle   s: sort:%s%s%s",
+			m.sectionsFilter.Value(), kind, len(m.sectionsFiltered), total, m.sectionsSort.String(), dir, extra))
 	}
 
 	addrW := m.file.AddrHexWidth()

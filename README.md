@@ -127,7 +127,7 @@ Output streams, so `| head` returns immediately even on large binaries.
 | `[` / `]` | page up / down in list views; previous / next section (Hex/Raw) or symbol (Disasm) |
 | `⇧[` / `⇧]` | previous / next non-zero byte (Hex/Raw) |
 | `d` / `h` / `m` | go to the address under the cursor in the Disasm / Hex / Raw view |
-| `s` / `r` | Sections & Symbols: cycle sort field · reverse it |
+| `s` / `r` | cycle sort field · reverse it (Sections, Symbols, Strings, Sources; `r` reverses Libs by name) |
 | `⌥t` / `⌥s` / `⌥b` | Symbols: filter by type / scope / bind · `⌥s` filters Strings by section · `⌥a` filters Libs/Sources by availability (needs Option-as-Alt in the terminal) |
 | `t` | Symbols/Sources/Libs: toggle a collapsible namespace/path **tree** ↔ flat list; Sections: sections ↔ segments; Hex/Raw: ascii ↔ pointer decode |
 | `←`/`→` · `Enter` · `+`/`−` | tree: collapse / expand group (`←` on a leaf folds its branch) · expand/collapse all below · all (keys rebindable) |

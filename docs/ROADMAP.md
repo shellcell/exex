@@ -286,8 +286,10 @@ view all the strings in single page one after other with middle dot separator
 > `⌥`/`option` chords are decoded from the key's modifier bits (not its rendered
 > string), so they fire however the terminal delivers Option — as Alt, as Alt with
 > a composed character (macOS Kitty protocol, e.g. ⌥t → "†"), or as Super/Cmd;
-> shift+letter chords arrive as the uppercase letter. Still **not** implemented
-> from the spec below: Strings sort-by.
+> shift+letter chords arrive as the uppercase letter. All five list views sort
+> with `s`/`r` (Sections index/name/addr/size; Symbols name/addr/size; Strings
+> offset/address/string; Sources project/name; Libs name) — the full spec below is
+> implemented.
 
 == GLOBAL ==
 

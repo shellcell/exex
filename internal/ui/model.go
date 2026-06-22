@@ -289,6 +289,7 @@ type libsState struct {
 	libsAvail     availFilter     // availability filter: all / on-disk / in cache
 	libsAvailKind map[string]availKind
 	libsFilter    textinput.Model // name search (the `/` filter)
+	libsSortDesc  bool            // reverse the (name) sort
 }
 
 // stringsState stores list, filter and cache state for printable strings.
@@ -298,9 +299,11 @@ type stringsState struct {
 	stringsFiltered   []int    // indices into stringsList
 	stringsCur        int      // index into stringsFiltered
 	stringsTop        int
-	stringsSections   []string // distinct owning-section names, for the section filter
-	stringsSecOn      bool     // section filter active
-	stringsSec        string   // the section name the filter restricts to
+	stringsSections   []string   // distinct owning-section names, for the section filter
+	stringsSecOn      bool       // section filter active
+	stringsSec        string     // the section name the filter restricts to
+	stringsSort       stringSort // sort field for the (filtered) list
+	stringsSortDesc   bool       // reverse the active sort
 	stringRowCache    map[rowCacheKey]string
 	stringHeightCache map[rowCacheKey]int
 }
@@ -314,6 +317,8 @@ type sourcesState struct {
 	sourcesTop         int
 	sourcesTree        bool            // show the file list as a directory tree
 	sourcesAvail       availFilter     // availability filter: all / present / missing
+	sourcesSort        sourceSort      // flat-list order: project-first or name
+	sourcesSortDesc    bool            // reverse the active sort
 	sourcesCollapsed   map[string]bool // collapsed directory paths
 	sourcesRows        []treeRow       // flattened visible rows (dirs + files)
 	sourcesTreeInit    bool

@@ -162,6 +162,7 @@ func (m *Model) renderHelpModal() string {
 		row("[ / ]", "prev / next mapped line"),
 		row("/  ^F", "find in file · grep all"),
 		row("⌥a", "filter: all / present / missing"),
+		row("s / r", "sort (project/name) · reverse"),
 		row("t", "toggle directory tree / flat list"),
 		row("⇧s  ·  g", "copy path · goto symbol"),
 		blank,
@@ -169,10 +170,12 @@ func (m *Model) renderHelpModal() string {
 		row("Enter", "imported symbols"),
 		row("o  ·  ⇧s", "open as primary · copy"),
 		row("/  ·  ⌥a", "search · filter all/on-disk/in dyld cache"),
+		row("r", "reverse the (name) sort"),
 		blank,
 		head("Strings"),
 		row("d / h / m", "go to addr in disasm / hex / raw"),
 		row("⌥s", "filter by section"),
+		row("s / r", "sort (offset/address/string) · reverse"),
 		row("⇧a / ⇧s", "copy address / string"),
 	}
 
@@ -472,14 +475,14 @@ func (m *Model) viewHints() []footerHint {
 	case modeRaw:
 		return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t", "ptrs"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 	case modeStrings:
-		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"/", "filter"}, {"⌥s", "section"}, {"⇧a/⇧s", "copy"}}
+		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"/", "filter"}, {"⌥s", "section"}, {"s/r", "sort/rev"}, {"⇧a/⇧s", "copy"}}
 	case modeSources:
 		if m.sourcesTree {
 			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {"/", "filter"}, {"⌥a", "present"}, {"t", "flat"}}
 		}
-		return []footerHint{{"↵", "open"}, {"/", "filter"}, {"⌥a", "present"}, {"^f", "grep all"}, {"t", "tree"}, {"⇧s", "copy"}}
+		return []footerHint{{"↵", "open"}, {"/", "filter"}, {"⌥a", "present"}, {"s/r", "sort/rev"}, {"^f", "grep"}, {"t", "tree"}, {"⇧s", "copy"}}
 	case modeLibs:
-		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"/", "filter"}, {"⌥a", "avail"}, {"⇧s", "copy"}}
+		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"/", "filter"}, {"⌥a", "avail"}, {"r", "rev"}, {"⇧s", "copy"}}
 	}
 	return nil
 }

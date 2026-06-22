@@ -44,6 +44,42 @@ func (t *Theme) columnStyle(cols []int, col int) (lipgloss.Style, bool) {
 	return lipgloss.Style{}, false
 }
 
+// sourceSort is the flat-list order of the source files.
+type sourceSort uint8
+
+const (
+	srcSortProject sourceSort = iota // project files first (the natural default)
+	srcSortName                      // pure alphabetical by path
+)
+
+// String returns the sort's filter-status label.
+func (s sourceSort) String() string {
+	if s == srcSortName {
+		return "name"
+	}
+	return "project"
+}
+
+// applySourceSort orders sourcesFiltered for the flat list. The project-first
+// order is the natural order of sourcesFiles, so it only reverses for descending;
+// name order sorts by path. (Tree mode always groups alphabetically.)
+func (m *Model) applySourceSort() {
+	desc := m.sourcesSortDesc
+	if m.sourcesSort == srcSortName {
+		sort.SliceStable(m.sourcesFiltered, func(a, b int) bool {
+			fa, fb := m.sourcesFiles[m.sourcesFiltered[a]], m.sourcesFiles[m.sourcesFiltered[b]]
+			if desc {
+				return fa > fb
+			}
+			return fa < fb
+		})
+		return
+	}
+	if desc {
+		reverseInts(m.sourcesFiltered)
+	}
+}
+
 // ensureSources loads the source-file list once.
 func (m *Model) ensureSources() {
 	if m.sourcesFiles == nil {
@@ -78,6 +114,7 @@ func (m *Model) recomputeSourceFiles() {
 		}
 		m.sourcesFiltered = append(m.sourcesFiltered, i)
 	}
+	m.applySourceSort()
 	m.buildSourceRows()
 	if m.sourcesCur >= len(m.sourcesRows) {
 		m.sourcesCur = max(0, len(m.sourcesRows)-1)
@@ -295,6 +332,20 @@ func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
 		m.recomputeSourceFiles()
 		m.setStatus("sources: "+availLabel(m.sourcesAvail), false)
 		return m, nil
+	case "s":
+		m.sourcesSort = (m.sourcesSort + 1) % 2
+		m.sourcesCur, m.sourcesTop = 0, 0
+		m.recomputeSourceFiles()
+		m.setStatus("sort: "+m.sourcesSort.String(), false)
+	case "r":
+		m.sourcesSortDesc = !m.sourcesSortDesc
+		m.sourcesCur, m.sourcesTop = 0, 0
+		m.recomputeSourceFiles()
+		dir := "ascending"
+		if m.sourcesSortDesc {
+			dir = "descending"
+		}
+		m.setStatus("sort order: "+dir, false)
 	case "t":
 		m.sourcesTree = !m.sourcesTree
 		m.sourcesCur, m.sourcesTop = 0, 0
@@ -582,6 +633,13 @@ func (m *Model) renderSourceList(bodyH int) string {
 		}
 		if m.sourcesAvail != availAll {
 			facet += "  " + m.theme.helpKeyStyle.Render("⌥a") + " " + availLabel(m.sourcesAvail)
+		}
+		if !m.sourcesTree {
+			dir := "↑"
+			if m.sourcesSortDesc {
+				dir = "↓"
+			}
+			facet += "  " + m.theme.helpKeyStyle.Render("s") + " sort:" + m.sourcesSort.String() + dir
 		}
 		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)",
 			m.sourcesFilter.Value(), len(m.sourcesFiltered), len(m.sourcesFiles))) + m.theme.footerStyle.Render(facet)

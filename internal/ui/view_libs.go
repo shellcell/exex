@@ -41,7 +41,12 @@ func (m *Model) sortedLibIdxs() ([]int, []string) {
 		}
 		idxs = append(idxs, i)
 	}
-	sort.Slice(idxs, func(a, b int) bool { return libs[idxs[a]] < libs[idxs[b]] })
+	sort.Slice(idxs, func(a, b int) bool {
+		if m.libsSortDesc {
+			return libs[idxs[a]] > libs[idxs[b]]
+		}
+		return libs[idxs[a]] < libs[idxs[b]]
+	})
 	return idxs, libs
 }
 
@@ -142,6 +147,18 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 		if dirty {
 			m.setStatus("filters cleared", false)
 		}
+	case "s":
+		// Libraries sort by name only; report the (single) field for consistency.
+		m.setStatus("sort: name", false)
+	case "r":
+		m.libsSortDesc = !m.libsSortDesc
+		m.libsCur, m.libsTop = 0, 0
+		m.buildLibRows()
+		dir := "ascending"
+		if m.libsSortDesc {
+			dir = "descending"
+		}
+		m.setStatus("sort order: "+dir, false)
 	case "w":
 		m.toggleWrap()
 	case "alt+a":
@@ -338,6 +355,9 @@ func (m *Model) renderLibsHeader() string {
 	hdr := " Needed libraries"
 	if m.libsAvail != availAll {
 		hdr += "  " + m.theme.helpKeyStyle.Render("⌥a") + m.theme.footerStyle.Render(" "+availLabel(m.libsAvail))
+	}
+	if m.libsSortDesc {
+		hdr += "  " + m.theme.helpKeyStyle.Render("r") + m.theme.footerStyle.Render(" name↓")
 	}
 	if m.libsTree {
 		hdr += "  " + m.theme.footerStyle.Render("(tree · ←/→ fold · ↵ all below · +/− all · t flat)")

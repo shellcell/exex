@@ -17,6 +17,53 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 )
 
+// stringSort is the display order of the (filtered) strings list.
+type stringSort uint8
+
+const (
+	strSortOffset stringSort = iota // file order (the natural extraction order)
+	strSortAddr
+	strSortText
+)
+
+// String returns the sort's filter-status label.
+func (s stringSort) String() string {
+	switch s {
+	case strSortAddr:
+		return "address"
+	case strSortText:
+		return "string"
+	}
+	return "offset"
+}
+
+// applyStringSort orders stringsFiltered by the active field. The natural order
+// is offset-ascending (strings are extracted in offset order), so that case only
+// needs reversing for descending.
+func (m *Model) applyStringSort() {
+	desc := m.stringsSortDesc
+	if m.stringsSort == strSortOffset {
+		if desc {
+			reverseInts(m.stringsFiltered)
+		}
+		return
+	}
+	sort.SliceStable(m.stringsFiltered, func(a, b int) bool {
+		sa, sb := m.stringsList[m.stringsFiltered[a]], m.stringsList[m.stringsFiltered[b]]
+		var less bool
+		switch m.stringsSort {
+		case strSortAddr:
+			less = sa.Addr < sb.Addr
+		case strSortText:
+			less = string(m.file.StringBytes(sa)) < string(m.file.StringBytes(sb))
+		}
+		if desc {
+			return !less
+		}
+		return less
+	})
+}
+
 // ensureStrings extracts the file's printable strings lazily and builds the
 // (initially unfiltered) view list.
 func (m *Model) ensureStrings() {
@@ -84,6 +131,7 @@ func (m *Model) recomputeStrings() {
 			m.stringsFiltered = append(m.stringsFiltered, i)
 		}
 	}
+	m.applyStringSort()
 	if m.stringsCur >= len(m.stringsFiltered) {
 		m.stringsCur = max(0, len(m.stringsFiltered)-1)
 	}
@@ -149,6 +197,20 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 		m.cycleStringSectionFilter()
 		m.stringsCur, m.stringsTop = 0, 0
 		m.recomputeStrings()
+	case "s":
+		m.stringsSort = (m.stringsSort + 1) % 3
+		m.stringsCur, m.stringsTop = 0, 0
+		m.recomputeStrings()
+		m.setStatus("sort: "+m.stringsSort.String(), false)
+	case "r":
+		m.stringsSortDesc = !m.stringsSortDesc
+		m.stringsCur, m.stringsTop = 0, 0
+		m.recomputeStrings()
+		dir := "ascending"
+		if m.stringsSortDesc {
+			dir = "descending"
+		}
+		m.setStatus("sort order: "+dir, false)
 	case "w":
 		m.toggleWrap()
 	case "d":
@@ -207,8 +269,13 @@ func (m *Model) renderStrings() string {
 		if m.stringsSecOn {
 			secLabel = m.stringsSec
 		}
+		dir := "↑"
+		if m.stringsSortDesc {
+			dir = "↓"
+		}
 		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)   ", m.stringsFilter.Value(), len(m.stringsFiltered), len(m.stringsList))) +
-			m.theme.helpKeyStyle.Render("⌥s") + m.theme.footerStyle.Render(" section:"+secLabel)
+			m.theme.helpKeyStyle.Render("⌥s") + m.theme.footerStyle.Render(" section:"+secLabel) +
+			m.theme.footerStyle.Render("   ") + m.theme.helpKeyStyle.Render("s") + m.theme.footerStyle.Render(" sort:"+m.stringsSort.String()+dir)
 	}
 
 	addrW := m.file.AddrHexWidth()

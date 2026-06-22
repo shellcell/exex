@@ -753,6 +753,97 @@ func TestKeysCopyLine(t *testing.T) {
 	}
 }
 
+// --- Sorting in Strings / Libs / Sources -----------------------------------
+
+func TestStringsSortKeys(t *testing.T) {
+	f := &binfile.File{Format: binfile.FormatELF}
+	m := newTestModel(t, f)
+	// Offset-ascending input (as the extractor produces), with addresses in a
+	// different order so the address sort is observably distinct.
+	m.stringsList = []binfile.StringEntry{
+		{Offset: 0x10, Addr: 0x3000, HasAddr: true, Len: 1, Section: ".rodata"},
+		{Offset: 0x20, Addr: 0x1000, HasAddr: true, Len: 1, Section: ".rodata"},
+		{Offset: 0x30, Addr: 0x2000, HasAddr: true, Len: 1, Section: ".rodata"},
+	}
+	m.setMode(modeStrings)
+	m.recomputeStrings()
+
+	offsets := func() []uint64 {
+		var out []uint64
+		for _, i := range m.stringsFiltered {
+			out = append(out, m.stringsList[i].Offset)
+		}
+		return out
+	}
+	// Default is offset-ascending.
+	if got := offsets(); got[0] != 0x10 || got[2] != 0x30 {
+		t.Fatalf("default (offset) order = %x", got)
+	}
+	// s → address: order becomes addr 0x1000,0x2000,0x3000 = offsets 0x20,0x30,0x10.
+	m.updateStrings("s")
+	if m.stringsSort != strSortAddr {
+		t.Fatalf("s did not advance sort, got %v", m.stringsSort)
+	}
+	if got := offsets(); got[0] != 0x20 || got[1] != 0x30 || got[2] != 0x10 {
+		t.Fatalf("address-sorted order = %x", got)
+	}
+	// r reverses the address sort.
+	m.updateStrings("r")
+	if got := offsets(); got[0] != 0x10 || got[2] != 0x20 {
+		t.Fatalf("reversed address order = %x", got)
+	}
+}
+
+func TestLibsSortReverse(t *testing.T) {
+	h := newKeyHarness(t, systemBinary(t))
+	h.goView(modeLibs, "8")
+	if h.m().file.Info == nil || len(h.m().file.Info.DynamicLibs) < 2 {
+		t.Skip("need >= 2 libraries")
+	}
+	first := func() string {
+		for _, r := range h.m().libsRows {
+			if r.node.leaf >= 0 {
+				return h.m().file.Info.DynamicLibs[r.node.leaf]
+			}
+		}
+		return ""
+	}
+	// Flat list so the leaf order reflects the sort directly.
+	if h.m().libsTree {
+		h.press("t")
+	}
+	asc := first()
+	h.press("r")
+	if !h.m().libsSortDesc {
+		t.Fatal("r did not set descending")
+	}
+	if first() == asc {
+		t.Fatal("r did not change the first library")
+	}
+}
+
+func TestSourcesSortKeys(t *testing.T) {
+	bin := buildDebugSample(t)
+	h := newKeyHarness(t, bin)
+	h.goView(modeSources, "9")
+	if !h.m().file.HasDWARF() || len(h.m().sourcesFiles) == 0 {
+		t.Skip("no DWARF sources")
+	}
+	if h.m().sourcesTree {
+		h.press("t")
+	}
+	s0 := h.m().sourcesSort
+	h.press("s")
+	if h.m().sourcesSort == s0 {
+		t.Fatal("s did not change the sources sort field")
+	}
+	d0 := h.m().sourcesSortDesc
+	h.press("r")
+	if h.m().sourcesSortDesc == d0 {
+		t.Fatal("r did not reverse the sources sort")
+	}
+}
+
 // --- Option/Alt delivery quirks (macOS) ------------------------------------
 
 // TestKeysOptionDelivery reproduces how terminals actually deliver Option+letter

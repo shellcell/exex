@@ -221,14 +221,37 @@ func (f *File) loadMachO() error {
 	}
 	f.Symbols = append(f.Symbols, machoImportSymbols(mf, f.raw, base, libs)...)
 
-	if d := f.machoDWARF(mf); d != nil {
-		f.dwarf = d // line table decoded lazily on first source lookup
-	}
-
 	f.entry = machoEntry(mf, textSeg, base)
-	f.loadMachOInfo(mf)
+	f.loadMachOInfo(mf) // reads mf.Symtab (Stripped), so before it is dropped below
+	f.dwarfAvail = f.machoHasDWARF(mf)
 	f.header = f.machoHeaderInfo(mf)
+
+	// Defer the DWARF decode (abbrev/section parse — a big slice of Open for debug
+	// binaries) to the first source/line lookup. mf is retained for that, but its
+	// parsed symbol table — the bulk of it — is dropped first, since we've copied
+	// what we need into f.Symbols.
+	mf.Symtab = nil
+	f.dwarfBuild = func() *dwarf.Data { return f.machoDWARF(mf) }
 	return nil
+}
+
+// machoHasDWARF reports whether DWARF is available without parsing it: an
+// embedded __DWARF segment, an explicit --debug path, or a companion .dSYM.
+func (f *File) machoHasDWARF(mf *macho.File) bool {
+	if mf.Segment("__DWARF") != nil || f.debugPath != "" {
+		return true
+	}
+	if _, err := os.Stat(f.Path + ".dSYM/Contents/Resources/DWARF/" + filepath.Base(f.Path)); err == nil {
+		return true
+	}
+	if entries, err := os.ReadDir(filepath.Dir(f.Path)); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".dSYM") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // parseMachO opens raw as a thin or fat Mach-O. It returns the chosen slice's
@@ -914,6 +937,6 @@ func (f *File) machoHeaderInfo(mf *macho.File) []string {
 		fmt.Sprintf("Entry:       %s", entry),
 		fmt.Sprintf("Sections:    %d", len(f.Sections)),
 		fmt.Sprintf("Symbols:     %d", len(f.Symbols)),
-		fmt.Sprintf("DWARF info:  %v", f.dwarf != nil),
+		fmt.Sprintf("DWARF info:  %v", f.dwarfAvail),
 	}
 }

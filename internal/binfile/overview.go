@@ -39,35 +39,56 @@ func (f *File) computeOverview() {
 	in.MappedLo, in.MappedHi, in.CodeSize = lo, hi, code
 
 	for _, s := range f.Symbols {
-		if strings.Contains(s.Name, "stack_chk_fail") || strings.Contains(s.Name, "security_cookie") {
+		if !in.Canary && (strings.Contains(s.Name, "stack_chk_fail") || strings.Contains(s.Name, "security_cookie")) {
 			in.Canary = true
 		}
-		if strings.HasSuffix(s.Name, "_chk") {
+		if !in.Fortify && strings.HasSuffix(s.Name, "_chk") {
 			in.Fortify = true
+		}
+		if in.Canary && in.Fortify {
+			break // both found — no need to scan the rest of the symbols
 		}
 	}
 
-	if bi, err := buildinfo.ReadFile(f.Path); err == nil {
-		in.GoVersion = bi.GoVersion
-		in.GoModule = bi.Main.Path
-		if in.GoModule == "" {
-			in.GoModule = bi.Path
-		}
-		dirty := false
-		for _, s := range bi.Settings {
-			switch s.Key {
-			case "vcs.revision":
-				in.GoVCS = s.Value
-			case "vcs.modified":
-				dirty = s.Value == "true"
+	// buildinfo.ReadFile re-opens and re-parses the whole file (~100 ms+, more for a
+	// fat Mach-O). ELF/Mach-O Go binaries carry a ".go.buildinfo"/"__go_buildinfo"
+	// section, so skip the call entirely for non-Go ones; PE Go binaries have no
+	// such section (build info is scanned from .data), so always try there.
+	if f.Format == FormatPE || f.hasGoBuildInfo() {
+		if bi, err := buildinfo.ReadFile(f.Path); err == nil {
+			in.GoVersion = bi.GoVersion
+			in.GoModule = bi.Main.Path
+			if in.GoModule == "" {
+				in.GoModule = bi.Path
 			}
-		}
-		if in.GoVCS != "" && dirty {
-			in.GoVCS += " (dirty)"
+			dirty := false
+			for _, s := range bi.Settings {
+				switch s.Key {
+				case "vcs.revision":
+					in.GoVCS = s.Value
+				case "vcs.modified":
+					dirty = s.Value == "true"
+				}
+			}
+			if in.GoVCS != "" && dirty {
+				in.GoVCS += " (dirty)"
+			}
 		}
 	}
 
 	in.SourceLang = f.sourceLanguage()
+}
+
+// hasGoBuildInfo reports whether the binary carries a Go build-info section, so
+// computeOverview only pays buildinfo.ReadFile for actual Go binaries.
+func (f *File) hasGoBuildInfo() bool {
+	for i := range f.Sections {
+		switch f.Sections[i].Name {
+		case "__go_buildinfo", ".go.buildinfo":
+			return true
+		}
+	}
+	return false
 }
 
 // sourceLanguage reports the implementation language from DWARF when present,

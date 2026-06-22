@@ -5,10 +5,12 @@
 package binfile
 
 import (
+	"cmp"
 	"debug/dwarf"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -177,15 +179,18 @@ type File struct {
 	lowerName      []string // lazily-built lowercased Symbols[i].Name (for filtering)
 	lowerDemangled []string // lazily-built lowercased Symbols[i].Demangled
 
-	dwarf     *dwarf.Data
-	lines     []lineEntry       // sorted by Addr (loaded lazily from dwarf)
-	linesOnce sync.Once         // guards the lazy line-table decode
-	indexOnce sync.Once         // builds line lookup indexes from lines
-	lineCols  map[lineKey][]int // distinct DWARF columns by source file:line
-	lineMap   map[string]map[int]bool
-	lineAddr  map[lineKey]uint64  // lowest mapped address per source file:line
-	fileLines map[string][]int    // sorted distinct mapped line numbers per file
-	sources   map[string][]string // resolved file -> lines
+	dwarf      *dwarf.Data
+	dwarfAvail bool               // DWARF is present (cheap check); HasDWARF without parsing
+	dwarfBuild func() *dwarf.Data // builds dwarf lazily on first line/source lookup
+	dwarfOnce  sync.Once          // guards the lazy DWARF decode
+	lines      []lineEntry        // sorted by Addr (loaded lazily from dwarf)
+	linesOnce  sync.Once          // guards the lazy line-table decode
+	indexOnce  sync.Once          // builds line lookup indexes from lines
+	lineCols   map[lineKey][]int  // distinct DWARF columns by source file:line
+	lineMap    map[string]map[int]bool
+	lineAddr   map[lineKey]uint64  // lowest mapped address per source file:line
+	fileLines  map[string][]int    // sorted distinct mapped line numbers per file
+	sources    map[string][]string // resolved file -> lines
 
 	vaImage   *Image        // all mapped sections, in VA order (lazy)
 	execImage *Image        // executable sections only, in VA order (lazy)
@@ -209,7 +214,9 @@ type lineKey struct {
 // table, so callers run it separately (ComputeDemangled/ApplyDemangled) off the
 // critical path; until then Display() falls back to the raw name.
 func (f *File) finalizeSymbols() {
-	sort.Slice(f.Symbols, func(i, j int) bool { return f.Symbols[i].Name < f.Symbols[j].Name })
+	// slices.SortFunc is generic — no per-swap reflection, unlike sort.Slice — a
+	// noticeable win sorting hundreds of thousands of symbols at startup.
+	slices.SortFunc(f.Symbols, func(a, b Symbol) int { return strings.Compare(a.Name, b.Name) })
 
 	addrIdx := make([]int, 0, len(f.Symbols))
 	for i, s := range f.Symbols {
@@ -218,13 +225,16 @@ func (f *File) finalizeSymbols() {
 		}
 	}
 	sortAddrIdx := func() {
-		sort.Slice(addrIdx, func(i, j int) bool {
-			si := f.Symbols[addrIdx[i]]
-			sj := f.Symbols[addrIdx[j]]
-			if si.Addr != sj.Addr {
-				return si.Addr < sj.Addr
+		slices.SortFunc(addrIdx, func(i, j int) int {
+			si, sj := f.Symbols[i], f.Symbols[j]
+			switch {
+			case si.Addr != sj.Addr:
+				return cmp.Compare(si.Addr, sj.Addr) // ascending by address
+			case si.Size != sj.Size:
+				return cmp.Compare(sj.Size, si.Size) // larger size first
+			default:
+				return 0
 			}
-			return si.Size > sj.Size
 		})
 	}
 	sortAddrIdx()
@@ -344,11 +354,23 @@ func (f *File) LowerNames() (names, demangled []string) {
 // large slice of the startup cost for binaries with rich debug info.
 func (f *File) lineEntries() []lineEntry {
 	f.linesOnce.Do(func() {
+		f.ensureDWARF()
 		if f.dwarf != nil {
 			f.lines = loadLines(f.dwarf)
 		}
 	})
 	return f.lines
+}
+
+// ensureDWARF builds the DWARF data on first use (the parse is deferred out of
+// Open — it's a large part of startup for debug binaries and only the source
+// pane / line mapping needs it). A no-op for formats that parsed DWARF eagerly.
+func (f *File) ensureDWARF() {
+	f.dwarfOnce.Do(func() {
+		if f.dwarf == nil && f.dwarfBuild != nil {
+			f.dwarf = f.dwarfBuild()
+		}
+	})
 }
 
 // ensureLineIndexes builds source-line lookup maps from the lazy DWARF line table.
@@ -653,7 +675,7 @@ func (f *File) SourceLines(name string) []string {
 }
 
 // HasDWARF reports whether DWARF info was loaded.
-func (f *File) HasDWARF() bool { return f.dwarf != nil }
+func (f *File) HasDWARF() bool { return f.dwarfAvail || f.dwarf != nil }
 
 // Entry returns the entry-point virtual address.
 func (f *File) Entry() uint64 { return f.entry }

@@ -60,33 +60,23 @@ type treeRow struct {
 // trailing separator), or -1 when s has no separator (so s is a leaf remainder).
 type segFunc func(s string) int
 
-// segScoped splits a scoped name into its first segment. ".", "::" and " "
-// (space) are weighed equally — the earliest one at bracket depth zero wins — so
-// a name folds by whichever scope/word boundary comes first, and a family sharing
-// a descriptive prefix ("lazy protocol witness table accessor for type …") stays
-// unified instead of fragmenting by whichever member happens to reach a dot. "_"
-// is normally a lower-priority fallback used only when none of the above appear,
-// so flat C/Zig symbols (irq_stub_100, __anon_9433) still group — except when the
-// first scope separator sits past a bracket group (the "." after
-// "@typeInfo(input.Link.Action)"), where the divergence is bracket-ward: there we
-// fold by a "_"/word boundary in the shared prefix before the bracket, so a family
-// like "__zig_tag_name_@typeInfo(…)" groups under "__zig_tag_name_" instead of
-// staying flat. Separators inside template arguments <…>, parameter lists (…) or
-// [...] never split. Single-child chains are path-compressed afterward, so e.g.
+// segScoped splits a scoped name into its first segment by scope/word boundary:
+// ".", "::" and " " (space), weighed equally — the earliest one at bracket depth
+// zero wins. A name thus folds by whichever scope/word boundary comes first, and a
+// family sharing a descriptive prefix ("lazy protocol witness table accessor for
+// type …") stays unified (folded by the first space) instead of fragmenting by
+// whichever member happens to reach a dot. Separators inside template arguments
+// <…>, parameter lists (…) or [...] never split. Returns -1 when there is no
+// boundary. "_" is handled separately, as a second-pass fallback (see segUnder and
+// buildScopedLevel). Single-child chains are path-compressed afterward, so e.g.
 // "void " → "std::" reads as "void std::".
 func segScoped(s string) int {
 	depth := 0
-	content := false         // seen a non-separator char at depth 0 yet?
-	priEnd, priPos := -1, -1 // first "."/"::"/" " at depth 0, after content
-	undEnd, undPos := -1, -1 // first "_" at depth 0, after content
-	bracket := -1            // first "("/"<"/"[" at depth 0, after content
+	content := false // seen a non-separator char at depth 0 yet?
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; c {
 		case '<', '(', '[':
 			content = true
-			if depth == 0 && bracket < 0 {
-				bracket = i
-			}
 			depth++
 		case '>', ')', ']':
 			content = true
@@ -95,17 +85,13 @@ func segScoped(s string) int {
 			}
 		case '.', ' ':
 			// Don't split inside a leading run of separators (no node labelled just
-			// "_"/"__"/spaces); require a real character first.
-			if depth == 0 && content && priEnd < 0 {
-				priEnd, priPos = i+1, i
+			// spaces); require a real character first.
+			if depth == 0 && content {
+				return i + 1
 			}
 		case ':':
-			if depth == 0 && content && priEnd < 0 && i+1 < len(s) && s[i+1] == ':' {
-				priEnd, priPos = i+2, i
-			}
-		case '_':
-			if depth == 0 && content && undEnd < 0 {
-				undEnd, undPos = i+1, i
+			if depth == 0 && content && i+1 < len(s) && s[i+1] == ':' {
+				return i + 2
 			}
 		default:
 			if depth == 0 {
@@ -113,24 +99,39 @@ func segScoped(s string) int {
 			}
 		}
 	}
-	// A scope separator before any bracket wins — the normal case ("a.b", "std::x",
-	// "closure #1 () in …"); "dashed_plotter.Plotter" folds by "." not the earlier
-	// "_".
-	if priEnd >= 0 && (bracket < 0 || priPos < bracket) {
-		return priEnd
+	return -1
+}
+
+// segUnder splits on "_" the way segScoped splits on scope separators: earliest
+// underscore at bracket depth zero, after a real character (so a leading "__" run
+// never forms an underscore-only node). It is the second-pass fallback used to fold
+// items that segScoped left as singletons, letting flat C/Zig families group —
+// "irq_stub_100"/"irq_stub_101" by "irq_", and "__zig_is_named_enum_value_X.Y"
+// (each unique by scope) by their shared "__zig_is_named_enum_value_" prefix.
+func segUnder(s string) int {
+	depth := 0
+	content := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '<', '(', '[':
+			content = true
+			depth++
+		case '>', ')', ']':
+			content = true
+			if depth > 0 {
+				depth--
+			}
+		case '_':
+			if depth == 0 && content {
+				return i + 1
+			}
+		default:
+			if depth == 0 {
+				content = true
+			}
+		}
 	}
-	// The first scope separator sits past a bracket group, so the divergence is
-	// bracket-ward: fold by a "_"/word boundary in the shared prefix before that
-	// bracket ("__zig_tag_name_@typeInfo(…)" → "__zig_tag_name_").
-	if undEnd >= 0 && (bracket < 0 || undPos < bracket) {
-		return undEnd
-	}
-	// Otherwise fall back to the post-bracket scope separator (C++ "vector<int>::")
-	// or, last, any underscore.
-	if priEnd >= 0 {
-		return priEnd
-	}
-	return undEnd
+	return -1
 }
 
 // segPath splits on "/" (filesystem paths and library install paths).
@@ -149,9 +150,92 @@ func buildTree(idxs []int, label func(int) string, seg segFunc) []*treeNode {
 	return buildTreeLevel(idxs, label, seg, 0, "")
 }
 
-// buildScopedTree groups symbols by scope/word boundaries (see segScoped).
+// buildScopedTree groups symbols into a two-pass name tree: first by scope/word
+// boundaries (segScoped), then folding whatever that leaves as singletons by a
+// shared "_" prefix (segUnder). idxs must already be sorted by label.
 func buildScopedTree(idxs []int, label func(int) string) []*treeNode {
-	return buildTree(idxs, label, segScoped)
+	return buildScopedLevel(idxs, label, 0, "")
+}
+
+// buildScopedLevel builds one level of the scoped tree. Pass 1 groups runs of
+// items that share a scope/word segment; items whose segment is unique fall
+// through to pass 2, which folds them by a shared "_" prefix. Anything still
+// unique becomes a leaf shown by its remaining path. Groups (from either pass)
+// sort before leaves, each in label order.
+func buildScopedLevel(idxs []int, label func(int) string, prefixLen int, prefix string) []*treeNode {
+	var nodes []*treeNode
+
+	// Pass 1: fold by scope/word boundary; collect the leftovers (unique segments).
+	var rest []int
+	for i := 0; i < len(idxs); {
+		rem := label(idxs[i])[prefixLen:]
+		sl := segScoped(rem)
+		if sl < 0 {
+			rest = append(rest, idxs[i])
+			i++
+			continue
+		}
+		seg := rem[:sl]
+		j := i + 1
+		for j < len(idxs) && sharesSeg(label(idxs[j]), prefixLen, sl, seg, segScoped) {
+			j++
+		}
+		if j-i == 1 {
+			rest = append(rest, idxs[i])
+			i++
+			continue
+		}
+		nodes = append(nodes, scopedGroup(idxs[i:j], label, seg, prefixLen, prefix))
+		i = j
+	}
+
+	// Pass 2: among the leftovers, fold shared "_" prefixes; the rest are leaves.
+	for i := 0; i < len(rest); {
+		rem := label(rest[i])[prefixLen:]
+		sl := segUnder(rem)
+		if sl >= 0 {
+			seg := rem[:sl]
+			j := i + 1
+			for j < len(rest) && sharesSeg(label(rest[j]), prefixLen, sl, seg, segUnder) {
+				j++
+			}
+			if j-i > 1 {
+				nodes = append(nodes, scopedGroup(rest[i:j], label, seg, prefixLen, prefix))
+				i = j
+				continue
+			}
+		}
+		nodes = append(nodes, &treeNode{label: rem, path: prefix + rem, leaf: rest[i], count: 1})
+		i++
+	}
+
+	// Pass 1 and pass 2 produce two separately-ordered streams; restore a single
+	// sorted order with collapsible groups ahead of loose leaves.
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if a, b := leafRank(nodes[i]), leafRank(nodes[j]); a != b {
+			return a < b
+		}
+		return nodes[i].label < nodes[j].label
+	})
+	return nodes
+}
+
+// sharesSeg reports whether full (at prefixLen) begins with seg and has seg as its
+// own first segment under fn — i.e. it belongs in the same group.
+func sharesSeg(full string, prefixLen, sl int, seg string, fn segFunc) bool {
+	return len(full) >= prefixLen+sl && full[prefixLen:prefixLen+sl] == seg && fn(full[prefixLen:]) == sl
+}
+
+// scopedGroup builds an internal node for idxs (which all share segment seg),
+// recursing for its children, compressing single-child chains and summing counts.
+func scopedGroup(idxs []int, label func(int) string, seg string, prefixLen int, prefix string) *treeNode {
+	node := &treeNode{label: seg, path: prefix + seg, leaf: -1}
+	node.children = buildScopedLevel(idxs, label, prefixLen+len(seg), node.path)
+	compressTree(node)
+	for _, c := range node.children {
+		node.count += c.count
+	}
+	return node
 }
 
 func buildTreeLevel(idxs []int, label func(int) string, seg segFunc, prefixLen int, prefix string) []*treeNode {

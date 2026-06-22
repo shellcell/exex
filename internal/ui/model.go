@@ -103,6 +103,7 @@ type symbolsState struct {
 	symbolsLib        string          // when set, show only imports bound to this library
 	symbolsTree       bool            // group names into a collapsible namespace tree (name sort)
 	symbolsCollapsed  map[string]bool // collapsed tree node paths (persist across rebuilds)
+	symbolsRoots      []*treeNode     // built tree; cached so collapse toggles only re-flatten
 	symbolsRows       []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
 	symbolsTreeInit   bool            // collapse-default applied once
 	symbolsByDisplay  []int           // all symbol indices sorted by Display(); built lazily

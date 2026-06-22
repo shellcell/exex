@@ -219,26 +219,26 @@ func (m *Model) ensureSymbolDisplayOrder() {
 	m.symbolsByDisplay = idx
 }
 
-// buildSymbolRows flattens symbolsFiltered into the visible row slice: a collapsed
-// namespace tree in tree mode (name sort), otherwise one leaf row per symbol.
+// buildSymbolRows rebuilds the visible row slice from symbolsFiltered: in tree mode
+// it (re)builds the namespace tree and flattens it; otherwise one leaf row per
+// symbol. The built tree is cached in symbolsRoots so a later collapse/expand only
+// re-flattens (flattenSymbolRows) instead of rebuilding from scratch — important on
+// large symbol tables (hundreds of thousands of names).
 func (m *Model) buildSymbolRows() {
 	if m.symbolsTree {
 		label := func(i int) string { return m.file.Symbols[i].Display() }
-		roots := buildScopedTree(m.symbolsFiltered, label)
+		m.symbolsRoots = buildScopedTree(m.symbolsFiltered, label)
 		if !m.symbolsTreeInit {
 			m.symbolsTreeInit = true
 			if m.treeCollapseDefault {
 				m.symbolsCollapsed = map[string]bool{}
-				eachInternal(roots, func(p string) { m.symbolsCollapsed[p] = true })
+				eachInternal(m.symbolsRoots, func(p string) { m.symbolsCollapsed[p] = true })
 			}
 		}
-		collapsed := m.symbolsCollapsed
-		if m.symbolsFilter.Value() != "" {
-			collapsed = nil // while filtering, keep every match visible
-		}
-		m.symbolsRows = flattenTree(roots, collapsed, 0, m.symbolsRows[:0])
+		m.flattenSymbolRows()
 		return
 	}
+	m.symbolsRoots = nil
 	nodes := make([]treeNode, len(m.symbolsFiltered))
 	rows := m.symbolsRows[:0]
 	for k, idx := range m.symbolsFiltered {
@@ -246,6 +246,16 @@ func (m *Model) buildSymbolRows() {
 		rows = append(rows, treeRow{node: &nodes[k], depth: 0})
 	}
 	m.symbolsRows = rows
+}
+
+// flattenSymbolRows re-projects the cached tree (symbolsRoots) into visible rows
+// using the current collapse state — the cheap path taken on every collapse/expand.
+func (m *Model) flattenSymbolRows() {
+	collapsed := m.symbolsCollapsed
+	if m.symbolsFilter.Value() != "" {
+		collapsed = nil // while filtering, keep every match visible
+	}
+	m.symbolsRows = flattenTree(m.symbolsRoots, collapsed, 0, m.symbolsRows[:0])
 }
 
 // symbolTreeActive reports whether the tree is currently shown. The tree is
@@ -267,9 +277,7 @@ func (m *Model) toggleSymbolNode() {
 		m.symbolsCollapsed = map[string]bool{}
 	}
 	m.symbolsCollapsed[n.path] = !m.symbolsCollapsed[n.path]
-	m.clearSymbolCaches()
-	m.buildSymbolRows()
-	m.clampSymbolCursor()
+	m.rebuildSymbolRows()
 }
 
 func (m *Model) isSymbolCollapsed(path string) bool {
@@ -285,12 +293,9 @@ func (m *Model) setAllSymbolsCollapsed(collapsed bool) {
 		m.symbolsCollapsed = nil
 	} else {
 		m.symbolsCollapsed = map[string]bool{}
-		roots := buildScopedTree(m.symbolsFiltered, func(i int) string { return m.file.Symbols[i].Display() })
-		eachInternal(roots, func(p string) { m.symbolsCollapsed[p] = true })
+		eachInternal(m.symbolsRoots, func(p string) { m.symbolsCollapsed[p] = true })
 	}
-	m.clearSymbolCaches()
-	m.buildSymbolRows()
-	m.clampSymbolCursor()
+	m.rebuildSymbolRows()
 }
 
 func (m *Model) clampSymbolCursor() {
@@ -429,9 +434,12 @@ func (m *Model) ensureSymbolsCollapsed() {
 	}
 }
 
+// rebuildSymbolRows re-projects the cached tree after a collapse-state change. It
+// does not rebuild the tree itself (use recomputeSymbols/buildSymbolRows for that),
+// so an arrow-key fold on a huge table is instant.
 func (m *Model) rebuildSymbolRows() {
 	m.clearSymbolCaches()
-	m.buildSymbolRows()
+	m.flattenSymbolRows()
 	m.clampSymbolCursor()
 }
 

@@ -378,19 +378,35 @@ func (m *Model) renderSections() string {
 		phys = m.segmentsHavePhys()
 	}
 	var hdr string
+	idxLabel := sortHeaderLabel("#", 3, secSortIndex, m.sectionsSort, m.sectionsSortDesc)
+	nameTitle := "Name"
+	if m.showSegments {
+		nameTitle = "Type"
+	}
+	nameW := 22
+	if m.showSegments {
+		nameW = 16
+	}
+	nameLabel := sortHeaderLabel(nameTitle, nameW, secSortName, m.sectionsSort, m.sectionsSortDesc)
+	addrLabel := sortHeaderLabel("Addr", addrCol, secSortAddr, m.sectionsSort, m.sectionsSortDesc)
+	sizeTitle := "Size"
+	if m.showSegments {
+		sizeTitle = "MemSize"
+	}
+	sizeLabel := sortHeaderLabel(sizeTitle, 12, secSortSize, m.sectionsSort, m.sectionsSortDesc)
 	switch {
 	case m.showSegments && phys:
 		hdr = fmt.Sprintf(" %3s  %-16s %-5s %-*s %-*s %-12s %-12s  %s",
-			"#", "Type", "Perms", addrCol, "Addr", addrCol, "PAddr", "MemSize", "FileSize", "Align")
+			idxLabel, nameLabel, "Perms", addrCol, addrLabel, addrCol, "PAddr", sizeLabel, "FileSize", "Align")
 	case m.showSegments:
 		hdr = fmt.Sprintf(" %3s  %-16s %-5s %-*s %-12s %-12s  %s",
-			"#", "Type", "Perms", addrCol, "Addr", "MemSize", "FileSize", "Align")
+			idxLabel, nameLabel, "Perms", addrCol, addrLabel, sizeLabel, "FileSize", "Align")
 	case phys:
 		hdr = fmt.Sprintf(" %3s  %-22s %-14s %-*s %-*s %-12s  %s",
-			"#", "Name", "Type", addrCol, "Addr", addrCol, "LMA", "Size", "Flags")
+			idxLabel, nameLabel, "Type", addrCol, addrLabel, addrCol, "LMA", sizeLabel, "Flags")
 	default:
 		hdr = fmt.Sprintf(" %3s  %-22s %-14s %-*s %-12s  %s",
-			"#", "Name", "Type", addrCol, "Addr", "Size", "Flags")
+			idxLabel, nameLabel, "Type", addrCol, addrLabel, sizeLabel, "Flags")
 	}
 	header := m.tableHeader(hdr)
 

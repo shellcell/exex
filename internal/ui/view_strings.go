@@ -279,7 +279,11 @@ func (m *Model) renderStrings() string {
 	}
 
 	addrW := m.file.AddrHexWidth()
-	hdr := fmt.Sprintf(" %-10s %-*s %-16s  %s", "Offset", 2+addrW, "Address", "Section", "String")
+	addrCol := 2 + addrW
+	offsetLabel := sortHeaderLabel("Offset", 10, strSortOffset, m.stringsSort, m.stringsSortDesc)
+	addrLabel := sortHeaderLabel("Address", addrCol, strSortAddr, m.stringsSort, m.stringsSortDesc)
+	stringLabel := trailingSortHeaderLabel("String", strSortText, m.stringsSort, m.stringsSortDesc)
+	hdr := fmt.Sprintf(" %-10s %-*s %-16s  %s", offsetLabel, 2+addrW, addrLabel, "Section", stringLabel)
 	header := m.tableHeader(hdr)
 
 	visible := bodyH - 2 // filter row + header

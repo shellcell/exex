@@ -874,7 +874,10 @@ func (m *Model) renderSymbols() string {
 		header = m.theme.footerStyle.Render(" tree · ←/→ fold · ↵ all below · +/− expand/collapse all · . args · t flat")
 	} else {
 		addrCol := 2 + addrW
-		header = m.tableHeader(fmt.Sprintf(" %-*s %9s %6s %7s  %s", addrCol, "Address", "Size", "Bind", "Type", "Name"))
+		addrLabel := sortHeaderLabel("Address", addrCol, sortByAddr, m.symbolsSort, m.symbolsSortDesc)
+		sizeLabel := sortHeaderLabel("Size", 9, sortBySize, m.symbolsSort, m.symbolsSortDesc)
+		nameLabel := trailingSortHeaderLabel("Name", sortByName, m.symbolsSort, m.symbolsSortDesc)
+		header = m.tableHeader(fmt.Sprintf(" %-*s %9s %6s %7s  %s", addrCol, addrLabel, sizeLabel, "Bind", "Type", nameLabel))
 	}
 
 	visible := bodyH - 2 // filter row + header

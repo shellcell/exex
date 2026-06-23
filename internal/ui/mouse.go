@@ -67,12 +67,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.lastClickAt = now
 
 		before := m.activeCursorState()
-		m.handleClick(ms.X, ms.Y)
+		suppressDouble := m.handleClick(ms.X, ms.Y)
 		if before != m.activeCursorState() {
 			m.viewportDetached = false
 			m.pinCurrentByteSectionStart()
 		}
-		if isDouble {
+		if isDouble && !suppressDouble {
 			m.handleDoubleClick()
 		}
 	}
@@ -372,16 +372,20 @@ func (m *Model) followCurrentDisasm() {
 
 // handleClick selects the item under the pointer. y == 0 is the tab row; the
 // body starts at y == 1, and the footer occupies the final row.
-func (m *Model) handleClick(x, y int) {
+func (m *Model) handleClick(x, y int) bool {
 	bodyRow := y - 1 // strip the tab row
 	if bodyRow < 0 || y >= m.height-1 {
-		return
+		return false
 	}
 	// The Symbols status line (first body row) carries clickable toggle buttons.
 	if m.mode == modeSymbols && bodyRow == 0 && !m.symbolsFilter.Focused() {
 		if m.clickSymbolFacet(x) {
-			return
+			return true
 		}
+	}
+	if m.isTableHeaderRow(bodyRow) {
+		m.handleSortableHeaderClick(x, bodyRow)
+		return true
 	}
 	// List-style views (sections/symbols/strings/sources/libs) all map a click the
 	// same way: find the rendered top, then the item at (bodyRow - headerRows).
@@ -399,7 +403,7 @@ func (m *Model) handleClick(x, y int) {
 				m.toggleLibNode()
 			}
 		}
-		return
+		return false
 	}
 	switch m.mode {
 	case modeHex:
@@ -426,6 +430,7 @@ func (m *Model) handleClick(x, y int) {
 			m.disasmCur = i
 		}
 	}
+	return false
 }
 
 func (m *Model) clickInSourcePane(x int) bool {

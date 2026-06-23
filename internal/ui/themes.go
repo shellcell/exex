@@ -211,7 +211,7 @@ func nord() config.Colors {
 		SourceMappedFG:               nord8,
 		SourceCodeLineFG:             nord6,
 		SourceUnmappedFG:             nord3,
-		ColumnPalette:                []string{nord11, nord13, nord14, nord8, nord15, nord7, nord12, nord9},
+		ColumnPalette:                []string{nord11, nord13, nord14, nord15, nord7, nord12, nord10, nord5},
 		TitleFG:                      nord6,
 		TitleBG:                      nord10,
 		TabFG:                        nord3,

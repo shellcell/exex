@@ -289,7 +289,7 @@ func (m *Model) renderLibs() string {
 	m.buildLibRows()
 	b := strings.Builder{}
 	b.WriteString(m.renderLibsHeader())
-	headerH := lipgloss.Height(b.String())
+	headerH := m.libsHeaderRows()
 	visible := bodyH - headerH
 	if visible < 1 {
 		visible = 1
@@ -304,7 +304,7 @@ func (m *Model) renderLibs() string {
 	for i := top; i < len(m.libsRows); i++ {
 		line := m.libRow(i, i == m.libsCur)
 		for _, row := range renderLineRowsIndented(line, m.width, m.wrap, 6) {
-			if lipgloss.Height(b.String()) >= bodyH {
+			if renderedLineCount(b.String()) >= bodyH {
 				break
 			}
 			b.WriteString(row)
@@ -352,26 +352,48 @@ func (m *Model) renderLibsHeader() string {
 		b.WriteString(m.theme.footerStyle.Render("/ " + m.libsFilter.Value()))
 		b.WriteString("\n")
 	}
-	hdr := " Needed libraries"
-	if m.libsAvail != availAll {
-		hdr += "  " + m.theme.helpKeyStyle.Render("⌥a") + m.theme.footerStyle.Render(" "+availLabel(m.libsAvail))
-	}
-	if m.libsSortDesc {
-		hdr += "  " + m.theme.helpKeyStyle.Render("r") + m.theme.footerStyle.Render(" name↓")
-	}
-	if m.libsTree {
-		hdr += "  " + m.theme.footerStyle.Render("(tree · ←/→ fold · ↵ all below · +/− all · t flat)")
-	}
+	suffix := m.libsHeaderSuffix()
+	hdr := " " + activeSortHeaderLabel("Needed libraries", m.libsTitleWidth(), m.libsSortDesc) + suffix
 	b.WriteString(m.tableHeader(hdr))
 	b.WriteString("\n")
 	return b.String()
+}
+
+func (m *Model) libsHeaderSuffix() string {
+	suffix := ""
+	if m.libsAvail != availAll {
+		suffix += "  " + m.theme.helpKeyStyle.Render("⌥a") + m.theme.footerStyle.Render(" "+availLabel(m.libsAvail))
+	}
+	if m.libsTree {
+		suffix += "  " + m.theme.footerStyle.Render("(tree · ←/→ fold · ↵ all below · +/− all · t flat)")
+	}
+	return suffix
+}
+
+func (m *Model) libsTitleWidth() int {
+	return lipgloss.Width("Needed libraries") + 3
 }
 
 func (m *Model) libsHeaderRows() int {
 	if m.file.Info == nil || len(m.file.Info.DynamicLibs) == 0 {
 		return 0
 	}
-	return lipgloss.Height(m.renderLibsHeader())
+	return renderedLineCount(m.renderLibsHeader())
+}
+
+func (m *Model) libsTitleRow() int {
+	rows := m.libsHeaderRows()
+	if rows == 0 {
+		return -1
+	}
+	return rows - 1
+}
+
+func renderedLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return lipgloss.Height(strings.TrimSuffix(s, "\n"))
 }
 
 func (m *Model) libRowHeight(i int) int {

@@ -16,7 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/theme"
 )
 
-const settingsFieldCount = 9
+const settingsFieldCount = 12
 
 // settingsViewNames is the cycle for the "default view" setting.
 var settingsViewNames = []string{
@@ -107,7 +107,24 @@ func (m *Model) cycleSetting(dir int) {
 		m.symbolsAbbrevExcept = nil
 		m.clearSymbolCaches()
 		m.clearSymbolNameCaches()
+	case 9:
+		m.cfg.Behavior.HideDisasmBytes = !m.cfg.Behavior.HideDisasmBytes
+		m.clearDisasmDisplayCaches()
+	case 10:
+		m.cfg.Behavior.HideAnnotations = !m.cfg.Behavior.HideAnnotations
+		m.clearDisasmDisplayCaches()
+	case 11:
+		m.cfg.Behavior.SpacedDisasmBytes = !m.cfg.Behavior.SpacedDisasmBytes
+		m.clearDisasmDisplayCaches()
 	}
+}
+
+// clearDisasmDisplayCaches drops the caches whose geometry/content depends on the
+// disasm byte-column and annotation settings, so a toggle shows immediately. The
+// hex view is rendered uncached, so it needs no clear.
+func (m *Model) clearDisasmDisplayCaches() {
+	m.disasmHeightCache = nil
+	m.sourceAsmRowCache = nil
 }
 
 // cycleIndex returns the index of cur in list stepped by dir (wrapping); a value
@@ -165,6 +182,10 @@ func (m *Model) renderSettingsModal() string {
 		}
 		return "off"
 	}
+	byteSpacing := "compact"
+	if m.cfg.Behavior.SpacedDisasmBytes {
+		byteSpacing = "spaced"
+	}
 	fields := [settingsFieldCount]struct{ label, val string }{
 		{"Theme", themeVal},
 		{"Background", bgVal},
@@ -175,6 +196,9 @@ func (m *Model) renderSettingsModal() string {
 		{"Tree: libs", onOff(m.cfg.Behavior.TreeLibs)},
 		{"Tree collapsed", onOff(m.cfg.Behavior.TreeCollapsed)},
 		{"Abbrev args", onOff(m.cfg.Behavior.AbbrevArgs)},
+		{"Disasm bytes", onOff(!m.cfg.Behavior.HideDisasmBytes)},
+		{"Annotations", onOff(!m.cfg.Behavior.HideAnnotations)},
+		{"Byte spacing", byteSpacing},
 	}
 
 	const rowW = 44

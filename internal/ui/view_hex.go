@@ -880,7 +880,7 @@ func (m *Model) hexWordDecode(data byteSource, span hexRowSpan, cur int) string 
 			if onCursor {
 				style = m.theme.linkAddrInterStyle
 			}
-			if name := m.targetAnnotation(v); name != "" {
+			if name := m.targetAnnotation(v); name != "" && !m.cfg.Behavior.HideAnnotations {
 				notes = append(notes, style.Render(name))
 			}
 		}
@@ -948,7 +948,7 @@ func (m *Model) renderHexRow(md mode, data byteSource, cur int, span hexRowSpan,
 	// The trailing symbol/section annotation is only useful in the ASCII view; in
 	// pointer mode the row already carries the word decode and its → targets, so
 	// the extra annotation just adds noise and width.
-	if md == modeHex && !m.hexWords {
+	if md == modeHex && !m.hexWords && !m.cfg.Behavior.HideAnnotations {
 		addr := addrAt(span.start)
 		endAddr := addr + uint64(span.end-span.start)
 		if syms := m.file.SymbolsInRange(addr, endAddr); len(syms) != 0 {

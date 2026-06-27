@@ -941,10 +941,14 @@ func (m *Model) sourceAsmRow(i, addrW, w int) string {
 	// instruction text keeps its normal class colours so the pane reads like
 	// real disassembly.
 	addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
-	line := fmt.Sprintf(" %s  %s  %s",
-		m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText),
-		bytesHex(inst.Bytes, m.instByteWidth()),
-		m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr))
+	addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
+	asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
+	var line string
+	if m.disasmByteColWidth() > 0 {
+		line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
+	} else {
+		line = fmt.Sprintf(" %s  %s", addr, asm)
+	}
 	row := fitANSIWidth(line, w)
 	if m.sourceAsmRowCache == nil {
 		m.sourceAsmRowCache = make(map[sourceAsmRowCacheKey]string)

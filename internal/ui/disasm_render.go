@@ -302,8 +302,35 @@ func (m *Model) instByteWidth() int {
 	return disasm.MaxInstLen(m.file.Arch())
 }
 
+// disasmByteColWidth is the printed width of the instruction-byte column, or 0
+// when it is hidden (behavior.hide_disasm_bytes). Compact is 2 hex chars per
+// byte; spaced inserts a space between bytes (3 per byte, less the trailing one).
+func (m *Model) disasmByteColWidth() int {
+	if m.cfg.Behavior.HideDisasmBytes {
+		return 0
+	}
+	n := m.instByteWidth()
+	if m.cfg.Behavior.SpacedDisasmBytes {
+		return n*3 - 1
+	}
+	return n * 2
+}
+
+// disasmBytes renders an instruction's bytes for the byte column, compact or
+// spaced per the setting, padded to disasmByteColWidth.
+func (m *Model) disasmBytes(b []byte) string {
+	if m.cfg.Behavior.SpacedDisasmBytes {
+		return bytesHexSpaced(b, m.instByteWidth())
+	}
+	return bytesHex(b, m.instByteWidth())
+}
+
 func (m *Model) disasmAsmColumn() int {
-	return 1 + 2 + m.file.AddrHexWidth() + 2 + (m.instByteWidth() * 2) + 2
+	col := 1 + 2 + m.file.AddrHexWidth() + 2 // lead space + "0x" + addr + gap
+	if bw := m.disasmByteColWidth(); bw > 0 {
+		col += bw + 2 // byte column + gap
+	}
+	return col
 }
 
 func (m *Model) disasmAnnotationColumn(w int) int {
@@ -343,12 +370,20 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	asmCol := m.disasmAsmColumn()
 	annCol := m.disasmAnnotationColumn(w)
 	asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
-	note := m.instAnnotation(inst.Text, inst.Class)
+	note := ""
+	if !m.cfg.Behavior.HideAnnotations {
+		note = m.instAnnotation(inst.Text, inst.Class)
+	}
 
 	asmFit := fitANSIWidth(asm, max(1, w-asmCol))
 	asmEnd := asmCol + lipgloss.Width(asmFit)
 
-	asmRow := fmt.Sprintf(" %s  %s  ", addrCol, bytesHex(inst.Bytes, m.instByteWidth())) + asmFit
+	var asmRow string
+	if m.disasmByteColWidth() > 0 {
+		asmRow = fmt.Sprintf(" %s  %s  ", addrCol, m.disasmBytes(inst.Bytes)) + asmFit
+	} else {
+		asmRow = fmt.Sprintf(" %s  ", addrCol) + asmFit
+	}
 	// Highlight only the assembly (prefix + code) of the selected line; the gap,
 	// the annotation, and any continuation rows stay uncoloured.
 	if selected {

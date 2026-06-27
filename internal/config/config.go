@@ -64,6 +64,20 @@ type Behavior struct {
 	// (template arguments and parameter lists hidden). `d` toggles all and `.`
 	// toggles the row under the cursor for the session.
 	AbbrevArgs bool `yaml:"abbrev_args"`
+	// The three disasm/hex display toggles below are stored in the negative sense
+	// ("hide"/"spaced") so the zero value reproduces the historical default — a
+	// bool can't tell "absent" from "false", and Save writes every field
+	// explicitly. The settings modal presents them in the positive sense.
+	//
+	// HideDisasmBytes drops the raw instruction-byte column in the disasm view
+	// (like objdump --no-show-raw-insn), reclaiming width for the code/source.
+	HideDisasmBytes bool `yaml:"hide_disasm_bytes"`
+	// HideAnnotations drops the symbol/target annotations in the disasm and hex
+	// views.
+	HideAnnotations bool `yaml:"hide_annotations"`
+	// SpacedDisasmBytes separates instruction bytes with spaces ("01 00 00 14")
+	// instead of the compact form ("01000014"), matching the `-o disasm` dump.
+	SpacedDisasmBytes bool `yaml:"spaced_disasm_bytes"`
 }
 
 // Colors lists every visual element the user can re-skin. Empty strings mean
@@ -421,6 +435,9 @@ func Save(theme string, beh Behavior) (string, error) {
 	yamlBool("tree_libs", beh.TreeLibs)
 	yamlBool("tree_collapsed", beh.TreeCollapsed)
 	yamlBool("abbrev_args", beh.AbbrevArgs)
+	yamlBool("hide_disasm_bytes", beh.HideDisasmBytes)
+	yamlBool("hide_annotations", beh.HideAnnotations)
+	yamlBool("spaced_disasm_bytes", beh.SpacedDisasmBytes)
 
 	out, err := yaml.Marshal(&doc)
 	if err != nil {

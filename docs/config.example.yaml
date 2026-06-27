@@ -208,6 +208,16 @@ behavior:
   # the all-rows toggle also abbreviates symbol names in the disasm/hex/pointer
   # annotations. Toggle/save live from the settings popup (,).
   abbrev_args: false
+  # Disasm/hex display toggles (all default off; flip them live from the settings
+  # popup with ',').
+  # Hide the raw instruction-byte column in the disasm view (like objdump
+  # --no-show-raw-insn), reclaiming width for the code and source pane.
+  hide_disasm_bytes: false
+  # Hide the symbol/target annotations in the disasm and hex views.
+  hide_annotations: false
+  # Separate instruction bytes with spaces ("01 00 00 14") instead of the compact
+  # form ("01000014"), matching the `-o disasm` dump.
+  spaced_disasm_bytes: false
   # Where the disasm view lands by default (and redirects to when asked to show
   # a non-executable address): lowest, text, main, start, or entry. Defaults to
   # lowest (the lowest executable address). Unresolvable choices fall back.

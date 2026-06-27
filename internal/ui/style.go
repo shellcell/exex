@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/config"
@@ -16,6 +18,11 @@ type Theme struct {
 	tableHeaderStyle lipgloss.Style
 	tableRowStyle    lipgloss.Style
 	tableSelStyle    lipgloss.Style
+	// disasmSelSeq is the raw SGR prefix (bold + tableSelStyle's background) that the
+	// disasm view re-applies after every reset to draw its selected-line bar, so the
+	// bar matches the selection colour the table views use while keeping each token's
+	// own foreground colour. Derived from tableSelStyle whenever colours change.
+	disasmSelSeq string
 
 	addrStyle       lipgloss.Style
 	mnemonicStyle   lipgloss.Style
@@ -184,6 +191,19 @@ func (t *Theme) ApplyColors(c config.Colors) {
 	}
 	if len(c.PathPalette) > 0 {
 		t.pathPalette = stylePalette(c.PathPalette...)
+	}
+	t.deriveDisasmSel()
+}
+
+// deriveDisasmSel recomputes disasmSelSeq from the current tableSelStyle so the
+// disasm selection bar tracks the theme's selection background. It renders a NUL
+// sentinel with bold + that background and keeps the opening escape sequence.
+func (t *Theme) deriveDisasmSel() {
+	r := lipgloss.NewStyle().Bold(true).Background(t.tableSelStyle.GetBackground()).Render("\x00")
+	if before, _, found := strings.Cut(r, "\x00"); found {
+		t.disasmSelSeq = before
+	} else {
+		t.disasmSelSeq = r
 	}
 }
 

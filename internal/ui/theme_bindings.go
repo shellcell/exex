@@ -134,6 +134,7 @@ func (t *Theme) applyDefaults() {
 	for _, b := range colorBindings {
 		b.apply(t, b.def)
 	}
+	t.deriveDisasmSel()
 }
 
 // applyColorString sets a role's colour on its target style (fg or bg).

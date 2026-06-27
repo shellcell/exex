@@ -352,7 +352,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	// Highlight only the assembly (prefix + code) of the selected line; the gap,
 	// the annotation, and any continuation rows stay uncoloured.
 	if selected {
-		asmRow = selectedDisasmSegment(asmRow)
+		asmRow = m.selectedDisasmSegment(asmRow)
 	}
 
 	if note == "" {
@@ -412,8 +412,11 @@ func splitPlainWidth(s string, w int) (string, string) {
 	return s, ""
 }
 
-func selectedDisasmSegment(s string) string {
-	const sel = "\x1b[1;48;5;63m"
+func (m *Model) selectedDisasmSegment(s string) string {
+	sel := m.theme.disasmSelSeq
+	if sel == "" {
+		sel = "\x1b[1;48;5;63m" // fallback if the theme didn't derive a sequence
+	}
 	return sel + strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+sel) + "\x1b[0m"
 }
 

@@ -43,6 +43,7 @@ func settingsThemeList() []string {
 func (m *Model) openSettings() {
 	m.settingsActive = true
 	m.settingsCur = 0
+	m.settingsTop = 0
 }
 
 func (m *Model) closeSettings() { m.settingsActive = false }
@@ -202,10 +203,19 @@ func (m *Model) renderSettingsModal() string {
 	}
 
 	const rowW = 44
+	// Window the field list to the terminal height (title/hint/border cost ~8
+	// rows) so the popup never overruns a short window; the selection stays
+	// visible as it scrolls.
+	visible := clamp(m.height-8, 3, settingsFieldCount)
+	top := visualTop(m.settingsCur, m.settingsTop, settingsFieldCount, visible, func(int) int { return 1 })
+	m.settingsTop = top
+	end := min(top+visible, settingsFieldCount)
+
 	var b strings.Builder
 	b.WriteString(m.theme.modalTitle("Settings"))
 	b.WriteString("\n\n")
-	for i, f := range fields {
+	for i := top; i < end; i++ {
+		f := fields[i]
 		row := fmt.Sprintf(" %-13s ‹ %s ›", f.label+":", f.val)
 		if i == m.settingsCur {
 			row = m.theme.tableSelStyle.Render(padRight(row, rowW))
@@ -216,6 +226,10 @@ func (m *Model) renderSettingsModal() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(m.theme.modalHint("↑/↓ field · ←/→ change · Enter save · Esc cancel"))
+	hint := "↑/↓ field · ←/→ change · Enter save · Esc cancel"
+	if visible < settingsFieldCount {
+		hint = fmt.Sprintf("↑/↓ field · ←/→ change · Enter save · Esc cancel   (%d/%d)", m.settingsCur+1, settingsFieldCount)
+	}
+	b.WriteString(m.theme.modalHint(hint))
 	return m.theme.modalStyle.Render(b.String())
 }

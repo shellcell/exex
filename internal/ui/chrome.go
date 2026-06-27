@@ -279,12 +279,12 @@ func (m *Model) renderGotoModal() string {
 	} else {
 		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
-		// Scroll the window so the selection stays visible.
-		gotoTop := visualTop(m.gotoSel, m.gotoTop, len(m.gotoResults), gotoVisible, func(int) int { return 1 })
-		end := gotoTop + gotoVisible
-		if end > len(m.gotoResults) {
-			end = len(m.gotoResults)
-		}
+		// Window the results to the terminal height (title/input/hint/border cost
+		// ~10 rows) so the modal never overruns a short window; the selection stays
+		// visible as it scrolls.
+		visible := clamp(m.height-10, 3, 40)
+		gotoTop := visualTop(m.gotoSel, m.gotoTop, len(m.gotoResults), visible, func(int) int { return 1 })
+		end := min(gotoTop+visible, len(m.gotoResults))
 		rowW := modalListWidth(m.width)
 		labelW := rowW - addrW - 6
 		for i := gotoTop; i < end; i++ {

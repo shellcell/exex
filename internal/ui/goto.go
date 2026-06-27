@@ -18,12 +18,9 @@ type gotoTarget struct {
 	isSym bool
 }
 
-// gotoMaxResults bounds how many matches we keep (the list scrolls);
-// gotoVisible is how many rows the modal shows at once.
-const (
-	gotoMaxResults = 500
-	gotoVisible    = 10
-)
+// gotoMaxResults bounds how many matches we keep (the list scrolls; the visible
+// window is sized to the terminal height in renderGotoModal).
+const gotoMaxResults = 500
 
 // recomputeGoto rebuilds the modal's result list from the current input. A
 // parseable address is always offered first; symbols are matched (raw name and

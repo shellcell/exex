@@ -464,6 +464,7 @@ type searchState struct {
 type settingsState struct {
 	settingsActive bool
 	settingsCur    int // selected field (theme, background, default wrap, default view)
+	settingsTop    int // first visible field when the list is taller than the window
 }
 
 // statusState stores the footer status message.

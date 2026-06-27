@@ -45,6 +45,9 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: performance report (all views, startup, memory)
+        run: go run ./tools/perfreport exex-full
+
       - name: install mandoc
         run: sudo apt-get update && sudo apt-get install -y mandoc
 

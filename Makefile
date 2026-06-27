@@ -13,7 +13,7 @@ BASHCOMPDIR ?= /usr/local/etc/bash_completion.d
 ZSHCOMPDIR ?= /usr/local/share/zsh/site-functions
 FISHCOMPDIR ?= /usr/local/share/fish/vendor_completions.d
 
-.PHONY: build lite install install-man install-completions test test-cross lint-docs size-report clean release
+.PHONY: build lite install install-man install-completions test test-cross lint-docs size-report perf-report clean release
 
 # Full build: includes Chroma syntax highlighting (source pane + asm colours).
 build:
@@ -55,6 +55,13 @@ lint-docs:
 # then a per-module attribution from the symbol table. See scripts/size-report.sh.
 size-report:
 	@sh scripts/size-report.sh $(BINARY)
+
+# Performance report: parse/startup cost, every -o view's render time and
+# allocation volume, and peak resident memory, measured against a sample binary
+# (default: exex itself — a realistic native object that is always present).
+# Override the target with SAMPLE=... ; appends to $GITHUB_STEP_SUMMARY in CI.
+perf-report: build
+	@go run ./tools/perfreport $(if $(SAMPLE),$(SAMPLE),./$(BINARY))
 
 # Slow, toolchain-dependent end-to-end test: cross-compile a tiny program with Go
 # and Zig for every target exex can read, then parse/disassemble each. Needs the

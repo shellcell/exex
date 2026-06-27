@@ -23,6 +23,11 @@ jobs:
       - name: Build release archives
         run: make release VERSION="${GITHUB_REF_NAME}"
 
+      # Record this release's performance (all views, startup, memory) in the run
+      # summary, measured against the native build of exex itself.
+      - name: Performance report
+        run: make perf-report
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

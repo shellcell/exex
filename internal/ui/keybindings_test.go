@@ -381,7 +381,14 @@ func TestKeysStrings(t *testing.T) {
 		h.goView(modeHex, "h")
 		h.goView(modeStrings, "7")
 		h.m().stringsCur = i
-		h.goView(modeDisasm, "d") // strings in code (rare) — skip-tolerant below
+		// A mapped string usually lives in .rodata, not code; "d" only reaches the
+		// disasm view when the string sits in an executable section (rare, and
+		// platform-dependent for the system binary used here). Tolerate a refused
+		// jump and only return to Strings if we actually left.
+		h.press("d")
+		if h.m().mode == modeDisasm {
+			h.goView(modeStrings, "7")
+		}
 	}
 	h.goView(modeStrings, "7")
 	h.m().stringsCur = 0

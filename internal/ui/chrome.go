@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -329,6 +330,32 @@ func (m *Model) tabSegment(label string, active bool) string {
 	return m.theme.tabStyle.Render(label)
 }
 
+// tabLabel is a tab's drawn label: the full "4·Disasm" normally, or just its
+// number ("4") in compact mode — except the active tab, which keeps its full
+// label so the current view is always named even on a narrow terminal.
+func tabLabel(label string, active, compact bool) string {
+	if compact && !active {
+		if num, _, ok := strings.Cut(label, "·"); ok {
+			return num
+		}
+	}
+	return label
+}
+
+// tabsCompact reports whether the full-label tab strip would overflow the
+// terminal width, in which case renderTabs/tabHitTest collapse inactive tabs to
+// their numbers.
+func (m *Model) tabsCompact() bool {
+	w := 0
+	for _, s := range m.tabLead() {
+		w += lipgloss.Width(s)
+	}
+	for _, t := range tabItems {
+		w += lipgloss.Width(m.tabSegment(t.label, m.mode == t.mode))
+	}
+	return w > m.width
+}
+
 // tabLead is the non-clickable prefix of the tab row: the tool name and a chip
 // showing the detected container format (so the UI is honest that it isn't
 // ELF-only). Shared by renderTabs and tabHitTest so their geometry matches.
@@ -340,9 +367,11 @@ func (m *Model) tabLead() []string {
 }
 
 func (m *Model) renderTabs() string {
+	compact := m.tabsCompact()
 	segs := m.tabLead()
 	for _, t := range tabItems {
-		segs = append(segs, m.tabSegment(t.label, m.mode == t.mode))
+		active := m.mode == t.mode
+		segs = append(segs, m.tabSegment(tabLabel(t.label, active, compact), active))
 	}
 	row := lipgloss.JoinHorizontal(lipgloss.Left, segs...)
 	// Clamp to width: a too-wide tab strip would wrap and push the whole body
@@ -350,14 +379,17 @@ func (m *Model) renderTabs() string {
 	return padRight(row, m.width)
 }
 
-// tabHitTest maps an x column on the tab row to the tab the user clicked.
+// tabHitTest maps an x column on the tab row to the tab the user clicked. It must
+// mirror renderTabs' label choice so click geometry matches what's drawn.
 func (m *Model) tabHitTest(x int) (mode, bool) {
+	compact := m.tabsCompact()
 	pos := 0
 	for _, s := range m.tabLead() {
 		pos += lipgloss.Width(s)
 	}
 	for _, t := range tabItems {
-		w := lipgloss.Width(m.tabSegment(t.label, m.mode == t.mode))
+		active := m.mode == t.mode
+		w := lipgloss.Width(m.tabSegment(tabLabel(t.label, active, compact), active))
 		if x >= pos && x < pos+w {
 			return t.mode, true
 		}
@@ -483,19 +515,72 @@ func (m *Model) renderFooter() string {
 	for _, h := range hints {
 		parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
 	}
-	left := " " + strings.Join(parts, sep)
 
 	if m.status == "" {
-		return padRight(left, m.width)
+		// No message: hints fill the line, shrinking with an ellipsis if too wide.
+		return padRight(" "+fitJoin(parts, sep, m.width-1), m.width)
 	}
+
+	// A status message dominates: it keeps its full width on the right as a badge
+	// (its semantic colour as the background — red for errors — with a contrasting
+	// foreground) and the hints shrink into whatever is left, so the two never
+	// overlap.
 	st := m.theme.infoStyle
 	if m.statusError {
 		st = m.theme.errorStyle
 	}
-	// Right-align the status in whatever space the hints leave.
-	avail := max(1, m.width-lipgloss.Width(left))
-	right := lipgloss.PlaceHorizontal(avail, lipgloss.Right, st.Render(m.status))
-	return padRight(left+right, m.width)
+	bg := st.GetForeground()
+	badge := lipgloss.NewStyle().Bold(true).Background(bg).Foreground(contrastOn(bg))
+	msg := badge.Render(" " + m.status + " ")
+	if lipgloss.Width(msg) > m.width {
+		msg = fitANSIWidth(msg, m.width)
+	}
+	msgW := lipgloss.Width(msg)
+	left := padRight(" "+fitJoin(parts, sep, m.width-msgW-1), m.width-msgW)
+	return left + msg
+}
+
+// contrastOn returns near-black or near-white, whichever reads better on bg, by
+// its perceived luminance — so the status badge stays legible whatever colour the
+// theme gives info/error messages.
+func contrastOn(bg color.Color) color.Color {
+	r, g, b, _ := bg.RGBA() // 0–65535, premultiplied
+	lum := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
+	if lum > 0.55*0xffff {
+		return lipgloss.Color("#1c1c1c") // dark text on a light badge
+	}
+	return lipgloss.Color("#f5f5f5") // light text on a dark badge
+}
+
+// fitJoin joins the rendered parts with sep, keeping only whole parts that fit
+// within w visible columns and appending " …" when some are dropped. Used by the
+// footer so key-hints degrade gracefully on narrow terminals instead of being
+// hard-truncated mid-hint.
+func fitJoin(parts []string, sep string, w int) string {
+	if w <= 0 || len(parts) == 0 {
+		return ""
+	}
+	sepW := lipgloss.Width(sep)
+	var b strings.Builder
+	used := 0
+	for i, p := range parts {
+		add := lipgloss.Width(p)
+		if i > 0 {
+			add += sepW
+		}
+		if used+add > w {
+			if used+2 <= w { // room for " …"
+				b.WriteString(" …")
+			}
+			break
+		}
+		if i > 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(p)
+		used += add
+	}
+	return b.String()
 }
 
 // bodyHeight is the number of rows available between tabs and footer.

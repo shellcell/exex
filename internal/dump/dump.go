@@ -302,14 +302,24 @@ func lmaCell(phys uint64, addrW int) string {
 	return fmt.Sprintf("0x%0*x", addrW, phys)
 }
 
-// Symbols dumps the symbol table (nm-like): addr, size, bind, type, name. The
-// fixed columns are formatted into one reused buffer (no boxed Fprintf per row)
-// and the buffer is pre-sized, so a table with hundreds of thousands of symbols
-// stays cheap.
+// Symbols dumps the symbol table to a string (nm-like: addr, size, bind, type,
+// name). The CLI streams it via SymbolsTo; this buffered form is for callers that
+// want the whole text (tests).
 func Symbols(f *binfile.File) string {
-	addrW := f.AddrHexWidth()
 	var b strings.Builder
-	b.Grow(len(f.Symbols) * (addrW + 40))
+	b.Grow(len(f.Symbols) * (f.AddrHexWidth() + 40))
+	_ = SymbolsTo(&b, f)
+	return b.String()
+}
+
+// SymbolsTo streams the symbol table to w (one row per symbol), so a table with
+// hundreds of thousands of symbols never buffers the whole output. Each row's
+// fixed columns are formatted into one reused buffer (no boxed Fprintf per row).
+// A write error (e.g. a closed pipe) ends the dump cleanly.
+func SymbolsTo(w io.Writer, f *binfile.File) error {
+	addrW := f.AddrHexWidth()
+	bw := bufio.NewWriter(w)
+	defer bw.Flush()
 	var line []byte
 	for i := range f.Symbols {
 		s := &f.Symbols[i]
@@ -322,11 +332,13 @@ func Symbols(f *binfile.File) string {
 		line = append(line, ' ')
 		line = appendLeftStr(line, kindName(s.Kind), 7)
 		line = append(line, ' ')
-		b.Write(line)
-		b.WriteString(s.Display())
-		b.WriteByte('\n')
+		line = append(line, s.Display()...)
+		line = append(line, '\n')
+		if _, err := bw.Write(line); err != nil {
+			return nil // reader went away (closed pipe) — done, not an error
+		}
 	}
-	return b.String()
+	return nil
 }
 
 // appendRightUint appends v as decimal, right-justified in at least width columns.
@@ -348,24 +360,30 @@ func appendLeftStr(dst []byte, s string, width int) []byte {
 	return dst
 }
 
-// Strings dumps the printable strings with their address (or file offset). The
-// per-line prefix is formatted into one reused buffer and the string bytes are
-// written straight from the file image (StringBytes is zero-copy), so a binary
-// with hundreds of thousands of strings doesn't allocate a copy + a boxed
-// Fprintf per line.
+// Strings dumps the printable strings to a string (with address or file offset).
+// The CLI streams it via StringsTo; this buffered form is for tests.
 func Strings(f *binfile.File) string {
-	addrW := f.AddrHexWidth()
 	entries := f.Strings()
 	var b strings.Builder
-	// Size the buffer once up front (prefix + text + newline per line) so the
-	// output — which can be tens of MB — isn't reallocated through doubling.
 	size := 0
 	for i := range entries {
-		size += addrW + 5 + int(entries[i].Len) + 1
+		size += f.AddrHexWidth() + 5 + int(entries[i].Len) + 1
 	}
 	b.Grow(size)
+	_ = StringsTo(&b, f)
+	return b.String()
+}
+
+// StringsTo streams the printable strings to w, one per line. The per-line prefix
+// is formatted into one reused buffer and the text is written straight from the
+// file image (StringBytes is zero-copy), so neither a per-line copy nor a whole-
+// output buffer is allocated. A write error ends the dump cleanly.
+func StringsTo(w io.Writer, f *binfile.File) error {
+	addrW := f.AddrHexWidth()
+	bw := bufio.NewWriter(w)
+	defer bw.Flush()
 	var line []byte
-	for _, e := range entries {
+	for _, e := range f.Strings() {
 		line = line[:0]
 		if e.HasAddr {
 			line = append(line, '0', 'x')
@@ -380,11 +398,30 @@ func Strings(f *binfile.File) string {
 			}
 		}
 		line = append(line, ' ', ' ')
-		b.Write(line)
-		b.Write(f.StringBytes(e))
-		b.WriteByte('\n')
+		if _, err := bw.Write(line); err != nil {
+			return nil
+		}
+		if _, err := bw.Write(f.StringBytes(e)); err != nil {
+			return nil
+		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return nil
+		}
 	}
-	return b.String()
+	return nil
+}
+
+// StreamView writes a view straight to w when it has a streaming form (the large
+// symbol/string tables), returning whether it handled the view. The CLI uses it
+// so those dumps never buffer the whole output; other views fall back to View.
+func StreamView(w io.Writer, f *binfile.File, name string) (handled bool, err error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "symbols", "syms":
+		return true, SymbolsTo(w, f)
+	case "strings":
+		return true, StringsTo(w, f)
+	}
+	return false, nil
 }
 
 // Sources dumps the list of source files referenced by the binary's debug info.

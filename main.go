@@ -93,6 +93,17 @@ func main() {
 		if dump.ViewNeedsDemangle(outputView) || (outputView == "" && gotoTarget != "") {
 			f.ApplyDemangled(f.ComputeDemangled()) // readable + matchable names
 		}
+		// The large symbol/string tables stream straight to stdout (no whole-output
+		// buffer); other views are small and use the buffered View.
+		if outputView != "" {
+			if streamed, err := dump.StreamView(os.Stdout, f, outputView); streamed {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+					os.Exit(1)
+				}
+				return
+			}
+		}
 		var (
 			out string
 			err error

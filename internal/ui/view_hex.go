@@ -1045,6 +1045,11 @@ func (m *Model) pointerWordStart(addr uint64, pos int) int {
 func (m *Model) renderHexRow(md mode, data byteSource, cur int, span hexRowSpan, addrW int, addrAt func(pos int) uint64) string {
 	row := data.Bytes(span.start, span.end) // one zero-copy fetch; indexed natively below
 	var hexCol, asciiCol strings.Builder
+	// The byte cells carry pre-rendered ANSI, so the columns end up a few hundred
+	// bytes wide — pre-size them to skip the doubling reallocs (this runs for every
+	// visible row, every frame).
+	hexCol.Grow(bytesPerHexRow * 24)
+	asciiCol.Grow(bytesPerHexRow * 20)
 	for slot := 0; slot < bytesPerHexRow; slot++ {
 		if slot > 0 {
 			hexCol.WriteByte(' ')
@@ -1072,10 +1077,12 @@ func (m *Model) renderHexRow(md mode, data byteSource, cur int, span hexRowSpan,
 		}
 	}
 	var line strings.Builder
-	fmt.Fprintf(&line, " %s  %s  ",
-		m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, span.lineAddr)),
-		hexCol.String(),
-	)
+	line.Grow(hexCol.Len() + asciiCol.Len() + 48)
+	line.WriteByte(' ')
+	line.WriteString(m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, span.lineAddr)))
+	line.WriteString("  ")
+	line.WriteString(hexCol.String())
+	line.WriteString("  ")
 	if m.hexNumeric {
 		line.WriteString(m.hexWordDecode(data, span, cur))
 	} else {

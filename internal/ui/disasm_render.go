@@ -578,9 +578,6 @@ func (m *Model) renderSourcePane(w, h int) string {
 		suffix = fmt.Sprintf(":%d:%d", line, col)
 	}
 	loc := truncateMiddle(file, max(1, inner-lipgloss.Width(suffix))) + suffix
-	var b strings.Builder
-	b.WriteString(m.theme.viewTitleLine(loc, inner))
-	b.WriteString("\n")
 	half := (h - 1) / 2
 	base := line - half
 	from := base + m.rightScroll
@@ -595,6 +592,10 @@ func (m *Model) renderSourcePane(w, h int) string {
 			from = 1
 		}
 	}
+	// Build the lines directly (vs accumulating into one Builder then splitting it
+	// back apart in padBody) — fewer per-frame allocations on this hot path.
+	rows := make([]string, 0, h)
+	rows = append(rows, m.theme.viewTitleLine(loc, inner))
 	for i := from; i <= to; i++ {
 		var content string
 		if i-1 >= 0 && i-1 < len(src) {
@@ -608,19 +609,15 @@ func (m *Model) renderSourcePane(w, h int) string {
 		}
 		prefix := m.srcGutter(i, line, mapped, 5)
 		gutterW := lipgloss.Width(prefix)
-		avail := inner - gutterW
-		b.WriteString(prefix)
-		b.WriteString(fitANSIWidth(content, avail))
-		b.WriteString("\n")
+		rows = append(rows, prefix+fitANSIWidth(content, inner-gutterW))
 		// Point carets at every column this source line maps to (a line can map
 		// at several positions), each in its column colour — same as the
 		// source-first pane.
 		if i == line {
 			if cols := m.sourceLineColumns(file, line); len(cols) > 0 {
-				b.WriteString(m.theme.coloredCaretRow(cols, gutterW, inner))
-				b.WriteString("\n")
+				rows = append(rows, m.theme.coloredCaretRow(cols, gutterW, inner))
 			}
 		}
 	}
-	return border.Render(padBody(b.String(), inner, h))
+	return border.Render(padBodyRows(rows, inner, h))
 }

@@ -301,16 +301,41 @@ func Symbols(f *binfile.File) string {
 	return b.String()
 }
 
-// Strings dumps the printable strings with their address (or file offset).
+// Strings dumps the printable strings with their address (or file offset). The
+// per-line prefix is formatted into one reused buffer and the string bytes are
+// written straight from the file image (StringBytes is zero-copy), so a binary
+// with hundreds of thousands of strings doesn't allocate a copy + a boxed
+// Fprintf per line.
 func Strings(f *binfile.File) string {
 	addrW := f.AddrHexWidth()
+	entries := f.Strings()
 	var b strings.Builder
-	for _, e := range f.Strings() {
+	// Size the buffer once up front (prefix + text + newline per line) so the
+	// output — which can be tens of MB — isn't reallocated through doubling.
+	size := 0
+	for i := range entries {
+		size += addrW + 5 + int(entries[i].Len) + 1
+	}
+	b.Grow(size)
+	var line []byte
+	for _, e := range entries {
+		line = line[:0]
 		if e.HasAddr {
-			fmt.Fprintf(&b, "0x%0*x  %s\n", addrW, e.Addr, f.StringText(e))
+			line = append(line, '0', 'x')
+			line = appendHexPad(line, e.Addr, addrW)
 		} else {
-			fmt.Fprintf(&b, "@0x%-*x  %s\n", addrW, e.Offset, f.StringText(e))
+			// "@0x" + offset left-justified in addrW hex columns (matches "%-*x").
+			line = append(line, '@', '0', 'x')
+			n := len(line)
+			line = appendHexPad(line, e.Offset, 0)
+			for w := len(line) - n; w < addrW; w++ {
+				line = append(line, ' ')
+			}
 		}
+		line = append(line, ' ', ' ')
+		b.Write(line)
+		b.Write(f.StringBytes(e))
+		b.WriteByte('\n')
 	}
 	return b.String()
 }

@@ -57,6 +57,8 @@ func (m *Model) View() tea.View {
 		out = m.overlayCenter(out, m.renderSearchModal())
 	case m.xrefActive:
 		out = m.overlayCenter(out, m.renderXrefModal())
+	case m.syscallActive:
+		out = m.overlayCenter(out, m.renderSyscallModal())
 	}
 	m.viewCache = out
 	m.viewDirty = false
@@ -123,7 +125,7 @@ func (m *Model) renderHelpModal() string {
 		blank,
 		head("Sections"),
 		row(altKeys("t", "f"), "filter by type / flags"),
-		row("t / ⇥", "toggle sections / segments"),
+		row("t / ⇥", "cycle sections / segments / header"),
 	}
 	right := []helpEntry{
 		head("Symbols"),
@@ -134,6 +136,7 @@ func (m *Model) renderHelpModal() string {
 		row("←/→", "history back / forward"),
 		row("[ ]", "previous / next symbol"),
 		row("x", "find references (xrefs)"),
+		row("y", "list system calls"),
 		row("⇧a/⇧s/⇧c", "copy addr / symbol / function asm"),
 		row("Tab", "show / hide right pane"),
 		row("⇧Tab", "swap source / disasm"),
@@ -158,7 +161,8 @@ func (m *Model) renderHelpModal() string {
 		head("Libraries"),
 		row("o", "open as primary"),
 		row(altKeys("a"), "filter all/on-disk/cache"),
-		row("↵ Enter", "imported symbols"),
+		row("t / ⇥", "cycle flat / tree / relocations"),
+		row("↵ Enter", "imported symbols · (relocs) hex"),
 		blank,
 		head("Strings"),
 		row(altKeys("s"), "filter by section"),
@@ -492,7 +496,10 @@ func (m *Model) viewHints() []footerHint {
 		}
 		return hints
 	case modeSections:
-		return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {altKeys("t", "f"), "type/flags"}, {"⇧a/⇧s", "copy"}}
+		if m.showHeader {
+			return []footerHint{{"t", "sec/seg/hdr"}, {"↑/↓", "scroll"}, {"esc", "sections"}}
+		}
+		return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "sec/seg/hdr"}, {"/", "filter"}, {altKeys("t", "f"), "type/flags"}, {"⇧a/⇧s", "copy"}}
 	case modeSymbols:
 		if m.symbolTreeActive() {
 			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "flat"}}
@@ -508,11 +515,11 @@ func (m *Model) viewHints() []footerHint {
 			return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
 		case m.showSource && dwarf:
 			// Disasm-first with the source pane open.
-			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"h/m", "hex/raw"}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 		default:
 			// Disasm-first, no pane. Offer tab to open the pane only when there is
 			// debug info to show.
-			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"h/m", "hex/raw"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 			if dwarf {
 				hints = append(hints, footerHint{"tab", "pane"})
 			}
@@ -530,7 +537,10 @@ func (m *Model) viewHints() []footerHint {
 		}
 		return []footerHint{{"↵", "open"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {altKeys("a"), "present"}, {"⇧s", "copy"}}
 	case modeLibs:
-		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"r", "rev"}, {"/", "filter"}, {altKeys("a"), "avail"}, {"⇧s", "copy"}}
+		if m.libsRelocs {
+			return []footerHint{{"↵", "hex"}, {"s/r", "sort/rev"}, {altKeys("t", "s"), "type/sec"}, {"t", "libs"}, {"/", "filter"}, {"⇧a/⇧s", "copy"}}
+		}
+		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"r", "rev"}, {"t", "tree/relocs"}, {"/", "filter"}, {altKeys("a"), "avail"}, {"⇧s", "copy"}}
 	}
 	return nil
 }

@@ -127,7 +127,16 @@ func (m *Model) setAllLibsCollapsed(collapsed bool) {
 }
 
 func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
+	if m.libsRelocs {
+		return m.updateRelocs(key)
+	}
+	// With no needed libraries the list is empty, but `t` can still reach the
+	// relocation table (a static-PIE binary has relocations but no DT_NEEDED).
 	if m.file.Info == nil || len(m.file.Info.DynamicLibs) == 0 {
+		if key == "t" {
+			m.enterRelocs()
+			m.setStatus("showing relocations (t for libraries)", false)
+		}
 		return m, nil
 	}
 	m.buildLibRows()
@@ -175,14 +184,7 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 		m.buildLibRows()
 		m.setStatus("libs: "+availLabel(m.libsAvail), false)
 	case "t":
-		m.libsTree = !m.libsTree
-		m.libsCur, m.libsTop = 0, 0
-		m.buildLibRows()
-		view := "flat list"
-		if m.libsTree {
-			view = "tree"
-		}
-		m.setStatus("libs view: "+view, false)
+		m.setStatus(m.cycleLibsMode(), false)
 	case "-", "_":
 		m.setAllLibsCollapsed(true)
 		m.setStatus("collapsed all", false)
@@ -269,6 +271,9 @@ func (m *Model) openLibAsPrimary(lib string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) renderLibs() string {
+	if m.libsRelocs {
+		return m.renderRelocs()
+	}
 	bodyH := m.bodyHeight()
 	info := m.file.Info
 	if info == nil || len(info.DynamicLibs) == 0 {

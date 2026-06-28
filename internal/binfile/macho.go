@@ -246,6 +246,8 @@ func (f *File) loadMachO() error {
 	f.loadMachOInfo(mf) // reads mf.Symtab (Stripped), so before it is dropped below
 	f.dwarfAvail = f.machoHasDWARF(mf)
 	f.header = f.machoHeaderInfo(mf)
+	f.rawHeader = f.machoRawHeader(mf)
+	f.relocs = machoRelocs(mf, base) // eager: needs mf.Symtab, dropped below
 
 	// Defer the DWARF decode (abbrev/section parse — a big slice of Open for debug
 	// binaries) to the first source/line lookup. mf is retained for that, but its

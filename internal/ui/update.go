@@ -85,6 +85,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case xrefDoneMsg:
 		return m.handleXrefDone(msg)
 
+	case syscallDoneMsg:
+		return m.handleSyscallDone(msg)
+
+	case syscallFullDoneMsg:
+		return m.handleSyscallFullDone(msg)
+
 	case disasmPrefetchMsg:
 		return m, nil
 

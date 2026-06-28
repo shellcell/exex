@@ -69,6 +69,7 @@ type sectionsState struct {
 	sections           []binfile.Section
 	segments           []binfile.Segment
 	showSegments       bool // the `t` toggle: list segments instead of sections
+	showHeader         bool // the `t` toggle's third state: the raw container header
 	sectionsFilter     textinput.Model
 	sectionsFiltered   []int // indices into the active slice (sections or segments)
 	sectionsCur        int
@@ -289,18 +290,31 @@ type libsState struct {
 	libsCollapsed map[string]bool // collapsed directory paths
 	libsRows      []treeRow       // flattened visible rows (dirs + libs)
 	libsTreeInit  bool
-	libsAvail     availFilter     // availability filter: all / on-disk / in cache
+	libsAvail     availFilter // availability filter: all / on-disk / in cache
 	libsAvailKind map[string]availKind
 	libsFilter    textinput.Model // name search (the `/` filter)
 	libsSortDesc  bool            // reverse the (name) sort
+
+	libsRelocs    bool           // the `t` cycle's third state: the relocation table
+	relocCur      int            // cursor in the relocation table
+	relocTop      int            // viewport top of the relocation table
+	relocFiltered []int          // indices into file.Relocations() after the filter
+	relocSort     relocSortField // sort field for the relocation table
+	relocSortDesc bool           // reverse the relocation sort
+	relocTypeOn   bool           // type-name facet filter active
+	relocType     string         // the relocation type it restricts to
+	relocTypes    []string       // distinct types, for cycling
+	relocSecOn    bool           // section facet filter active
+	relocSec      string         // the section it restricts to
+	relocSecs     []string       // distinct sections, for cycling
 }
 
 // stringsState stores list, filter and cache state for printable strings.
 type stringsState struct {
 	stringsList       []binfile.StringEntry
 	stringsFilter     textinput.Model
-	stringsFiltered   []int    // indices into stringsList
-	stringsCur        int      // index into stringsFiltered
+	stringsFiltered   []int // indices into stringsList
+	stringsCur        int   // index into stringsFiltered
 	stringsTop        int
 	stringsSections   []string   // distinct owning-section names, for the section filter
 	stringsSecOn      bool       // section filter active
@@ -524,6 +538,7 @@ type Model struct {
 	searchState
 	settingsState
 	xrefState
+	syscallState
 	statusState
 	keyState
 }

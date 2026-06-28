@@ -45,30 +45,51 @@ func Open(path string, opts ...Option) (*File, error) {
 		unmap:     closer,
 		sources:   map[string][]string{},
 	}
+	if err := f.load(); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// OpenBytes builds the neutral model from an in-memory image (no file mapping),
+// labelled by name. Used for objects that aren't standalone files — e.g. the
+// members of a static-library (ar) archive. The caller owns raw and must keep it
+// alive for the lifetime of the returned File (its sections slice into it).
+func OpenBytes(name string, raw []byte) (*File, error) {
+	f := &File{
+		Path:    name,
+		raw:     raw,
+		sources: map[string][]string{},
+	}
+	if err := f.load(); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// load detects f.raw's container format, builds the model, and finalises it.
+func (f *File) load() error {
+	raw := f.raw
 	switch {
 	case len(raw) >= 4 && raw[0] == 0x7f && raw[1] == 'E' && raw[2] == 'L' && raw[3] == 'F':
 		if err := f.loadELF(); err != nil {
-			f.Close()
-			return nil, err
+			return err
 		}
 	case isMachO(raw):
 		if err := f.loadMachO(); err != nil {
-			f.Close()
-			return nil, err
+			return err
 		}
 	case len(raw) >= 2 && raw[0] == 'M' && raw[1] == 'Z':
 		if err := f.loadPE(); err != nil {
-			f.Close()
-			return nil, err
+			return err
 		}
 	default:
-		f.Close()
-		return nil, fmt.Errorf("unrecognised file format (not ELF, Mach-O, or PE)")
+		return fmt.Errorf("unrecognised file format (not ELF, Mach-O, or PE)")
 	}
-
 	f.finalizeSymbols()
 	f.computeOverview()
-	return f, nil
+	return nil
 }
 
 // Close releases the file mapping. Safe to call more than once; afterwards the

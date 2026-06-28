@@ -108,13 +108,22 @@ Flags (accepted in any position):
 | `-s STRING` | search printable strings; opens the match in Hex, or the Strings view filtered when several match |
 | `-debug PATH` / `-d PATH` | external debug-symbols file or directory (ELF `.debug` companion, or a Mach-O `.dSYM` bundle/file) |
 | `-arch NAME` | for a universal (fat) Mach-O, which architecture slice to open (e.g. `x86_64`, `arm64`); defaults to the host arch. The Info view lists all slices; press `t` there to switch |
-| `-o VIEW` | print a view to stdout and exit (non-interactive): `info`, `sections`, `segments`, `symbols`, `strings`, `libs`, `sources`, `disasm`, `disasm-all` |
+| `-o VIEW` | print a view to stdout and exit (non-interactive): `info`, `sections`, `segments`, `symbols`, `strings`, `libs`, `sources`, `relocs`, `syscalls`, `syscalls-all`, `syscalls-full`, `disasm`, `disasm-all` |
 | `-o` (bare) | print the `goto` symbol/address's function disassembly to stdout and exit |
 
 The `-o` modes make exex scriptable: `exex -o symbols ./bin`, `exex -o disasm ./bin | less`,
 `exex -o ./bin main` (disassemble one function). `disasm` covers executable
 sections (like `objdump -d`); `disasm-all` covers every section (like `objdump -D`).
 Output streams, so `| head` returns immediately even on large binaries.
+
+`relocs` prints the relocation table (like `readelf -r`). `syscalls` summarises
+the **distinct** system calls the binary makes — each kernel-entry instruction
+(`syscall`/`svc`/`int 0x80`/`ecall`), with the call **number** recovered from the
+immediate loaded into the syscall-number register where possible, plus calls to
+vDSO helpers (`__vdso_*`); `syscalls-all` lists every site with its address;
+`syscalls-full` also scans the binary's directly linked libraries (a dynamically
+linked program often makes no *direct* syscalls — they live in libc), tagging
+each with the originating object and listing any libraries it couldn't resolve.
 
 ### Keys
 
@@ -128,9 +137,10 @@ Output streams, so `| head` returns immediately even on large binaries.
 | `[` / `]` | page up / down in list views; previous / next section (Hex/Raw) or symbol (Disasm) |
 | `⇧[` / `⇧]` | previous / next non-zero byte (Hex/Raw) |
 | `d` / `h` / `m` | go to the address under the cursor in the Disasm / Hex / Raw view |
-| `s` / `r` | cycle sort field · reverse it (Sections, Symbols, Strings, Sources; `r` reverses Libs by name) |
+| `s` / `r` | cycle sort field · reverse it (Sections, Symbols, Strings, Sources, Relocations; `r` reverses Libs by name) |
+| `x` / `y` | Disasm: find references (xrefs) · list system calls (number + vDSO calls, scoped to the function / whole binary / unique) |
 | `⌥t` / `⌥s` / `⌥b` | Symbols: filter by type / scope / bind · `⌥s` filters Strings by section · `⌥a` filters Libs/Sources by availability (needs Option-as-Alt in the terminal) |
-| `t` (or `Tab`) | toggle the view's mode — Symbols/Sources/Libs: namespace/path **tree** ↔ flat list; Sections: sections ↔ segments; Hex/Raw: ascii ↔ pointer decode; Info: fat-Mach-O arch slice (`Tab` is the source pane in Disasm) |
+| `t` (or `Tab`) | toggle the view's mode — Symbols/Sources: namespace/path **tree** ↔ flat list; Sections: sections ↔ segments ↔ **header**; Libs: flat ↔ tree ↔ **relocations**; Hex/Raw: ascii ↔ pointer decode; Info: fat-Mach-O arch slice (`Tab` is the source pane in Disasm) |
 | `←`/`→` · `Enter` · `+`/`−` | tree: collapse / expand group (`←` on a leaf folds its branch) · expand/collapse all below · all (keys rebindable) |
 | `e` / `.` | collapse long `(…)`/`<…>` argument & template lists to `...` (short ones like `<int>` kept) — `e` all (also from Disasm/Hex/Raw, abbreviating their symbol annotations), `.` current Symbols row |
 | `⇧a` / `⇧s` / `⇧p` / `⇧c` | copy address / name (section, symbol, string, library, path) / pointer (Hex/Raw) / function disassembly (Disasm) |

@@ -63,6 +63,12 @@ func main() {
 	}
 	f, err := binfile.Open(path, openOpts...)
 	if err != nil {
+		// A static-library (ar) archive isn't a single object, but `-o syscalls`
+		// can still scan its members (e.g. which syscalls a static libc.a provides).
+		if outputMode && binfile.IsArchive(readPrefix(path, len("!<arch>\n"))) {
+			runArchiveOutput(path, outputView)
+			return
+		}
 		// Not a recognised binary: if it's a readable text file (a shell/python/…
 		// script — still "executable"), open it in the text viewer instead, unless
 		// a non-interactive -o dump was requested.
@@ -235,6 +241,28 @@ func readPrefix(path string, n int) []byte {
 }
 
 // runTextViewer loads path into the text-script viewer and runs it.
+// runArchiveOutput handles `-o` on a static-library (ar) archive. Archives wrap
+// many object members, so only the aggregate syscall views make sense; other
+// views get a clear message.
+func runArchiveOutput(path, view string) {
+	members, closer, err := binfile.OpenArchive(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	defer closer()
+	switch view {
+	case "syscalls", "syscalls-full":
+		fmt.Print(dump.SyscallsArchive(members, false))
+	case "syscalls-all":
+		fmt.Print(dump.SyscallsArchive(members, true))
+	default:
+		fmt.Fprintf(os.Stderr, "exex: %q is an archive (%d members); only -o syscalls / syscalls-all are supported for archives\n",
+			path, len(members))
+		os.Exit(2)
+	}
+}
+
 func runTextViewer(path string) {
 	cfg, err := config.Load()
 	if err != nil {

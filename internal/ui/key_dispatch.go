@@ -53,9 +53,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelXref()
 		return m, nil
 	}
+	if m.syscallRunning && key == "esc" {
+		m.cancelSyscall()
+		return m, nil
+	}
 
 	if m.xrefActive {
 		return m.updateXrefModal(key)
+	}
+	if m.syscallActive {
+		return m.updateSyscallModal(key)
 	}
 	if m.settingsActive {
 		return m.updateSettings(key)
@@ -208,6 +215,7 @@ var macOptionGlyph = map[rune]rune{
 //   - Alt/Super/Meta modifier + base letter (option-as-alt, or Cmd) → "alt+<l>"
 //   - Alt modifier + a composed Text (Kitty protocol, e.g. ⌥t → "†")  → "alt+<l>"
 //   - no modifier at all, just the composed glyph (ghostty default)   → "alt+<l>"
+//
 // tea.Key.String() returns the composed Text and drops the modifier, so it can't
 // be trusted for these; we read the modifier bits and the glyph table instead.
 // Shift-only and unmodified keys keep String(), so "A" (Shift+a) and the special
@@ -371,6 +379,9 @@ func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) 
 	case modeStrings:
 		return filterCapture(&m.stringsFilter, key, msg, m.recomputeStrings)
 	case modeLibs:
+		if m.libsRelocs {
+			return filterCapture(&m.libsFilter, key, msg, m.recomputeRelocs)
+		}
 		return filterCapture(&m.libsFilter, key, msg, m.buildLibRows)
 	case modeSources:
 		if m.srcFile == "" {

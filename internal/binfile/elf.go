@@ -191,6 +191,8 @@ func (f *File) loadELF() error {
 
 	f.loadELFInfo(ef)
 	f.header = f.elfHeaderInfo(ef)
+	f.rawHeader = f.elfRawHeader(ef)
+	f.relocBuild = func() []Reloc { return f.elfRelocs(ef) }
 	return nil
 }
 

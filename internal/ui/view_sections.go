@@ -159,6 +159,25 @@ func (m *Model) recomputeSections() {
 }
 
 func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
+	// Header mode is a static field list: only navigation, the `t` toggle and
+	// wrap apply; filters, sort and row actions are inert.
+	if m.showHeader {
+		if navKey(&m.sectionsCur, len(m.file.RawHeader()), m.listPage(), key) {
+			return m, nil
+		}
+		switch key {
+		case "t":
+			m.setStatus(m.cycleSectionsMode(), false)
+		case "esc":
+			m.showHeader = false
+			m.sectionsCur, m.sectionsTop = 0, 0
+			m.recomputeSections()
+			m.setStatus("showing sections", false)
+		case "w":
+			m.toggleWrap()
+		}
+		return m, nil
+	}
 	n := len(m.sectionsFiltered)
 	if navKey(&m.sectionsCur, n, m.listPage(), key) {
 		return m, nil
@@ -206,20 +225,9 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "t":
-		// Toggle sections ⇄ segments. No segments (e.g. PE) → stay on sections.
-		if !m.showSegments && len(m.segments) == 0 {
-			m.setStatus("no segments in this binary", false)
-			return m, nil
-		}
-		m.showSegments = !m.showSegments
-		m.sectionsCur, m.sectionsTop = 0, 0
-		m.sectionsFilter.SetValue("")
-		m.recomputeSections()
-		if m.showSegments {
-			m.setStatus("showing segments (t for sections)", false)
-		} else {
-			m.setStatus("showing sections (t for segments)", false)
-		}
+		// Cycle sections → segments → header → sections (segments skipped when the
+		// binary has none, e.g. PE).
+		m.setStatus(m.cycleSectionsMode(), false)
 		return m, nil
 	case "enter":
 		if m.showSegments {
@@ -342,6 +350,9 @@ func (m *Model) renderSections() string {
 	bodyH := m.bodyHeight()
 	if bodyH < 3 {
 		bodyH = 3
+	}
+	if m.showHeader {
+		return m.renderHeaderFields(bodyH)
 	}
 
 	total := len(m.sections)

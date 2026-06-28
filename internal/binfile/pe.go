@@ -126,6 +126,8 @@ func (f *File) loadPE() error {
 
 	f.loadPEInfo(pf, dllChars)
 	f.header = f.peHeaderInfo(pf)
+	f.rawHeader = f.peRawHeader(pf)
+	f.relocBuild = func() []Reloc { return peRelocs(pf, imageBase) }
 	return nil
 }
 

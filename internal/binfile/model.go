@@ -174,6 +174,11 @@ type File struct {
 	entry     uint64
 	addrWidth int // hex digits in a printed address (8 or 16)
 	header    []string
+	rawHeader []HeaderField // raw container-header fields (Header sub-view)
+
+	relocs     []Reloc        // relocation entries (built lazily)
+	relocBuild func() []Reloc // builds relocs on first Relocations() call
+	relocOnce  sync.Once      // guards the lazy relocation build
 
 	symByAddr      []Symbol // sorted by Addr
 	lowerName      []string // lazily-built lowercased Symbols[i].Name (for filtering)

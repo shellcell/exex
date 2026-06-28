@@ -27,14 +27,15 @@ const dumpMaxBytes = 1 << 20
 func IsView(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "info", "header", "headers", "sections", "segments",
-		"symbols", "syms", "strings", "libs", "libraries", "sources", "disasm", "disasm-all":
+		"symbols", "syms", "strings", "libs", "libraries", "sources",
+		"relocs", "relocations", "syscalls", "syscalls-all", "syscalls-full", "disasm", "disasm-all":
 		return true
 	}
 	return false
 }
 
 // ViewNames lists the canonical view keywords for help/usage text.
-var ViewNames = []string{"info", "sections", "segments", "symbols", "strings", "libs", "sources", "disasm", "disasm-all"}
+var ViewNames = []string{"info", "sections", "segments", "symbols", "strings", "libs", "sources", "relocs", "syscalls", "syscalls-all", "disasm", "disasm-all"}
 
 // IsDisasm reports whether name selects a (streaming) disassembly dump, and
 // whether it is the all-sections variant. The CLI routes these to DisasmTo
@@ -78,6 +79,14 @@ func View(f *binfile.File, name string) (string, error) {
 		return Libs(f), nil
 	case "sources":
 		return Sources(f), nil
+	case "relocs", "relocations":
+		return Relocs(f), nil
+	case "syscalls":
+		return Syscalls(f, false), nil
+	case "syscalls-all":
+		return Syscalls(f, true), nil
+	case "syscalls-full":
+		return SyscallsFull(f), nil
 	}
 	return "", fmt.Errorf("unknown view %q (try: %s)", name, strings.Join(ViewNames, ", "))
 }

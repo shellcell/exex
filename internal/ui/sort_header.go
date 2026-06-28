@@ -80,6 +80,9 @@ func (m *Model) handleSortableHeaderClick(x, bodyRow int) bool {
 	case modeStrings:
 		return bodyRow == 1 && m.clickStringsHeader(x)
 	case modeLibs:
+		if m.libsRelocs {
+			return bodyRow == 1 && m.clickRelocsHeader(x)
+		}
 		return bodyRow == m.libsTitleRow() && m.clickLibsHeader(x)
 	}
 	return false
@@ -93,6 +96,9 @@ func (m *Model) isTableHeaderRow(bodyRow int) bool {
 		m.ensureStrings()
 		return len(m.stringsList) > 0 && bodyRow == 1
 	case modeLibs:
+		if m.libsRelocs {
+			return bodyRow == 1
+		}
 		return bodyRow == m.libsTitleRow()
 	}
 	return false
@@ -196,6 +202,37 @@ func (m *Model) stringHeaderCols(addrW int) []sortableHeaderCol[stringSort] {
 		{start: 1, end: 11, sort: strSortOffset},
 		{start: addrStart, end: addrStart + addrCol, sort: strSortAddr},
 		{start: stringStart, end: m.width, sort: strSortText},
+	}
+}
+
+func (m *Model) clickRelocsHeader(x int) bool {
+	sort, ok := hitSortableHeader(m.relocHeaderCols(m.file.AddrHexWidth()), x)
+	if !ok {
+		return false
+	}
+	fieldChanged := applySortHeaderClick(&m.relocSort, &m.relocSortDesc, sort)
+	m.relocCur, m.relocTop = 0, 0
+	m.recomputeRelocs()
+	if fieldChanged {
+		m.setStatus("sort: "+m.relocSort.String(), false)
+	} else {
+		m.setStatus("sort order: "+sortDirectionLabel(m.relocSortDesc), false)
+	}
+	return true
+}
+
+// relocHeaderCols maps the relocation table's header columns to their x ranges,
+// matching the layout in renderRelocs / relocRow.
+func (m *Model) relocHeaderCols(addrW int) []sortableHeaderCol[relocSortField] {
+	offCol := 2 + addrW
+	typeStart := 1 + offCol + 2
+	secStart := typeStart + 24 + 1
+	symStart := secStart + 12 + 1
+	return []sortableHeaderCol[relocSortField]{
+		{start: 1, end: 1 + offCol, sort: relocSortOffset},
+		{start: typeStart, end: typeStart + 24, sort: relocSortType},
+		{start: secStart, end: secStart + 12, sort: relocSortSection},
+		{start: symStart, end: m.width, sort: relocSortSym},
 	}
 }
 

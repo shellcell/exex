@@ -119,7 +119,7 @@ func (h *keyHarness) pump(msg tea.Msg) {
 }
 
 func (h *keyHarness) press(s string) { h.t.Helper(); h.pump(kp(s)) }
-func (h *keyHarness) m() *Model       { return h.model.(*Model) }
+func (h *keyHarness) m() *Model      { return h.model.(*Model) }
 
 func (h *keyHarness) goView(md mode, key string) {
 	h.t.Helper()
@@ -205,14 +205,22 @@ func TestKeysSections(t *testing.T) {
 		t.Fatal("r did not reverse the sort")
 	}
 
-	// t toggles sections <-> segments (when the binary has segments).
+	// t cycles sections -> segments -> header -> sections (when the binary has
+	// segments). Cycle all the way back to sections for the jump tests below.
 	if len(h.m().segments) > 0 {
 		seg0 := h.m().showSegments
 		h.press("t")
 		if h.m().showSegments == seg0 {
 			t.Fatal("t did not toggle sections/segments")
 		}
-		h.press("t") // back to sections for the jump tests
+		h.press("t") // -> header
+		if !h.m().showHeader {
+			t.Fatal("second t did not reach the header mode")
+		}
+		h.press("t") // -> back to sections
+		if h.m().showSegments || h.m().showHeader {
+			t.Fatal("third t did not return to the section table")
+		}
 	}
 
 	// Select an executable section, then d/h/m jump to disasm/hex/raw.
@@ -989,9 +997,9 @@ func TestKeysActivate(t *testing.T) {
 	// instruction may have no in-file target).
 	h.goView(modeDisasm, "4")
 	if len(h.m().disasmInst) > 0 {
-		h.press("enter")     // follow (or status "no address")
-		h.press("left")      // history back
-		h.press("right")     // history forward
+		h.press("enter") // follow (or status "no address")
+		h.press("left")  // history back
+		h.press("right") // history forward
 		if h.m().mode != modeDisasm {
 			t.Fatalf("disasm history left mode = %v", h.m().mode)
 		}

@@ -86,7 +86,13 @@ func main() {
 			}
 			return
 		}
-		f.ApplyDemangled(f.ComputeDemangled()) // readable + matchable names
+		// Demangle the whole table only when the output actually uses symbol names:
+		// the symbols view, or the bare `-o <symbol>` function dump (which resolves a
+		// possibly-demangled name). Skipping it keeps sections/strings/etc. cheap on
+		// large C++/Swift binaries, where the pass alone allocates 1+ GB.
+		if dump.ViewNeedsDemangle(outputView) || (outputView == "" && gotoTarget != "") {
+			f.ApplyDemangled(f.ComputeDemangled()) // readable + matchable names
+		}
 		var (
 			out string
 			err error

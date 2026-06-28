@@ -49,6 +49,18 @@ func IsDisasm(name string) (disasm, all bool) {
 	return false, false
 }
 
+// ViewNeedsDemangle reports whether a view actually displays symbol names, so the
+// CLI can skip the whole-table demangle pass for views that don't (sections,
+// segments, strings, libs, sources, info) — that pass allocates 1+ GB on a large
+// C++/Swift binary and is pure waste for them.
+func ViewNeedsDemangle(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "symbols", "syms":
+		return true
+	}
+	return false
+}
+
 // View dumps a named view as plain text, or errors for an unknown name.
 func View(f *binfile.File, name string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
@@ -290,15 +302,50 @@ func lmaCell(phys uint64, addrW int) string {
 	return fmt.Sprintf("0x%0*x", addrW, phys)
 }
 
-// Symbols dumps the symbol table (nm-like): addr, size, bind, type, name.
+// Symbols dumps the symbol table (nm-like): addr, size, bind, type, name. The
+// fixed columns are formatted into one reused buffer (no boxed Fprintf per row)
+// and the buffer is pre-sized, so a table with hundreds of thousands of symbols
+// stays cheap.
 func Symbols(f *binfile.File) string {
 	addrW := f.AddrHexWidth()
 	var b strings.Builder
-	for _, s := range f.Symbols {
-		fmt.Fprintf(&b, "0x%0*x %8d %-6s %-7s %s\n",
-			addrW, s.Addr, s.Size, bindName(s.Bind), kindName(s.Kind), s.Display())
+	b.Grow(len(f.Symbols) * (addrW + 40))
+	var line []byte
+	for i := range f.Symbols {
+		s := &f.Symbols[i]
+		line = append(line[:0], '0', 'x')
+		line = appendHexPad(line, s.Addr, addrW)
+		line = append(line, ' ')
+		line = appendRightUint(line, s.Size, 8)
+		line = append(line, ' ')
+		line = appendLeftStr(line, bindName(s.Bind), 6)
+		line = append(line, ' ')
+		line = appendLeftStr(line, kindName(s.Kind), 7)
+		line = append(line, ' ')
+		b.Write(line)
+		b.WriteString(s.Display())
+		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// appendRightUint appends v as decimal, right-justified in at least width columns.
+func appendRightUint(dst []byte, v uint64, width int) []byte {
+	var tmp [20]byte
+	d := strconv.AppendUint(tmp[:0], v, 10)
+	for p := width - len(d); p > 0; p-- {
+		dst = append(dst, ' ')
+	}
+	return append(dst, d...)
+}
+
+// appendLeftStr appends s, left-justified in at least width columns (ASCII).
+func appendLeftStr(dst []byte, s string, width int) []byte {
+	dst = append(dst, s...)
+	for p := width - len(s); p > 0; p-- {
+		dst = append(dst, ' ')
+	}
+	return dst
 }
 
 // Strings dumps the printable strings with their address (or file offset). The

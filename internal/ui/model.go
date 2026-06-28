@@ -307,6 +307,7 @@ type stringsState struct {
 	stringsSec        string     // the section name the filter restricts to
 	stringsSort       stringSort // sort field for the (filtered) list
 	stringsSortDesc   bool       // reverse the active sort
+	stringsCompact    bool       // flow strings inline (· separated, no columns) vs the table
 	stringRowCache    map[rowCacheKey]string
 	stringHeightCache map[rowCacheKey]int
 }
@@ -361,10 +362,12 @@ type interactionState struct {
 	// it is built (config behavior.tree_collapsed).
 	treeCollapseDefault bool
 
-	// hexWords toggles the hex/raw views' trailing column from ASCII to a
-	// pointer-sized word decode that resolves each word to the symbol/section it
-	// points at (the `p` key) — useful for reading GOT/data pointer tables.
-	hexWords bool
+	// hexNumeric switches the hex/raw views' trailing column from ASCII (default)
+	// to the numeric interpretation selected by hexInterp. `t` toggles ascii vs
+	// numeric; shift+t cycles the interpretation. The pointer-sized hex
+	// interpretation resolves each word to the symbol/section it points at.
+	hexNumeric bool
+	hexInterp  int // index into hexInterps; -1 until initialised to the pointer width
 
 	// hexInspect replaces the hex/raw banner with a data inspector that decodes
 	// the bytes under the cursor as int/uint of every width, float, char and

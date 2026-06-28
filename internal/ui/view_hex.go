@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -50,7 +51,7 @@ const hexGridWidth = bytesPerHexRow*2 + (bytesPerHexRow - 1) + 1
 // the symbol annotations sit) in ascii mode.
 func (m *Model) hexWrapIndent(addrW int) int {
 	col := hexBodyStart(addrW) + hexGridWidth + 2 // start of the ascii / word column
-	if !m.hexWords {
+	if !m.hexNumeric {
 		col += bytesPerHexRow + 2 // skip the |ascii| column to the symbol annotations
 	}
 	return col
@@ -182,15 +183,66 @@ func (m *Model) inspectorBanner(data byteSource, pos int, prefix string) string 
 	return prefix + "  " + strings.Join(parts, "  ")
 }
 
-// toggleHexWords flips the hex/raw trailing column between ASCII and the
-// pointer-word decode, reporting the new mode in the footer.
+// hexInterpKind is how a trailing-column interpretation renders a fixed-width word.
+type hexInterpKind uint8
+
+const (
+	hexHex   hexInterpKind = iota // unsigned hex; the pointer-sized one resolves targets
+	hexUint                       // unsigned decimal
+	hexSint                       // signed decimal
+	hexFloat                      // IEEE-754
+)
+
+// hexInterpDef is one numeric interpretation of the row's bytes.
+type hexInterpDef struct {
+	name string
+	size int // bytes per value
+	kind hexInterpKind
+}
+
+// hexInterps is the cycle shift+t steps through: hex / unsigned / signed at each
+// width, plus 32- and 64-bit floats. Ordered by width so the cycle is predictable.
+var hexInterps = []hexInterpDef{
+	{"u8", 1, hexUint}, {"i8", 1, hexSint},
+	{"x16", 2, hexHex}, {"u16", 2, hexUint}, {"i16", 2, hexSint},
+	{"x32", 4, hexHex}, {"u32", 4, hexUint}, {"i32", 4, hexSint}, {"f32", 4, hexFloat},
+	{"x64", 8, hexHex}, {"u64", 8, hexUint}, {"i64", 8, hexSint}, {"f64", 8, hexFloat},
+}
+
+// curHexInterp returns the active interpretation, resolving the initial -1 to the
+// pointer-width hex (the historical pointer column).
+func (m *Model) curHexInterp() hexInterpDef {
+	if m.hexInterp < 0 || m.hexInterp >= len(hexInterps) {
+		ps := m.pointerSize()
+		m.hexInterp = 0
+		for i, in := range hexInterps {
+			if in.kind == hexHex && in.size == ps {
+				m.hexInterp = i
+				break
+			}
+		}
+	}
+	return hexInterps[m.hexInterp]
+}
+
+// toggleHexWords flips the trailing column between ASCII and the current numeric
+// interpretation (the `t` key), reporting the new mode in the footer.
 func (m *Model) toggleHexWords() {
-	m.hexWords = !m.hexWords
+	m.hexNumeric = !m.hexNumeric
 	col := "ascii"
-	if m.hexWords {
-		col = "pointers"
+	if m.hexNumeric {
+		col = m.curHexInterp().name
 	}
 	m.setStatus("hex column: "+col, false)
+}
+
+// cycleHexInterp switches to numeric mode and advances to the next interpretation
+// (shift+t).
+func (m *Model) cycleHexInterp() {
+	_ = m.curHexInterp() // resolve the initial -1 before stepping
+	m.hexNumeric = true
+	m.hexInterp = (m.hexInterp + 1) % len(hexInterps)
+	m.setStatus("hex column: "+hexInterps[m.hexInterp].name, false)
 }
 
 // toggleHexInspect flips the data-inspector banner on/off.
@@ -295,6 +347,8 @@ func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
 		m.toggleWrap()
 	case "t":
 		m.toggleHexWords()
+	case "T":
+		m.cycleHexInterp()
 	case "i":
 		m.toggleHexInspect()
 	case "P":
@@ -434,6 +488,8 @@ func (m *Model) updateRaw(key string) (tea.Model, tea.Cmd) {
 		m.toggleWrap()
 	case "t":
 		m.toggleHexWords()
+	case "T":
+		m.cycleHexInterp()
 	case "i":
 		m.toggleHexInspect()
 	case "P":
@@ -858,14 +914,19 @@ func (m *Model) readPointer(data byteSource, pos int) (uint64, bool) {
 }
 
 func (m *Model) hexWordDecode(data byteSource, span hexRowSpan, cur int) string {
-	size := m.pointerSize()
+	in := m.curHexInterp()
+	size := in.size
+	colW := hexColWidth(in) // right-align values so the columns line up
+	// Only the pointer-width hex interpretation resolves words to targets (the
+	// historical pointer column); the others are pure numeric reads.
+	ptr := in.kind == hexHex && size == m.pointerSize()
 	var words, notes []string
 	for slot := 0; slot+size <= bytesPerHexRow; slot += size {
 		i := span.start + slot - span.lead
 		if slot < span.lead || i < span.start || i+size > span.end {
 			continue
 		}
-		v, ok := m.readPointer(data, i)
+		v, ok := m.readWord(data, i, size)
 		if !ok {
 			continue
 		}
@@ -875,7 +936,7 @@ func (m *Model) hexWordDecode(data byteSource, span hexRowSpan, cur int) string 
 		// word's → target is drawn in the same colour so they read as a pair.
 		onCursor := cur >= i && cur < i+size
 		style := m.theme.asmNumberStyle
-		if v != 0 && m.file.IsMapped(v) {
+		if ptr && v != 0 && m.file.IsMapped(v) {
 			style = m.theme.hexPointerStyle
 			if onCursor {
 				style = m.theme.linkAddrInterStyle
@@ -884,13 +945,90 @@ func (m *Model) hexWordDecode(data byteSource, span hexRowSpan, cur int) string 
 				notes = append(notes, style.Render(name))
 			}
 		}
-		words = append(words, style.Render(fmt.Sprintf("0x%0*x", size*2, v)))
+		text := formatHexWord(in, v)
+		if pad := colW - len(text); pad > 0 {
+			text = hexPadSpaces[:pad] + text // right-align within the column
+		}
+		words = append(words, style.Render(text))
 	}
 	out := strings.Join(words, " ")
 	if len(notes) > 0 {
 		out += "  " + m.theme.addrStyle.Render("→ ") + strings.Join(notes, m.theme.addrStyle.Render(", "))
 	}
 	return out
+}
+
+// readWord reads size bytes at pos as an unsigned value, honouring the file's
+// byte order (the inspector's readU, exposed for the interpretation columns).
+func (m *Model) readWord(data byteSource, pos, size int) (uint64, bool) {
+	if pos < 0 || pos+size > data.Len() {
+		return 0, false
+	}
+	var v uint64
+	if m.file.Info != nil && m.file.Info.ByteOrder == "big-endian" {
+		for k := 0; k < size; k++ {
+			v = v<<8 | uint64(data.At(pos+k))
+		}
+	} else {
+		for k := size - 1; k >= 0; k-- {
+			v = v<<8 | uint64(data.At(pos+k))
+		}
+	}
+	return v, true
+}
+
+// hexPadSpaces is sliced to right-align interpretation values (the widest column
+// is the 20-digit i64/u64 decimal).
+const hexPadSpaces = "                    " // 20 spaces
+
+// hexColWidth is the column width an interpretation's values are right-aligned to,
+// sized to the widest possible value so signed/unsigned decimals line up.
+func hexColWidth(in hexInterpDef) int {
+	switch in.kind {
+	case hexHex:
+		return in.size*2 + 2 // "0x" + digits (already fixed-width)
+	case hexFloat:
+		return 12 // %g varies; a stable column that fits typical magnitudes
+	}
+	w := 20 // u64 has up to 20 digits
+	switch in.size {
+	case 1:
+		w = 3 // 255
+	case 2:
+		w = 5 // 65535
+	case 4:
+		w = 10 // 4294967295
+	}
+	if in.kind == hexSint {
+		w++ // room for a leading '-'
+	}
+	return w
+}
+
+// formatHexWord renders one raw word per the interpretation's kind.
+func formatHexWord(in hexInterpDef, v uint64) string {
+	switch in.kind {
+	case hexUint:
+		return strconv.FormatUint(v, 10)
+	case hexSint:
+		return strconv.FormatInt(signExtend(v, in.size), 10)
+	case hexFloat:
+		if in.size == 4 {
+			return fmt.Sprintf("%g", math.Float32frombits(uint32(v)))
+		}
+		return fmt.Sprintf("%g", math.Float64frombits(v))
+	default: // hexHex
+		return fmt.Sprintf("0x%0*x", in.size*2, v)
+	}
+}
+
+// signExtend interprets the low size bytes of v as a two's-complement signed int.
+func signExtend(v uint64, size int) int64 {
+	if size >= 8 {
+		return int64(v)
+	}
+	shift := uint(64 - size*8)
+	return int64(v<<shift) >> shift
 }
 
 // pointerWordStart aligns a byte position down to the pointer-word boundary on
@@ -938,7 +1076,7 @@ func (m *Model) renderHexRow(md mode, data byteSource, cur int, span hexRowSpan,
 		m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, span.lineAddr)),
 		hexCol.String(),
 	)
-	if m.hexWords {
+	if m.hexNumeric {
 		line.WriteString(m.hexWordDecode(data, span, cur))
 	} else {
 		line.WriteString("|")
@@ -948,7 +1086,7 @@ func (m *Model) renderHexRow(md mode, data byteSource, cur int, span hexRowSpan,
 	// The trailing symbol/section annotation is only useful in the ASCII view; in
 	// pointer mode the row already carries the word decode and its → targets, so
 	// the extra annotation just adds noise and width.
-	if md == modeHex && !m.hexWords && !m.cfg.Behavior.HideAnnotations {
+	if md == modeHex && !m.hexNumeric && !m.cfg.Behavior.HideAnnotations {
 		addr := addrAt(span.start)
 		endAddr := addr + uint64(span.end-span.start)
 		if syms := m.file.SymbolsInRange(addr, endAddr); len(syms) != 0 {

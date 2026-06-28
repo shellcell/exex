@@ -177,10 +177,27 @@ func (m *Model) currentString() (binfile.StringEntry, bool) {
 
 func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	m.ensureStrings()
+	// In the compact flow, strings read left-to-right, so ←/→ step the selection
+	// too (in the table they're unused).
+	if m.stringsCompact && (key == "left" || key == "right") {
+		if key == "left" {
+			m.stringsCur = max(0, m.stringsCur-1)
+		} else {
+			m.stringsCur = min(len(m.stringsFiltered)-1, m.stringsCur+1)
+		}
+		return m, nil
+	}
 	if navKey(&m.stringsCur, len(m.stringsFiltered), m.listPage(), key) {
 		return m, nil
 	}
 	switch key {
+	case "t":
+		m.stringsCompact = !m.stringsCompact
+		mode := "table"
+		if m.stringsCompact {
+			mode = "compact"
+		}
+		m.setStatus("strings: "+mode, false)
 	case "/":
 		m.stringsFilter.Focus()
 	case "esc":
@@ -278,6 +295,10 @@ func (m *Model) renderStrings() string {
 			m.theme.footerStyle.Render("   ") + m.theme.helpKeyStyle.Render("s") + m.theme.footerStyle.Render(" sort:"+m.stringsSort.String()+dir)
 	}
 
+	if m.stringsCompact {
+		return m.renderStringsFlow(bodyH, filterRow)
+	}
+
 	addrW := m.file.AddrHexWidth()
 	addrCol := 2 + addrW
 	offsetLabel := sortHeaderLabel("Offset", 10, strSortOffset, m.stringsSort, m.stringsSortDesc)
@@ -309,6 +330,194 @@ func (m *Model) renderStrings() string {
 		}
 	}
 	return padBodyRows(rows, m.width, bodyH)
+}
+
+// renderStringsFlow draws the compact strings view: every string laid out inline,
+// separated by a middle dot and wrapped to the width — no address/section/offset
+// columns. The selected string (caret) is highlighted and the view scrolls to keep
+// it visible; ←/→ and ↑/↓ all step the selection.
+func (m *Model) renderStringsFlow(bodyH int, filterRow string) string {
+	sep := m.theme.srcShadowStyle.Render(" · ")
+	visible := max(1, bodyH-1) // filter row
+	n := len(m.stringsFiltered)
+
+	// pack lays strings out from top into at most `visible` lines, returning the
+	// rendered lines and the last string index shown. Strings are printable ASCII
+	// (width == byte length), so the bytes are written straight from the file image
+	// (zero-copy) and only the highlighted caret string is converted to a string.
+	pack := func(top int) (lines []string, last int) {
+		var line strings.Builder
+		lineW := 0
+		last = top - 1
+		for i := top; i < n; i++ {
+			e := m.stringsList[m.stringsFiltered[i]]
+			sw, trunc := flowWidth(e)
+			need := sw
+			if lineW > 0 {
+				need += flowSepW
+			}
+			if lineW > 0 && lineW+need > m.width {
+				lines = append(lines, line.String())
+				if len(lines) >= visible {
+					return lines, last
+				}
+				line.Reset()
+				lineW = 0
+				need = sw
+			}
+			if lineW > 0 {
+				line.WriteString(sep)
+			}
+			b := m.file.StringBytes(e)
+			switch {
+			case i == m.stringsCur:
+				line.WriteString(m.theme.tableSelStyle.Render(flowText(b, trunc)))
+			case trunc:
+				line.Write(b[:flowMaxLen])
+				line.WriteRune('…')
+			default:
+				line.Write(b)
+			}
+			lineW += need
+			last = i
+		}
+		if lineW > 0 && len(lines) < visible {
+			lines = append(lines, line.String())
+		}
+		return lines, last
+	}
+
+	// When the wheel has detached the viewport, render from the scrolled top as-is
+	// (the caret may be off-screen); otherwise keep the caret visible.
+	if m.viewportDetached {
+		m.stringsTop = clamp(m.stringsTop, 0, max(0, n-1))
+	} else if m.stringsCur < m.stringsTop {
+		m.stringsTop = m.stringsCur
+	}
+	lines, last := pack(m.stringsTop)
+	if !m.viewportDetached && m.stringsCur > last { // caret past the bottom — bring it up
+		m.stringsTop = m.stringsCur
+		lines, _ = pack(m.stringsTop)
+	}
+	m.renderedStringsTop = m.stringsTop
+	rows := append([]string{filterRow}, lines...)
+	return padBodyRows(rows, m.width, bodyH)
+}
+
+// flowSepW is the visible width of the " · " separator; flowMaxLen bounds a single
+// flowed string so one entry can't fill the view (printable runs carry no newlines).
+const (
+	flowSepW   = 3
+	flowMaxLen = 200
+)
+
+// flowWidth is the rendered width of a flowed string (== byte length for printable
+// ASCII) and whether it was truncated to flowMaxLen. Uses the entry length only —
+// no string copy — so the scroll/pack hot paths don't allocate per string.
+func flowWidth(e binfile.StringEntry) (w int, trunc bool) {
+	if int(e.Len) > flowMaxLen {
+		return flowMaxLen + 1, true // flowMaxLen bytes + the "…"
+	}
+	return int(e.Len), false
+}
+
+// flowText materialises a flowed string (only needed for the highlighted caret).
+func flowText(b []byte, trunc bool) string {
+	if trunc {
+		return string(b[:flowMaxLen]) + "…"
+	}
+	return string(b)
+}
+
+// flowStrW is the rendered width of the i-th filtered string in the compact flow.
+func (m *Model) flowStrW(i int) int {
+	w, _ := flowWidth(m.stringsList[m.stringsFiltered[i]])
+	return w
+}
+
+// flowLineEnd returns the exclusive end index of the compact-flow line that starts
+// at `top`: at least one string, then as many as fit `width`. Mirrors pack().
+func (m *Model) flowLineEnd(top, width int) int {
+	w, i := 0, top
+	for i < len(m.stringsFiltered) {
+		add := m.flowStrW(i)
+		if w > 0 {
+			add += flowSepW
+		}
+		if w > 0 && w+add > width {
+			break
+		}
+		w += add
+		i++
+	}
+	if i == top { // a single over-wide string still occupies its own line
+		return top + 1
+	}
+	return i
+}
+
+// flowLineStart returns the start index of the line ending just before `top` — the
+// exact inverse of flowLineEnd, so scrolling up then down returns to the same place.
+func (m *Model) flowLineStart(top, width int) int {
+	if top <= 0 {
+		return 0
+	}
+	w, i := 0, top-1
+	for i >= 0 {
+		add := m.flowStrW(i)
+		if w > 0 {
+			add += flowSepW
+		}
+		if w > 0 && w+add > width {
+			break
+		}
+		w += add
+		i--
+	}
+	return i + 1
+}
+
+// flowStringAt maps a click at flow line `line` (0-based within the body, after
+// the filter row) and column x to a string index, packing from `top` exactly like
+// the renderer. A click in the separator gap selects the following string.
+func (m *Model) flowStringAt(top, line, x int) (int, bool) {
+	if line < 0 {
+		return 0, false
+	}
+	curLine, col := 0, 0
+	for i := top; i < len(m.stringsFiltered); i++ {
+		sw, _ := flowWidth(m.stringsList[m.stringsFiltered[i]])
+		if col > 0 && col+flowSepW+sw > m.width { // wrap, mirroring pack()
+			curLine++
+			col = 0
+		}
+		if curLine > line {
+			return 0, false
+		}
+		end := col + sw
+		if col > 0 {
+			end += flowSepW
+		}
+		if curLine == line && x >= col && x < end {
+			return i, true
+		}
+		col = end
+	}
+	return 0, false
+}
+
+// scrollStringsFlow moves the compact view by delta lines (wheel scrolling).
+func (m *Model) scrollStringsFlow(delta int) {
+	for ; delta > 0; delta-- {
+		next := m.flowLineEnd(m.stringsTop, m.width)
+		if next >= len(m.stringsFiltered) {
+			break
+		}
+		m.stringsTop = next
+	}
+	for ; delta < 0 && m.stringsTop > 0; delta++ {
+		m.stringsTop = m.flowLineStart(m.stringsTop, m.width)
+	}
 }
 
 func (m *Model) stringRowHeight(i int) int {

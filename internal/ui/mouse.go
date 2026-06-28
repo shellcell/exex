@@ -158,6 +158,9 @@ func (m *Model) listGeometryFor() (listGeometry, bool) {
 		return listGeometry{len(m.symbolsRows), 2, m.symbolRowHeight, &m.symbolsCur, &m.symbolsTop, m.renderedSymbolsTop}, true
 	case modeStrings:
 		m.ensureStrings()
+		if m.stringsCompact {
+			return listGeometry{}, false // the · flow has its own line-based scroll
+		}
 		return listGeometry{len(m.stringsFiltered), 2, m.stringRowHeight, &m.stringsCur, &m.stringsTop, m.renderedStringsTop}, true
 	case modeSources:
 		m.ensureSources()
@@ -181,6 +184,8 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
+	case modeStrings: // compact · flow (the table is handled via listGeometry above)
+		m.scrollStringsFlow(delta)
 	case modeDisasm:
 		m.scrollDisasmViewport(delta)
 	case modeHex:
@@ -406,6 +411,10 @@ func (m *Model) handleClick(x, y int) bool {
 		return false
 	}
 	switch m.mode {
+	case modeStrings: // compact · flow: map the click to the string under it
+		if idx, ok := m.flowStringAt(m.renderedStringsTop, bodyRow-1, x); ok {
+			m.stringsCur = idx
+		}
 	case modeHex:
 		m.ensureHex()
 		top := m.hexVisibleTop(modeHex, m.hexCur, m.hexTop, max(1, m.bodyHeight()-1), m.hexImg.AddrAt)

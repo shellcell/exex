@@ -517,9 +517,9 @@ func TestKeysHexRaw(t *testing.T) {
 	h.goView(modeHex, "5")
 
 	// t toggles the pointer/ascii column; i toggles the inspector.
-	pw0 := h.m().hexWords
+	pw0 := h.m().hexNumeric
 	h.press("t")
-	if h.m().hexWords == pw0 {
+	if h.m().hexNumeric == pw0 {
 		t.Fatal("t did not toggle the hex pointer column")
 	}
 	in0 := h.m().hexInspect
@@ -561,9 +561,9 @@ func TestKeysHexRaw(t *testing.T) {
 
 	// Raw view: d jumps back to disasm for an allocated offset; t/i/copy work.
 	h.goView(modeRaw, "6")
-	pw0 = h.m().hexWords
+	pw0 = h.m().hexNumeric
 	h.press("t")
-	if h.m().hexWords == pw0 {
+	if h.m().hexNumeric == pw0 {
 		t.Fatal("raw: t did not toggle the pointer column")
 	}
 	h.m().lastCopy = ""
@@ -1037,9 +1037,9 @@ func TestKeysTabTogglesMode(t *testing.T) {
 
 	// Hex: tab toggles the ascii/pointer column.
 	h.goView(modeHex, "5")
-	pw0 := h.m().hexWords
+	pw0 := h.m().hexNumeric
 	h.press("tab")
-	if h.m().hexWords == pw0 {
+	if h.m().hexNumeric == pw0 {
 		t.Fatal("tab did not toggle the hex pointer column")
 	}
 

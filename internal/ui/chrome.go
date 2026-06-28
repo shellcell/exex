@@ -143,7 +143,8 @@ func (m *Model) renderHelpModal() string {
 		head("Hex / Raw"),
 		row("[ ]", "prev / next section"),
 		row("⇧[ ⇧]", "prev / next nonzero"),
-		row("t / ⇥", "toggle ascii / pointer column"),
+		row("t / ⇥", "trailing column: ascii ↔ numeric"),
+		row("⇧t", "cycle interpretation (i8…i64/u…/f32/f64)"),
 		row("i", "data inspector"),
 		row("⇧a/⇧s/⇧p", "copy address / symbol / pointer"),
 		row("↵ Enter", "follow pointer at cursor"),
@@ -161,6 +162,7 @@ func (m *Model) renderHelpModal() string {
 		blank,
 		head("Strings"),
 		row(altKeys("s"), "filter by section"),
+		row("t / ⇥", "table ↔ compact (· flow) layout"),
 	}
 
 	leftLines := m.helpColumn(left)
@@ -515,11 +517,11 @@ func (m *Model) viewHints() []footerHint {
 			return hints
 		}
 	case modeHex:
-		return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"[ ]", "section"}, {"t", "ptrs"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+		return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 	case modeRaw:
-		return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t", "ptrs"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+		return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 	case modeStrings:
-		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"/", "filter"}, {altKeys("s"), "section"}, {"⇧a/⇧s", "copy"}}
+		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {altKeys("s"), "section"}, {"⇧a/⇧s", "copy"}}
 	case modeSources:
 		if m.sourcesTree {
 			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {altKeys("a"), "present"}, {"t", "flat"}}

@@ -83,6 +83,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 		interactionState: interactionState{
 			wrap:                cfg.Behavior.DefaultWrap,
 			treeCollapseDefault: cfg.Behavior.TreeCollapsed,
+			hexInterp:           -1, // resolved to the pointer-width hex on first use
 		},
 		keyState: newKeyState(cfg.Keys),
 	}

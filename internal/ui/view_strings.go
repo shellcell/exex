@@ -117,6 +117,25 @@ func (m *Model) cycleStringSectionFilter() {
 
 // recomputeStrings rebuilds stringsFiltered from the current filter text,
 // matching on the string text and its owning section.
+// looksLikePath reports whether a string is a plausible filesystem path or URL:
+// it contains a path separator and alphanumerics, and no whitespace or control
+// characters. Deliberately inclusive (paths, URLs, "a/b") — the goal is to surface
+// every path-ish string, which the text filter can then narrow.
+func looksLikePath(b []byte) bool {
+	hasSep, hasAlnum := false, false
+	for _, c := range b {
+		switch {
+		case c == '/' || c == '\\':
+			hasSep = true
+		case c <= ' ', c == 0x7f:
+			return false // whitespace/control → not a clean path
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'):
+			hasAlnum = true
+		}
+	}
+	return hasSep && hasAlnum
+}
+
 func (m *Model) recomputeStrings() {
 	m.clearStringCaches()
 	needle := strings.ToLower(m.stringsFilter.Value())
@@ -127,7 +146,11 @@ func (m *Model) recomputeStrings() {
 		}
 		// Filter on the raw bytes (zero-copy) so scanning millions of strings on
 		// each keystroke doesn't allocate a copy per entry.
-		if needle == "" || containsFoldBytes(m.file.StringBytes(s), needle) || containsFold(s.Section, needle) {
+		b := m.file.StringBytes(s)
+		if m.stringsPathsOnly && !looksLikePath(b) {
+			continue
+		}
+		if needle == "" || containsFoldBytes(b, needle) || containsFold(s.Section, needle) {
 			m.stringsFiltered = append(m.stringsFiltered, i)
 		}
 	}
@@ -201,8 +224,9 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	case "/":
 		m.stringsFilter.Focus()
 	case "esc":
-		dirty := m.stringsSecOn || m.stringsFilter.Value() != "" || m.stringsFilter.Focused()
+		dirty := m.stringsSecOn || m.stringsPathsOnly || m.stringsFilter.Value() != "" || m.stringsFilter.Focused()
 		m.stringsSecOn = false
+		m.stringsPathsOnly = false
 		m.stringsFilter.SetValue("")
 		m.stringsFilter.Blur()
 		m.stringsCur, m.stringsTop = 0, 0
@@ -214,6 +238,15 @@ func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 		m.cycleStringSectionFilter()
 		m.stringsCur, m.stringsTop = 0, 0
 		m.recomputeStrings()
+	case "alt+p":
+		m.stringsPathsOnly = !m.stringsPathsOnly
+		m.stringsCur, m.stringsTop = 0, 0
+		m.recomputeStrings()
+		state := "off"
+		if m.stringsPathsOnly {
+			state = "on"
+		}
+		m.setStatus("paths only: "+state, false)
 	case "s":
 		m.stringsSort = (m.stringsSort + 1) % 3
 		m.stringsCur, m.stringsTop = 0, 0
@@ -290,8 +323,13 @@ func (m *Model) renderStrings() string {
 		if m.stringsSortDesc {
 			dir = "↓"
 		}
+		pathsLabel := "off"
+		if m.stringsPathsOnly {
+			pathsLabel = "on"
+		}
 		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d)   ", m.stringsFilter.Value(), len(m.stringsFiltered), len(m.stringsList))) +
 			m.theme.helpKeyStyle.Render(altKeys("s")) + m.theme.footerStyle.Render(" section:"+secLabel) +
+			m.theme.footerStyle.Render("   ") + m.theme.helpKeyStyle.Render(altKeys("p")) + m.theme.footerStyle.Render(" paths:"+pathsLabel) +
 			m.theme.footerStyle.Render("   ") + m.theme.helpKeyStyle.Render("s") + m.theme.footerStyle.Render(" sort:"+m.stringsSort.String()+dir)
 	}
 

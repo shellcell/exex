@@ -162,6 +162,7 @@ func (m *Model) renderHelpModal() string {
 		blank,
 		head("Strings"),
 		row(altKeys("s"), "filter by section"),
+		row(altKeys("p"), "filter to paths only"),
 		row("t / ⇥", "table ↔ compact (· flow) layout"),
 	}
 
@@ -522,7 +523,7 @@ func (m *Model) viewHints() []footerHint {
 	case modeRaw:
 		return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 	case modeStrings:
-		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {altKeys("s"), "section"}, {"⇧a/⇧s", "copy"}}
+		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {altKeys("s"), "section"}, {altKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
 	case modeSources:
 		if m.sourcesTree {
 			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {altKeys("a"), "present"}, {"t", "flat"}}

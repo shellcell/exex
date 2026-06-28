@@ -308,6 +308,7 @@ type stringsState struct {
 	stringsSort       stringSort // sort field for the (filtered) list
 	stringsSortDesc   bool       // reverse the active sort
 	stringsCompact    bool       // flow strings inline (· separated, no columns) vs the table
+	stringsPathsOnly  bool       // show only path-like strings (filesystem paths / URLs)
 	stringRowCache    map[rowCacheKey]string
 	stringHeightCache map[rowCacheKey]int
 }

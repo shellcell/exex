@@ -113,6 +113,8 @@ type symbolsState struct {
 	symbolsAbbrev       bool            // global: render "(…)"/"<…>" contents as "..."
 	symbolsAbbrevExcept map[string]bool // per-row overrides inverting symbolsAbbrev
 	symbolsCollapsed    map[string]bool // collapsed tree node paths (persist across rebuilds)
+	symbolsCollapsedAlt map[string]bool // pre-filter collapse state, saved while a search filter is active
+	symbolsFiltering    bool            // whether a search filter is currently narrowing the tree
 	symbolsRoots        []*treeNode     // built tree; cached so collapse toggles only re-flatten
 	symbolsRows         []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
 	symbolsTreeInit     bool            // collapse-default applied once

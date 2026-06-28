@@ -363,6 +363,20 @@ func (sc symbolScope) includes(s binfile.Symbol) bool {
 func (m *Model) recomputeSymbols() {
 	m.clearSymbolCaches()
 	needle := strings.ToLower(m.symbolsFilter.Value())
+	// Entering a search auto-expands the tree so matches aren't hidden under
+	// previously-collapsed groups; the pre-filter collapse state is saved and
+	// restored when the search clears. In between, collapse/expand work normally on
+	// the filtered tree (flattenSymbolRows honours symbolsCollapsed either way).
+	if filtering := needle != ""; filtering != m.symbolsFiltering {
+		if filtering {
+			m.symbolsCollapsedAlt = m.symbolsCollapsed
+			m.symbolsCollapsed = nil
+		} else {
+			m.symbolsCollapsed = m.symbolsCollapsedAlt
+			m.symbolsCollapsedAlt = nil
+		}
+		m.symbolsFiltering = filtering
+	}
 	lowerName, lowerDem := m.file.LowerNames()
 	m.symbolsFiltered = m.symbolsFiltered[:0]
 	scan := func(i int) {
@@ -493,11 +507,10 @@ func (m *Model) buildSymbolRows() {
 // flattenSymbolRows re-projects the cached tree (symbolsRoots) into visible rows
 // using the current collapse state — the cheap path taken on every collapse/expand.
 func (m *Model) flattenSymbolRows() {
-	collapsed := m.symbolsCollapsed
-	if m.symbolsFilter.Value() != "" {
-		collapsed = nil // while filtering, keep every match visible
-	}
-	m.symbolsRows = flattenTree(m.symbolsRoots, collapsed, 0, m.symbolsRows[:0])
+	// Always honour the collapse state — including while a search filter is active
+	// (recomputeSymbols auto-expands on entering the filter so matches show, then
+	// the user's collapse/expand take effect here).
+	m.symbolsRows = flattenTree(m.symbolsRoots, m.symbolsCollapsed, 0, m.symbolsRows[:0])
 }
 
 // symbolTreeActive reports whether the tree is currently shown. The tree is

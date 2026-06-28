@@ -102,7 +102,7 @@ func (f *File) extractStrings() []StringEntry {
 // followed past the boundary so it is captured whole exactly once.
 func (f *File) extractStringsRange(data []byte, secs []*Section, lo, hi int) []StringEntry {
 	printable := func(b byte) bool { return b >= 0x20 && b < 0x7f }
-	var out []StringEntry
+	out := make([]StringEntry, 0, 4096) // a typical section holds thousands of runs
 	start := -1
 	flush := func(end int) {
 		if start >= 0 && end-start >= minString {

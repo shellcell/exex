@@ -31,3 +31,37 @@ func benchDisasm(b *testing.B, all bool) {
 
 func BenchmarkDisasm(b *testing.B)    { benchDisasm(b, false) }
 func BenchmarkDisasmAll(b *testing.B) { benchDisasm(b, true) }
+
+// BenchmarkStringsDump and BenchmarkSymsDump cover the full `-o strings` / `-o
+// syms` CLI paths (re-Open each iteration so the string scan / symbol parse is
+// included), to profile their wall-time CPU against strings(1)/nm.
+func BenchmarkStringsDump(b *testing.B) {
+	path := os.Getenv("EXEX_BENCH_BIN")
+	if path == "" {
+		b.Skip("set EXEX_BENCH_BIN to a real binary")
+	}
+	b.ReportAllocs()
+	for range b.N {
+		f, err := binfile.Open(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = Strings(f)
+	}
+}
+
+func BenchmarkSymsDump(b *testing.B) {
+	path := os.Getenv("EXEX_BENCH_BIN")
+	if path == "" {
+		b.Skip("set EXEX_BENCH_BIN to a real binary")
+	}
+	b.ReportAllocs()
+	for range b.N {
+		f, err := binfile.Open(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		f.ApplyDemangled(f.ComputeDemangled())
+		_ = Symbols(f)
+	}
+}

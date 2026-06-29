@@ -1,3 +1,4 @@
 exex
 .vscode
 dist
+*.test

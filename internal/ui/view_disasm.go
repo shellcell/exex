@@ -60,6 +60,8 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "x":
 		return m, m.startXrefScan()
+	case "y":
+		return m, m.startSyscallScan()
 	case "w":
 		m.toggleWrap()
 		return m, nil
@@ -121,8 +123,64 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 		m.copyFunctionDisasm()
 	case "e":
 		m.toggleSymbolAbbrevAll()
+	case "a":
+		m.toggleDisasmAll()
 	}
 	return m, nil
+}
+
+// disasmAllHint labels the `a` toggle by what it will switch to.
+func (m *Model) disasmAllHint() string {
+	if m.file.DisasmAll() {
+		return "exec-only"
+	}
+	return "all-sec"
+}
+
+// toggleDisasmAll flips disasm-all mode: the byte source switches between the
+// executable sections and every section with file content (data, object-file
+// .text at address 0, …). All image-derived disasm state is rebuilt and the view
+// re-decodes, keeping the cursor address when it survives the switch.
+func (m *Model) toggleDisasmAll() {
+	if m.dis == nil {
+		m.setStatus("no disassembler for this architecture", true)
+		return
+	}
+	on := !m.file.DisasmAll()
+	// Turning all-sections off when there are no executable sections would leave an
+	// empty view (object files, kernels with no SHF_EXECINSTR section), so refuse.
+	if !on && !m.file.HasExecCode() {
+		m.setStatus("no executable sections — staying in all-sections disasm", false)
+		return
+	}
+	var addr uint64
+	if len(m.disasmInst) > 0 && m.disasmCur >= 0 && m.disasmCur < len(m.disasmInst) {
+		addr = m.disasmInst[m.disasmCur].Addr
+	}
+	m.file.SetDisasmAll(on)
+	m.resetDisasmImageState()
+	if on {
+		m.setStatus("disasm: all sections (a)", false)
+	} else {
+		m.setStatus("disasm: executable sections (a)", false)
+	}
+	m.loadDisasmAtNoHistory(addr)
+}
+
+// resetDisasmImageState discards every decode/render cache tied to the previous
+// byte image so a re-decode rebuilds them against the new one. Used when the
+// disasm image changes underfoot (disasm-all toggle).
+func (m *Model) resetDisasmImageState() {
+	m.disasmSvc = nil // rebuilt over the new ExecImage()
+	m.disasmInst = nil
+	m.disasmBuilt = false
+	m.disasmDecoding = false
+	m.disasmPosLo, m.disasmPosHi = 0, 0
+	m.disasmCur, m.disasmTop = 0, 0
+	m.disasmPositioned = false
+	m.execSecStarts = nil
+	m.disasmAsmCache = nil
+	m.clearDisasmDisplayCaches()
 }
 
 // copyFunctionDisasm copies the disassembly of the function under the cursor to

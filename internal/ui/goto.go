@@ -9,22 +9,83 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 )
 
-// gotoTarget is one selectable entry in the goto modal: either a symbol or a
-// bare parsed address.
-type gotoTarget struct {
-	label string
-	addr  uint64
-	sym   binfile.Symbol
-	isSym bool
+// gotoKind tags a palette result so it can be coloured and routed to the right
+// view on Enter.
+type gotoKind uint8
+
+const (
+	gkAddr gotoKind = iota
+	gkSymbol
+	gkSection
+	gkString
+	gkLib
+)
+
+func (k gotoKind) tag() string {
+	switch k {
+	case gkSymbol:
+		return "sym"
+	case gkSection:
+		return "sec"
+	case gkString:
+		return "str"
+	case gkLib:
+		return "lib"
+	default:
+		return "addr"
+	}
 }
+
+// gotoScope selects what the palette searches.
+type gotoScope uint8
+
+const (
+	gsAll      gotoScope = iota // symbols + sections + a typed address
+	gsSymbols                   // symbols only
+	gsSections                  // section names
+	gsStrings                   // printable strings (its own scope — the corpus is large)
+	gsLibs                      // linked libraries
+	gsAddr                      // a raw address (virtual, or physical when toggled)
+	gsScopeCount
+)
+
+func (s gotoScope) String() string {
+	switch s {
+	case gsSymbols:
+		return "symbols"
+	case gsSections:
+		return "sections"
+	case gsStrings:
+		return "strings"
+	case gsLibs:
+		return "libraries"
+	case gsAddr:
+		return "address"
+	default:
+		return "all"
+	}
+}
+
+// gotoTarget is one selectable palette entry, tagged by kind for colour + routing.
+type gotoTarget struct {
+	kind    gotoKind
+	label   string
+	addr    uint64
+	off     uint64 // file offset (sections / strings with no virtual address)
+	sym     binfile.Symbol
+	hasAddr bool
+}
+
+func (t gotoTarget) isSym() bool { return t.kind == gkSymbol }
 
 // gotoMaxResults bounds how many matches we keep (the list scrolls; the visible
 // window is sized to the terminal height in renderGotoModal).
 const gotoMaxResults = 500
 
-// recomputeGoto rebuilds the modal's result list from the current input. A
-// parseable address is always offered first; symbols are matched (raw name and
-// demangled name) and ranked exact → prefix → substring.
+// recomputeGoto rebuilds the palette's result list from the current input and
+// scope. Each scope searches its corpus; "all" spans symbols + sections and
+// offers a parseable address. Strings/libraries are their own scopes (the string
+// corpus is large enough that scanning it on every keystroke must be opt-in).
 func (m *Model) recomputeGoto() {
 	m.gotoResults = m.gotoResults[:0]
 	m.gotoSel = 0
@@ -33,11 +94,48 @@ func (m *Model) recomputeGoto() {
 	if val == "" {
 		return
 	}
-	if a, err := parseAddr(val); err == nil {
-		m.gotoResults = append(m.gotoResults, gotoTarget{label: "address", addr: a})
-	}
-
 	needle := strings.ToLower(val)
+	sc := m.gotoScope
+
+	if sc == gsAll || sc == gsAddr {
+		m.appendAddrTarget(val)
+	}
+	if sc == gsAll || sc == gsSymbols {
+		m.appendSymbolMatches(needle)
+	}
+	if sc == gsAll || sc == gsSections {
+		m.appendSectionMatches(needle)
+	}
+	if sc == gsStrings {
+		m.appendStringMatches(needle)
+	}
+	if sc == gsLibs {
+		m.appendLibMatches(needle)
+	}
+}
+
+// appendAddrTarget offers a parseable address, resolving a physical address to
+// its virtual one when physical mode is on.
+func (m *Model) appendAddrTarget(val string) {
+	a, err := parseAddr(val)
+	if err != nil {
+		return
+	}
+	label := "address  0x" + strconv.FormatUint(a, 16)
+	if m.gotoAddrPhys {
+		v, ok := m.file.PhysToVirtual(a)
+		if !ok {
+			return // physical address not in any section's load range
+		}
+		label = fmt.Sprintf("physical 0x%x → virtual 0x%x", a, v)
+		a = v
+	}
+	m.gotoResults = append(m.gotoResults, gotoTarget{kind: gkAddr, label: label, addr: a, hasAddr: true})
+}
+
+// appendSymbolMatches ranks symbols (raw + demangled name) exact → prefix →
+// substring and appends them.
+func (m *Model) appendSymbolMatches(needle string) {
 	lowerName, lowerDem := m.file.LowerNames()
 	type ranked struct {
 		t    gotoTarget
@@ -50,8 +148,7 @@ func (m *Model) recomputeGoto() {
 			continue
 		}
 		name, dem := lowerName[i], lowerDem[i]
-		hit := strings.Contains(name, needle) || (dem != "" && strings.Contains(dem, needle))
-		if !hit {
+		if !strings.Contains(name, needle) && (dem == "" || !strings.Contains(dem, needle)) {
 			continue
 		}
 		rank := 2
@@ -61,7 +158,7 @@ func (m *Model) recomputeGoto() {
 		case strings.HasPrefix(name, needle) || strings.HasPrefix(dem, needle):
 			rank = 1
 		}
-		matches = append(matches, ranked{gotoTarget{label: s.Display(), addr: s.Addr, sym: s, isSym: true}, rank})
+		matches = append(matches, ranked{gotoTarget{kind: gkSymbol, label: s.Display(), addr: s.Addr, sym: s, hasAddr: true}, rank})
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].rank != matches[j].rank {
@@ -77,36 +174,98 @@ func (m *Model) recomputeGoto() {
 	}
 }
 
-// activateGoto acts on the highlighted result, falling back to a bare address
-// parse when there are no results.
+// appendSectionMatches matches section names.
+func (m *Model) appendSectionMatches(needle string) {
+	for i := range m.file.Sections {
+		s := m.file.Sections[i]
+		if s.Size == 0 || !containsFold(s.Name, needle) {
+			continue
+		}
+		m.gotoResults = append(m.gotoResults, gotoTarget{
+			kind: gkSection, label: s.Name, addr: s.Addr, off: s.Offset, hasAddr: s.Addr != 0,
+		})
+		if len(m.gotoResults) >= gotoMaxResults {
+			return
+		}
+	}
+}
+
+// appendStringMatches matches printable strings (zero-copy over the file image).
+func (m *Model) appendStringMatches(needle string) {
+	for _, e := range m.file.Strings() {
+		if !containsFoldBytes(m.file.StringBytes(e), needle) {
+			continue
+		}
+		m.gotoResults = append(m.gotoResults, gotoTarget{
+			kind: gkString, label: sanitizeString(m.file.StringText(e)), addr: e.Addr, off: e.Offset, hasAddr: e.HasAddr,
+		})
+		if len(m.gotoResults) >= gotoMaxResults {
+			return
+		}
+	}
+}
+
+// appendLibMatches matches linked-library names.
+func (m *Model) appendLibMatches(needle string) {
+	if m.file.Info == nil {
+		return
+	}
+	for _, lib := range m.file.Info.DynamicLibs {
+		if containsFold(lib, needle) {
+			m.gotoResults = append(m.gotoResults, gotoTarget{kind: gkLib, label: lib})
+		}
+		if len(m.gotoResults) >= gotoMaxResults {
+			return
+		}
+	}
+}
+
+// activateGoto acts on the highlighted result, routing it to the natural view for
+// its kind; with no results it falls back to a bare address parse.
 func (m *Model) activateGoto() {
-	addr, ok := m.gotoSelectionAddr()
-	if !ok {
-		m.setStatus("nothing to go to", true)
+	if m.gotoSel < 0 || m.gotoSel >= len(m.gotoResults) {
+		if a, err := parseAddr(strings.TrimSpace(m.gotoInput.Value())); err == nil {
+			m.gotoAddr(a)
+		} else {
+			m.setStatus("nothing to go to", true)
+		}
 		return
 	}
-	// In the Sources view, goto navigates by source: resolve the target to its
-	// source file:line and open it there.
-	if m.mode == modeSources {
-		m.openSourceForAddr(addr)
+	t := m.gotoResults[m.gotoSel]
+	// In the Sources view, an address/symbol target navigates by source line.
+	if m.mode == modeSources && (t.kind == gkAddr || t.kind == gkSymbol) {
+		m.openSourceForAddr(t.addr)
 		return
 	}
-	if m.gotoSel >= 0 && m.gotoSel < len(m.gotoResults) && m.gotoResults[m.gotoSel].isSym {
-		m.openSymbol(m.gotoResults[m.gotoSel].sym)
-		return
+	switch t.kind {
+	case gkSymbol:
+		m.openSymbol(t.sym)
+	case gkSection, gkString:
+		if t.hasAddr {
+			m.gotoAddr(t.addr)
+		} else {
+			m.openRawAt(t.off)
+		}
+	case gkLib:
+		m.openLibsFiltered(t.label)
+	default:
+		m.gotoAddr(t.addr)
 	}
-	m.gotoAddr(addr)
+}
+
+// openLibsFiltered shows the Libraries view filtered to lib (where the user can
+// open it as primary).
+func (m *Model) openLibsFiltered(lib string) {
+	m.libsFilter.SetValue(lib)
+	m.setMode(modeLibs)
+	m.setStatus("library: "+lib+"  (press o to open it)", false)
 }
 
 // gotoSelectionAddr returns the address of the highlighted result, falling back
 // to a bare address typed into the prompt.
 func (m *Model) gotoSelectionAddr() (uint64, bool) {
 	if m.gotoSel >= 0 && m.gotoSel < len(m.gotoResults) {
-		t := m.gotoResults[m.gotoSel]
-		if t.isSym {
-			return t.sym.Addr, true
-		}
-		return t.addr, true
+		return m.gotoResults[m.gotoSel].addr, true
 	}
 	if a, err := parseAddr(strings.TrimSpace(m.gotoInput.Value())); err == nil {
 		return a, true
@@ -134,6 +293,8 @@ func (m *Model) closeGoto() {
 	m.gotoResults = m.gotoResults[:0]
 	m.gotoSel = 0
 	m.gotoTop = 0
+	m.gotoScope = gsAll
+	m.gotoAddrPhys = false
 }
 
 // gotoTargetString navigates to a startup goto argument: an explicit address

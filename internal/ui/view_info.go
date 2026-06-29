@@ -17,6 +17,9 @@ import (
 )
 
 func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
+	if m.isArchive() && m.infoMembers {
+		return m.updateMembersList(key)
+	}
 	switch key {
 	case "home":
 		m.headerVP.GotoTop()
@@ -25,19 +28,26 @@ func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 		m.headerVP.GotoBottom()
 		return m, nil
 	case "enter":
-		// Follow the entry point into disasm; fall back to hex when disassembly
-		// isn't possible (no decoder for this CPU, or entry not in exec code).
+		// Follow the entry point into disasm; fall back to hex only when it can't be
+		// disassembled at all (no decoder, or not in any code/data section). An entry
+		// in a non-executable section (e.g. a kernel's multiboot stub) still goes to
+		// disasm via disasm-all.
 		if entry := m.file.Entry(); entry != 0 {
-			if m.canDisasmAt(entry) {
-				m.loadDisasmAt(entry)
+			if m.dis != nil && (m.canDisasmAt(entry) || m.file.AddrDisassemblable(entry)) {
+				m.jumpDisasmAtAddr(entry)
 			} else {
 				m.openHexAt(entry)
 			}
 		}
 		return m, nil
 	case "t":
-		// Toggle to the next architecture slice of a fat Mach-O (doc #27: `t`
-		// toggles arches in Info, mirroring its toggle role in the other views).
+		// For a static library, `t`/`tab` opens the members list (doc #22). For a
+		// fat Mach-O it toggles the next architecture slice (doc #27). Both mirror
+		// the toggle role `t` plays in the other views.
+		if m.isArchive() {
+			m.enterMembersList()
+			return m, nil
+		}
 		if len(m.file.FatArches) > 1 {
 			return m.switchFatArch()
 		}
@@ -81,10 +91,41 @@ func (m *Model) switchFatArch() (tea.Model, tea.Cmd) {
 	return nm, nm.Init()
 }
 
+// fileTypeExplain returns a short plain-language gloss for a container file type
+// (ELF ET_*, Mach-O Exec/Dylib/…, PE EXE/DLL), or "" when unknown.
+func fileTypeExplain(t string) string {
+	switch strings.ToUpper(strings.TrimSpace(t)) {
+	case "ET_EXEC", "EXEC", "EXECUTE", "EXE", "EXECUTABLE":
+		return "runnable program"
+	case "ET_DYN", "DYLIB", "DLL", "DYLINKER":
+		return "shared / dynamic library"
+	case "ET_REL", "OBJ", "OBJECT", "REL", "RELOCATABLE":
+		return "relocatable object (not yet linked)"
+	case "ET_CORE", "CORE":
+		return "core dump (crash snapshot)"
+	case "BUNDLE":
+		return "loadable bundle / plugin"
+	case "DSYM":
+		return "debug-symbols companion"
+	case "KEXTBUNDLE", "KEXT":
+		return "kernel extension"
+	case "PRELOAD":
+		return "preloaded program image"
+	case "FILESET":
+		return "Mach-O fileset (kernel collection)"
+	}
+	// ELF ET_DYN can be a PIE executable; the loader can't always tell, so keep the
+	// generic gloss above.
+	return ""
+}
+
 // infoKeyWidth is the aligned width of the key column in the Info view.
 const infoKeyWidth = 15
 
 func (m *Model) renderInfo() string {
+	if m.isArchive() && m.infoMembers {
+		return m.renderMembersList()
+	}
 	bodyH := m.bodyHeight()
 	innerW := max(1, m.width-4) // panel border (2) + padding (2)
 
@@ -167,21 +208,40 @@ func (m *Model) buildInfoContent(innerW int) string {
 
 	// Identity (from the format header). The Entry line is actionable.
 	head("Identity")
+	// These header fields are shown (more usefully) in the Requirements / Contents
+	// blocks below, so skip them here to avoid repetition.
+	identitySkip := map[string]bool{"CPU": true, "64-bit": true, "Sections": true, "Symbols": true, "DWARF info": true}
 	for _, l := range m.file.HeaderInfo() {
 		if strings.HasPrefix(l, "Entry:") {
 			kv("Entry", m.entryValue())
 			continue
 		}
 		if idx := strings.IndexByte(l, ':'); idx >= 0 {
-			kvText(l[:idx], strings.TrimSpace(l[idx+1:]))
+			key, val := l[:idx], strings.TrimSpace(l[idx+1:])
+			if identitySkip[key] {
+				continue
+			}
+			// Explain the file type in plain language (Dylib → dynamic library, …).
+			if key == "Type" {
+				if exp := fileTypeExplain(val); exp != "" {
+					kv("Type", m.theme.tableRowStyle.Render(val)+"  "+dim("("+exp+")"))
+					continue
+				}
+			}
+			kvText(key, val)
 		} else {
 			b.WriteString("    ")
 			b.WriteString(m.theme.tableRowStyle.Render(l))
 			b.WriteString("\n")
 		}
 	}
-	if m.dis != nil {
-		kvText("Disassembler", m.dis.Name())
+	// The disassembler is only worth surfacing when there *isn't* one — then it
+	// explains why disasm is unavailable.
+	if m.dis == nil {
+		kvText("Disassembler", m.theme.warnStyle.Render("none for this architecture"))
+	}
+	if m.file.SyntheticAddrs() {
+		kvText("Addresses", m.theme.warnStyle.Render("synthetic")+dim("  — relocatable object; exex lays sections out so they don't collide. Real positions are section-relative."))
 	}
 	// Universal (fat) Mach-O: a per-architecture listing. Shown for every fat
 	// binary; the slice currently loaded is marked, and `a` switches between them.
@@ -213,6 +273,28 @@ func (m *Model) buildInfoContent(innerW int) string {
 	}
 
 	if info != nil {
+		// Requirements — the consolidated "what it takes to run this": the CPU it
+		// targets, the minimum OS, and how it links. (Details live in the Overview /
+		// Hardening / Dynamic-linking sections below; this is the at-a-glance answer.)
+		head("Requirements")
+		archLine := m.file.Arch().String()
+		if info.WordBits != 0 {
+			archLine += fmt.Sprintf("  ·  %d-bit  ·  %s", info.WordBits, info.ByteOrder)
+		}
+		kvText("CPU / arch", archLine)
+		if info.MinOS != "" {
+			kvText("Minimum OS", info.MinOS)
+		}
+		link := "dynamically linked"
+		if info.StaticLinked {
+			link = "statically linked"
+		}
+		if info.PIE == binfile.TriYes {
+			link += "  ·  PIE"
+		}
+		kvText("Linking", link)
+		kv("CPU features", dim("press F to detect (SSE / AVX / NEON / …) · -o cpu-features"))
+
 		// Overview — sizes in the number colour, addresses in the address colour.
 		head("Overview")
 		kv("File size", num(humanBytes(info.FileSize))+"  "+dim(fmt.Sprintf("(%d bytes)", info.FileSize)))
@@ -233,6 +315,26 @@ func (m *Model) buildInfoContent(innerW int) string {
 		if info.Segments > 0 {
 			kv(segmentLabel(m.file.Format), num(fmt.Sprintf("%d", info.Segments)))
 		}
+
+		// Contents — what's inside and the key that jumps there (a table of
+		// contents for the binary, so the first screen orients the reader).
+		head("Contents")
+		cnt := func(label string, n int, key string) {
+			kv(label, num(fmt.Sprintf("%d", n))+"  "+dim("(press "+key+")"))
+		}
+		cnt("Sections", len(m.file.Sections), "2")
+		cnt("Symbols", len(m.file.Symbols), "3")
+		kv("Disassembly", dim("press 4"))
+		kv("Strings", dim("press 7"))
+		if len(info.DynamicLibs) > 0 {
+			cnt("Libraries", len(info.DynamicLibs), "8")
+		}
+		if m.file.HasDWARF() {
+			kv("Sources", dim("press 9"))
+		}
+		kv("Relocations", dim("press 0")) // always available; the view builds relocs lazily on open
+		kv("Raw header", dim("press ⇧H — full "+string(m.file.Format)+" header fields"))
+		kv("Find anything", dim("press g — symbol / section / string / address"))
 
 		// Hardening — a ✓/✗/◐ badge coloured by how safe each setting is.
 		head("Hardening")

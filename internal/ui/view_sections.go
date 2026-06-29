@@ -206,20 +206,9 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "t":
-		// Toggle sections ⇄ segments. No segments (e.g. PE) → stay on sections.
-		if !m.showSegments && len(m.segments) == 0 {
-			m.setStatus("no segments in this binary", false)
-			return m, nil
-		}
-		m.showSegments = !m.showSegments
-		m.sectionsCur, m.sectionsTop = 0, 0
-		m.sectionsFilter.SetValue("")
-		m.recomputeSections()
-		if m.showSegments {
-			m.setStatus("showing segments (t for sections)", false)
-		} else {
-			m.setStatus("showing sections (t for segments)", false)
-		}
+		// Cycle sections → segments → header → sections (segments skipped when the
+		// binary has none, e.g. PE).
+		m.setStatus(m.cycleSectionsMode(), false)
 		return m, nil
 	case "enter":
 		if m.showSegments {
@@ -242,30 +231,44 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 			m.openRawAt(sec.Offset)
 		}
 	case "d":
+		// jumpDisasmAtAddr falls back to disasm-all when the target isn't in an
+		// executable section (e.g. a multiboot/boot section), so kernel code that
+		// isn't flagged executable can still be disassembled.
 		if m.showSegments {
-			if seg, ok := m.currentSegment(); ok && seg.X && seg.Addr != 0 && m.dis != nil {
-				m.loadDisasmAt(seg.Addr)
+			if seg, ok := m.currentSegment(); ok && seg.Addr != 0 {
+				m.jumpDisasmAtAddr(seg.Addr)
 			} else {
-				m.setStatus("segment is not executable", true)
+				m.setStatus("segment has no address to disassemble", true)
 			}
 			return m, nil
 		}
-		sec, ok := m.currentSection()
-		if !ok {
-			return m, nil
-		}
-		if binfile.IsExecSection(&sec) && m.dis != nil {
-			m.loadDisasmAt(sec.Addr)
-		} else {
-			m.setStatus("section is not executable", true)
+		if sec, ok := m.currentSection(); ok {
+			m.jumpDisasmAtAddr(sec.Addr)
 		}
 	case "h":
 		if addr, ok := m.currentSectionAddr(); ok {
 			m.jumpHexAtAddr(addr)
 		}
 	case "m":
-		if addr, ok := m.currentSectionAddr(); ok {
-			m.jumpRawAtAddr(addr)
+		// Raw is file-offset based, so jump by the section/segment's file offset
+		// directly — non-allocated sections (.symtab, .strtab, …) have no virtual
+		// address but do have file bytes, so an address-based jump would fail.
+		if m.showSegments {
+			if seg, ok := m.currentSegment(); ok {
+				if seg.FileSize > 0 {
+					m.openRawAt(seg.Offset)
+				} else {
+					m.setStatus("segment has no file bytes", true)
+				}
+			}
+			return m, nil
+		}
+		if sec, ok := m.currentSection(); ok {
+			if sec.FileSize > 0 {
+				m.openRawAt(sec.Offset)
+			} else {
+				m.setStatus("section has no file bytes (e.g. .bss)", true)
+			}
 		}
 	case "s":
 		m.sectionsSort = (m.sectionsSort + 1) % 4
@@ -343,7 +346,6 @@ func (m *Model) renderSections() string {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-
 	total := len(m.sections)
 	kind := "sections"
 	if m.showSegments {
@@ -397,7 +399,7 @@ func (m *Model) renderSections() string {
 	switch {
 	case m.showSegments && phys:
 		hdr = fmt.Sprintf(" %3s  %-16s %-5s %-*s %-*s %-12s %-12s  %s",
-			idxLabel, nameLabel, "Perms", addrCol, addrLabel, addrCol, "PAddr", sizeLabel, "FileSize", "Align")
+			idxLabel, nameLabel, "Perms", addrCol, addrLabel, addrCol, "LMA", sizeLabel, "FileSize", "Align")
 	case m.showSegments:
 		hdr = fmt.Sprintf(" %3s  %-16s %-5s %-*s %-12s %-12s  %s",
 			idxLabel, nameLabel, "Perms", addrCol, addrLabel, sizeLabel, "FileSize", "Align")
@@ -422,6 +424,13 @@ func (m *Model) renderSections() string {
 	m.sectionsTop = top
 	m.renderedSectionsTop = top
 
+	if len(m.sectionsFiltered) == 0 {
+		msg := "no entries"
+		if m.sectionsFilter.Value() != "" || m.sectionsTypeOn || m.sectionsFlagsOn {
+			msg = "no matching entries  ·  Esc clears filters"
+		}
+		return m.emptyList(msg, filterRow, header)
+	}
 	rows := []string{filterRow, header}
 	for i := top; i < len(m.sectionsFiltered); i++ {
 		line := m.sectionRow(i, addrW)
@@ -440,41 +449,18 @@ func (m *Model) sectionRowHeight(i int) int {
 		return 1
 	}
 	addrW := m.file.AddrHexWidth()
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.sectionHeightCache != nil {
-		if h, ok := m.sectionHeightCache[key]; ok {
-			return h
-		}
-	}
-	line := m.sectionRow(i, addrW)
-	h := len(renderLineRowsIndented(line, m.width, m.wrap, 6))
-	if m.sectionHeightCache == nil {
-		m.sectionHeightCache = make(map[rowCacheKey]int)
-	}
-	m.sectionHeightCache[key] = h
-	return h
+	return m.sectionHeightCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() int {
+		return len(renderLineRowsIndented(m.sectionRow(i, addrW), m.width, m.wrap, 6))
+	})
 }
 
 func (m *Model) sectionRow(i, addrW int) string {
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.sectionRowCache != nil {
-		if s, ok := m.sectionRowCache[key]; ok {
-			return s
+	return m.sectionRowCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() string {
+		if m.showSegments {
+			return m.segmentRow(i, addrW)
 		}
-	}
-
-	var line string
-	if m.showSegments {
-		line = m.segmentRow(i, addrW)
-	} else {
-		line = m.sectionRowText(i, addrW)
-	}
-
-	if m.sectionRowCache == nil {
-		m.sectionRowCache = make(map[rowCacheKey]string)
-	}
-	m.sectionRowCache[key] = line
-	return line
+		return m.sectionRowText(i, addrW)
+	})
 }
 
 // sectionsHavePhys / segmentsHavePhys report whether any row carries a distinct

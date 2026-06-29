@@ -17,15 +17,17 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/syscalls"
 	"github.com/rabarbra/exex/internal/ui"
 )
 
 func main() {
-	var debugPath, searchString, archName string
+	var debugPath, searchString, archName, syscallTables string
 	flag.StringVar(&debugPath, "debug", "", "path to an external debug-symbols file or directory (ELF .debug / Mach-O .dSYM)")
 	flag.StringVar(&debugPath, "d", "", "shorthand for -debug")
 	flag.StringVar(&searchString, "s", "", "search printable strings: open the match in Hex, or the Strings view filtered when several match")
 	flag.StringVar(&archName, "arch", "", "for a universal (fat) Mach-O, which architecture slice to open (e.g. x86_64, arm64)")
+	flag.StringVar(&syscallTables, "syscall-tables", "", "directory of custom syscall-name tables; files named <os>-<arch> (e.g. linux-amd64), one \"<num> <name>\" per line, override the built-ins")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [-debug PATH] [-s STRING] [-arch NAME] [-o [VIEW]] <binary> [goto]\n", os.Args[0])
 		fmt.Fprintln(os.Stderr, "  <binary>  path to an ELF/Mach-O/PE file, or a command name on $PATH")
@@ -48,6 +50,14 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+	if syscallTables != "" {
+		if n, err := syscalls.LoadOverrideDir(syscallTables); err != nil {
+			fmt.Fprintf(os.Stderr, "exex: -syscall-tables: %v\n", err)
+			os.Exit(2)
+		} else if n == 0 {
+			fmt.Fprintf(os.Stderr, "exex: -syscall-tables: no <os>-<arch> table files in %s\n", syscallTables)
+		}
+	}
 	path := resolveTarget(args[0])
 	gotoTarget := ""
 	if len(args) == 2 {
@@ -63,6 +73,16 @@ func main() {
 	}
 	f, err := binfile.Open(path, openOpts...)
 	if err != nil {
+		// A static-library (ar) archive isn't a single object. `-o syscalls` scans
+		// its members non-interactively; otherwise browse them in the TUI.
+		if binfile.IsArchive(readPrefix(path, len("!<arch>\n"))) {
+			if outputMode {
+				runArchiveOutput(path, outputView)
+			} else {
+				runArchiveViewer(path)
+			}
+			return
+		}
 		// Not a recognised binary: if it's a readable text file (a shell/python/…
 		// script — still "executable"), open it in the text viewer instead, unless
 		// a non-interactive -o dump was requested.
@@ -235,6 +255,54 @@ func readPrefix(path string, n int) []byte {
 }
 
 // runTextViewer loads path into the text-script viewer and runs it.
+// runArchiveOutput handles `-o` on a static-library (ar) archive. Archives wrap
+// many object members, so only the aggregate syscall views make sense; other
+// views get a clear message.
+func runArchiveOutput(path, view string) {
+	members, closer, err := binfile.OpenArchive(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	defer closer()
+	switch view {
+	case "syscalls", "syscalls-full":
+		fmt.Print(dump.SyscallsArchive(members, false))
+	case "syscalls-all":
+		fmt.Print(dump.SyscallsArchive(members, true))
+	default:
+		fmt.Fprintf(os.Stderr, "exex: %q is an archive (%d members); only -o syscalls / syscalls-all are supported for archives\n",
+			path, len(members))
+		os.Exit(2)
+	}
+}
+
+// runArchiveViewer opens a static-library (ar) archive in the TUI: its object
+// members are browsable from the Info view's members list. The archive image
+// stays mapped for the whole session (members slice into it).
+func runArchiveViewer(path string) {
+	members, closer, err := binfile.OpenArchive(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	defer closer()
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	m, err := ui.NewArchive(path, members, ui.Options{Config: cfg})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := tea.NewProgram(m).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runTextViewer(path string) {
 	cfg, err := config.Load()
 	if err != nil {

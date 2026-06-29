@@ -25,8 +25,12 @@ const (
 	actionViewRaw
 	actionViewStrings
 	actionViewSources
+	actionViewRelocs
 	actionToggleSource
 	actionSettings
+	actionBack        // pop the cross-file stack (return to the file we came from)
+	actionCPUFeatures // scan & show the CPU features the binary requires
+	actionHeader      // show the raw container-header overlay
 )
 
 // keyMap maps key strings (as returned by tea.KeyMsg.String()) to the
@@ -49,8 +53,12 @@ func defaultKeyMap() keyMap {
 		"7":      actionViewStrings,
 		"8":      actionViewLibs,
 		"9":      actionViewSources,
+		"0":      actionViewRelocs,
 		"tab":    actionToggleSource,
 		",":      actionSettings,
+		"ctrl+o": actionBack,
+		"F":      actionCPUFeatures,
+		"H":      actionHeader,
 	}
 }
 

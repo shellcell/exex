@@ -911,6 +911,14 @@ func (m *Model) renderSymbols() string {
 	m.renderedSymbolsTop = top
 	m.pageRows = pageStep(top, len(m.symbolsRows), visible, rowHeight)
 
+	if len(m.symbolsRows) == 0 {
+		msg := "no symbols in this binary"
+		if m.symbolsFilter.Value() != "" || m.symbolsKindOn || m.symbolsBindOn ||
+			m.symbolsScope != scopeAll || m.symbolsLib != "" {
+			msg = "no matching symbols  ·  Esc clears filters"
+		}
+		return m.emptyList(msg, filterRow, header)
+	}
 	rows := []string{filterRow, header}
 	for i := top; i < len(m.symbolsRows); i++ {
 		node := m.symbolsRows[i].node
@@ -939,29 +947,20 @@ func (m *Model) symbolRowHeight(i int) int {
 	if i < 0 || i >= len(m.symbolsRows) {
 		return 1
 	}
-	key := rowCacheKey{i, m.width, m.file.AddrHexWidth(), m.wrap}
-	if m.symbolHeightCache != nil {
-		if h, ok := m.symbolHeightCache[key]; ok {
-			return h
-		}
-	}
-	h := len(m.symbolRows(i, m.file.AddrHexWidth()))
-	if m.symbolHeightCache == nil {
-		m.symbolHeightCache = make(map[rowCacheKey]int)
-	}
-	m.symbolHeightCache[key] = h
-	return h
+	return m.symbolHeightCache.get(rowCacheKey{i, m.width, m.file.AddrHexWidth(), m.wrap}, func() int {
+		return len(m.symbolRows(i, m.file.AddrHexWidth()))
+	})
 }
 
 // symbolRows renders one visible row — an internal tree node (arrow + underlined
 // label + collapsed count) or a leaf symbol (address columns + indented name).
 func (m *Model) symbolRows(i, addrW int) []string {
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.symbolRowCache != nil {
-		if rows, ok := m.symbolRowCache[key]; ok {
-			return rows
-		}
-	}
+	return m.symbolRowCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() []string {
+		return m.symbolRowsText(i, addrW)
+	})
+}
+
+func (m *Model) symbolRowsText(i, addrW int) []string {
 	const sep = " \t/.-_:$@<>"
 	row := m.symbolsRows[i]
 	n := row.node
@@ -1002,9 +1001,5 @@ func (m *Model) symbolRows(i, addrW int) []string {
 		}
 	}
 
-	if m.symbolRowCache == nil {
-		m.symbolRowCache = make(map[rowCacheKey][]string)
-	}
-	m.symbolRowCache[key] = rows
 	return rows
 }

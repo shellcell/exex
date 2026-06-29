@@ -74,18 +74,19 @@ const (
 // describe where its bytes live in the file (FileSize == 0 for BSS-style
 // zero-fill sections that occupy no file space).
 type Section struct {
-	Name     string
-	Addr     uint64
-	PhysAddr uint64 // load/physical address (LMA); 0 when same as Addr or unknown
-	Size     uint64 // in-memory size
-	Offset   uint64 // file offset of the bytes
-	FileSize uint64 // bytes actually present in the file
-	TypeName string // short type label for the table ("PROGBITS", "__text", …)
-	Flags    string // short flag string ("AX", "r-x", …)
-	Category SectionCategory
-	Alloc    bool // occupies memory at runtime (has a virtual address)
-	Exec     bool // executable
-	Write    bool // writable
+	Name      string
+	Addr      uint64
+	PhysAddr  uint64 // load/physical address (LMA); 0 when same as Addr or unknown
+	SynthAddr bool   // Addr is a synthetic layout address (relocatable object); real address is 0
+	Size      uint64 // in-memory size
+	Offset    uint64 // file offset of the bytes
+	FileSize  uint64 // bytes actually present in the file
+	TypeName  string // short type label for the table ("PROGBITS", "__text", …)
+	Flags     string // short flag string ("AX", "r-x", …)
+	Category  SectionCategory
+	Alloc     bool // occupies memory at runtime (has a virtual address)
+	Exec      bool // executable
+	Write     bool // writable
 }
 
 // Segment is a loadable region of the program's memory image — an ELF program
@@ -140,6 +141,10 @@ type Symbol struct {
 	Bind      SymBind
 	Section   string
 	Library   string // for imports: the shared library this symbol is bound to
+	// RealOff is the symbol's real position within its section (st_value) when the
+	// file uses a synthetic address layout (a relocatable object); Addr is then the
+	// synthetic address exex assigned. Both equal Addr otherwise.
+	RealOff uint64
 }
 
 // Display returns the demangled name when available, else the raw name.
@@ -174,6 +179,13 @@ type File struct {
 	entry     uint64
 	addrWidth int // hex digits in a printed address (8 or 16)
 	header    []string
+	rawHeader []HeaderField // raw container-header fields (Header sub-view)
+
+	relocs        []Reloc        // relocation entries (built lazily)
+	relocBuild    func() []Reloc // builds relocs on first Relocations() call
+	relocOnce     sync.Once      // guards the lazy relocation build
+	relocsByAddr  []Reloc        // relocs sorted by Offset, for address lookup (lazy)
+	relocSortOnce sync.Once      // guards the sorted-reloc build
 
 	symByAddr      []Symbol // sorted by Addr
 	lowerName      []string // lazily-built lowercased Symbols[i].Name (for filtering)
@@ -197,6 +209,10 @@ type File struct {
 
 	vaImage   *Image        // all mapped sections, in VA order (lazy)
 	execImage *Image        // executable sections only, in VA order (lazy)
+	allImage  *Image        // every section with file content (disasm-all), lazy
+	disasmAll bool          // ExecImage returns allImage (disassemble all sections)
+	synthetic bool          // section/symbol addresses are a synthetic layout (relocatable object)
+	relocatable bool        // a relocatable object (ELF ET_REL / Mach-O MH_OBJECT)
 	strings   []StringEntry // printable strings, extracted lazily
 }
 

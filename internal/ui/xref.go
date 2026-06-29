@@ -13,10 +13,14 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // xrefMaxHits caps how many references are collected (the modal scrolls).
@@ -42,8 +46,37 @@ type xrefState struct {
 	xrefTarget  uint64
 	xrefLabel   string // display name of the target (symbol or 0x…)
 	xrefResults []xrefHit
+	xrefShown   []int // indices into xrefResults after sort + filter
 	xrefSel     int
 	xrefTop     int
+
+	// Sort + free-text filter over the results (mirrors the syscalls modal).
+	xrefSort      xrefSortKey
+	xrefSortDesc  bool
+	xrefFilter    textinput.Model
+	xrefFiltering bool
+	xrefTotal     int // results before the text filter
+}
+
+// xrefSortKey selects how the modal orders references.
+type xrefSortKey uint8
+
+const (
+	xrefSortAddr xrefSortKey = iota // referencing address
+	xrefSortLoc                     // containing symbol
+	xrefSortKind                    // instruction kind (groups calls / jumps / loads)
+	xrefSortKeyCount
+)
+
+func (k xrefSortKey) String() string {
+	switch k {
+	case xrefSortLoc:
+		return "location"
+	case xrefSortKind:
+		return "kind"
+	default:
+		return "address"
+	}
 }
 
 // xrefDoneMsg delivers a finished cross-reference scan.
@@ -183,6 +216,11 @@ func (m *Model) handleXrefDone(msg xrefDoneMsg) (tea.Model, tea.Cmd) {
 	m.xrefResults = msg.hits
 	m.xrefSel = 0
 	m.xrefTop = 0
+	m.ensureXrefFilter()
+	m.xrefFilter.SetValue("")
+	m.xrefFilter.Blur()
+	m.xrefFiltering = false
+	m.rebuildXrefRows()
 	m.xrefActive = true
 	capped := ""
 	if len(msg.hits) >= xrefMaxHits {
@@ -199,37 +237,179 @@ func (m *Model) cancelXref() {
 	m.setStatus("xref search cancelled", false)
 }
 
-// updateXrefModal drives the results list: select with up/down, Enter jumps to
-// the referencing instruction, Esc closes.
-func (m *Model) updateXrefModal(key string) (tea.Model, tea.Cmd) {
+// ensureXrefFilter guarantees the filter input is fully constructed before it is
+// focused or rendered (so a model built without New() can't panic).
+func (m *Model) ensureXrefFilter() {
+	if m.xrefFilter.Prompt == "" {
+		m.xrefFilter = newPromptInput("location · text · 0xaddr", "/ ")
+	}
+}
+
+// rebuildXrefRows recomputes xrefShown (indices into xrefResults) for the active
+// sort and text filter.
+func (m *Model) rebuildXrefRows() {
+	rows := m.xrefShown[:0]
+	for i := range m.xrefResults {
+		rows = append(rows, i)
+	}
+	desc := m.xrefSortDesc
+	sort.SliceStable(rows, func(a, b int) bool {
+		x, y := m.xrefResults[rows[a]], m.xrefResults[rows[b]]
+		if desc {
+			x, y = y, x
+		}
+		return xrefLess(x, y, m.xrefSort)
+	})
+	m.xrefTotal = len(rows)
+	if needle := strings.ToLower(strings.TrimSpace(m.xrefFilter.Value())); needle != "" {
+		kept := rows[:0]
+		for _, idx := range rows {
+			if xrefMatches(m.xrefResults[idx], needle) {
+				kept = append(kept, idx)
+			}
+		}
+		rows = kept
+	}
+	m.xrefShown = rows
+	if m.xrefSel >= len(rows) {
+		m.xrefSel = max(0, len(rows)-1)
+	}
+}
+
+func xrefLess(a, b xrefHit, key xrefSortKey) bool {
+	switch key {
+	case xrefSortLoc:
+		if a.sym != b.sym {
+			return a.sym < b.sym
+		}
+		return a.addr < b.addr
+	case xrefSortKind:
+		if ka, kb := xrefKind(a.text), xrefKind(b.text); ka != kb {
+			return ka < kb
+		}
+		return a.addr < b.addr
+	default:
+		return a.addr < b.addr
+	}
+}
+
+func xrefMatches(h xrefHit, needle string) bool {
+	return containsFold(h.sym, needle) || containsFold(h.text, needle) ||
+		containsFold("0x"+strconv.FormatUint(h.addr, 16), needle)
+}
+
+// xrefKind buckets a referencing instruction so the modal can colour and sort it:
+// 0 call, 1 jump/branch, 2 address-load, 3 other.
+func xrefKind(text string) int {
+	op := firstToken(text)
+	switch {
+	case strings.HasPrefix(op, "call") || strings.HasPrefix(op, "bl"):
+		return 0
+	case op == "jmp" || op == "b" || (len(op) > 0 && op[0] == 'j') || strings.HasPrefix(op, "b."):
+		return 1
+	case isAddrLoadOp(op):
+		return 2
+	}
+	return 3
+}
+
+func (m *Model) xrefKindStyle(text string) lipgloss.Style {
+	switch xrefKind(text) {
+	case 0:
+		return m.theme.infoStyle // call → green
+	case 1:
+		return m.theme.warnStyle // jump/branch → yellow
+	case 2:
+		return m.theme.headerKey // address load → blue
+	default:
+		return m.theme.srcShadowStyle // other → dim
+	}
+}
+
+// updateXrefModal drives the results list. While the filter box is focused,
+// typing edits it; otherwise s/r sort, / filters, Enter jumps and Esc closes.
+func (m *Model) updateXrefModal(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
+	m.ensureXrefFilter()
+	rows := m.xrefShown
+	if m.xrefFiltering {
+		switch key {
+		case "esc":
+			m.xrefFilter.SetValue("")
+			m.xrefFilter.Blur()
+			m.xrefFiltering = false
+			m.xrefSel, m.xrefTop = 0, 0
+			m.rebuildXrefRows()
+		case "up":
+			if m.xrefSel > 0 {
+				m.xrefSel--
+			}
+		case "down":
+			if m.xrefSel < len(rows)-1 {
+				m.xrefSel++
+			}
+		case "enter":
+			return m.xrefJump()
+		default:
+			if key == "tab" {
+				m.xrefFilter.Blur()
+				m.xrefFiltering = false
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.xrefFilter, cmd = m.xrefFilter.Update(msg)
+			m.xrefSel, m.xrefTop = 0, 0
+			m.rebuildXrefRows()
+			return m, cmd
+		}
+		return m, nil
+	}
 	switch key {
 	case "esc":
 		m.xrefActive = false
+	case "/":
+		m.xrefFiltering = true
+		return m, m.xrefFilter.Focus()
+	case "s":
+		m.xrefSort = (m.xrefSort + 1) % xrefSortKeyCount
+		m.xrefSel, m.xrefTop = 0, 0
+		m.rebuildXrefRows()
+		m.setStatus("sort: "+m.xrefSort.String(), false)
+	case "r":
+		m.xrefSortDesc = !m.xrefSortDesc
+		m.xrefSel, m.xrefTop = 0, 0
+		m.rebuildXrefRows()
 	case "up", "k":
 		if m.xrefSel > 0 {
 			m.xrefSel--
 		}
 	case "down", "j":
-		if m.xrefSel < len(m.xrefResults)-1 {
+		if m.xrefSel < len(rows)-1 {
 			m.xrefSel++
 		}
 	case "enter":
-		if m.xrefSel >= 0 && m.xrefSel < len(m.xrefResults) {
-			addr := m.xrefResults[m.xrefSel].addr
-			m.xrefActive = false
-			m.loadDisasmAt(addr)
-		}
+		return m.xrefJump()
 	}
 	return m, nil
 }
 
+// xrefJump follows the selected reference to its instruction in the disasm view.
+func (m *Model) xrefJump() (tea.Model, tea.Cmd) {
+	if m.xrefSel < 0 || m.xrefSel >= len(m.xrefShown) {
+		return m, nil
+	}
+	addr := m.xrefResults[m.xrefShown[m.xrefSel]].addr
+	m.xrefActive = false
+	m.loadDisasmAt(addr)
+	return m, nil
+}
+
 func (m *Model) renderXrefModal() string {
+	m.ensureXrefFilter()
 	var sb strings.Builder
 	addrW := m.file.AddrHexWidth()
 	rowW := modalListWidth(m.width)
-	// As many rows as the screen allows, after the modal's chrome (title, target
-	// line(s), two blanks, footer, border + padding).
-	visible := clamp(m.height-8, 3, 40)
+	rows := m.xrefShown
+	visible := clamp(m.height-10, 3, 40) // 2 extra header lines (filter + legend)
 
 	// Column budget: " 0x<addr>  <sym>  <text>". The instruction text in an xref
 	// is short (call/lea/branch), so cap it and give the rest to the symbol.
@@ -237,8 +417,8 @@ func (m *Model) renderXrefModal() string {
 	textW := clamp(avail/3, 12, 40)
 	symW := max(8, avail-textW)
 
-	// Title bar; the target name (a possibly long demangled symbol) goes on its
-	// own line(s), wrapped to the modal width so it never widens past the view.
+	// Title + target name (a possibly long demangled symbol), then a filter box and
+	// a colour/sort legend before the rows.
 	sb.WriteString(m.theme.modalTitle("Cross-references"))
 	sb.WriteString("\n")
 	targetRows := renderLineRowsIndented(m.theme.symbolNameStyle.Render(m.xrefLabel), rowW, true, 0)
@@ -246,13 +426,28 @@ func (m *Model) renderXrefModal() string {
 		sb.WriteString(r)
 		sb.WriteString("\n")
 	}
+	countStr := fmt.Sprintf("  %d", len(rows))
+	if m.xrefTotal != len(rows) {
+		countStr = fmt.Sprintf("  %d of %d", len(rows), m.xrefTotal)
+	}
+	m.xrefFilter.SetWidth(clamp(rowW-len(countStr)-4, 12, 60))
+	sb.WriteString(fitANSIWidth(m.xrefFilter.View()+m.theme.modalHint(countStr), rowW))
 	sb.WriteString("\n")
-	m.modalListRow = 1 + len(targetRows) + 1 // title + target line(s) + blank
-	top := visualTop(m.xrefSel, m.xrefTop, len(m.xrefResults), visible, func(int) int { return 1 })
+	dir := "↑"
+	if m.xrefSortDesc {
+		dir = "↓"
+	}
+	legend := m.theme.infoStyle.Render("call") + m.theme.modalHint(" · ") +
+		m.theme.warnStyle.Render("jump") + m.theme.modalHint(" · ") +
+		m.theme.headerKey.Render("load") + m.theme.modalHint("    sort: "+m.xrefSort.String()+dir)
+	sb.WriteString(fitANSIWidth(legend, rowW))
+	sb.WriteString("\n\n")
+	m.modalListRow = 1 + len(targetRows) + 2 + 1 // title + target line(s) + filter + legend + blank
+	top := visualTop(m.xrefSel, m.xrefTop, len(rows), visible, func(int) int { return 1 })
 	m.xrefTop = top
-	end := min(top+visible, len(m.xrefResults))
+	end := min(top+visible, len(rows))
 	for i := top; i < end; i++ {
-		h := m.xrefResults[i]
+		h := m.xrefResults[rows[i]]
 		loc := h.sym
 		if loc == "" {
 			loc = "—"
@@ -260,17 +455,22 @@ func (m *Model) renderXrefModal() string {
 		line := fmt.Sprintf(" 0x%0*x  %s  %s",
 			addrW, h.addr,
 			padVisual(truncateMiddle(loc, symW), symW),
-			truncateMiddle(h.text, textW))
+			m.xrefKindStyle(h.text).Render(truncateMiddle(h.text, textW)))
 		line = padRight(line, rowW)
 		if i == m.xrefSel {
-			line = m.theme.tableSelStyle.Render(line)
+			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(m.theme.modalHint(
-		fmt.Sprintf("↑/↓ select · Enter jump · Esc close   (%d/%d)", m.xrefSel+1, len(m.xrefResults))))
+	footer := fmt.Sprintf("↑/↓ select · ↵ jump · s/r sort · / filter · Esc close   (%d/%d)",
+		min(m.xrefSel+1, len(rows)), len(rows))
+	if m.xrefFiltering {
+		footer = fmt.Sprintf("type to filter · ↵ jump · Tab done · Esc clear   (%d/%d)",
+			min(m.xrefSel+1, len(rows)), len(rows))
+	}
+	sb.WriteString(m.theme.modalHint(fitANSIWidth(footer, rowW)))
 	return m.theme.modalStyle.Render(sb.String())
 }

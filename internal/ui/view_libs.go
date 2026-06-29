@@ -5,6 +5,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -175,14 +176,7 @@ func (m *Model) updateLibs(key string) (tea.Model, tea.Cmd) {
 		m.buildLibRows()
 		m.setStatus("libs: "+availLabel(m.libsAvail), false)
 	case "t":
-		m.libsTree = !m.libsTree
-		m.libsCur, m.libsTop = 0, 0
-		m.buildLibRows()
-		view := "flat list"
-		if m.libsTree {
-			view = "tree"
-		}
-		m.setStatus("libs view: "+view, false)
+		m.setStatus(m.cycleLibsMode(), false)
 	case "-", "_":
 		m.setAllLibsCollapsed(true)
 		m.setStatus("collapsed all", false)
@@ -264,7 +258,9 @@ func (m *Model) openLibAsPrimary(lib string) (tea.Model, tea.Cmd) {
 		m.setStatus("open library: "+err.Error(), true)
 		return m, nil
 	}
-	nm.width, nm.height = m.width, m.height
+	// Descending into a dependency — remember where we came from so Back returns.
+	m.enterFile(nm, filepath.Base(path))
+	nm.setStatus("opened dependency "+filepath.Base(path)+"  (Ctrl+O: back)", false)
 	return nm, nm.switchMode(modeInfo)
 }
 
@@ -283,7 +279,7 @@ func (m *Model) renderLibs() string {
 				body += "\n"
 			}
 		}
-		return padBody(body, m.width, bodyH)
+		return lipgloss.Place(m.width, bodyH, lipgloss.Center, lipgloss.Center, strings.TrimRight(body, "\n"))
 	}
 
 	m.buildLibRows()
@@ -301,6 +297,10 @@ func (m *Model) renderLibs() string {
 	m.libsTop = top
 	m.pageRows = pageStep(top, len(m.libsRows), visible, rowHeight)
 	m.renderedLibsTop = top
+	if len(m.libsRows) == 0 {
+		b.WriteString(m.placeCentred("no matching libraries  ·  Esc clears filters", bodyH-headerH))
+		return padBody(b.String(), m.width, bodyH)
+	}
 	for i := top; i < len(m.libsRows); i++ {
 		line := m.libRow(i, i == m.libsCur)
 		for _, row := range renderLineRowsIndented(line, m.width, m.wrap, 6) {

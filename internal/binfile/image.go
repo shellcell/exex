@@ -268,11 +268,139 @@ func (f *File) VAImage() *Image {
 	return f.vaImage
 }
 
-// ExecImage returns the flattened image of every executable section, built
-// lazily. This is the byte source the disassembler sweeps.
+// ExecImage returns the byte source the disassembler sweeps: normally just the
+// executable sections, but every section with file content when disasm-all mode
+// is enabled (so object files and non-exec sections can still be decoded). Built
+// lazily; both variants are cached.
 func (f *File) ExecImage() *Image {
+	if f.disasmAll {
+		if f.allImage == nil {
+			f.allImage = f.buildAllImage()
+		}
+		return f.allImage
+	}
 	if f.execImage == nil {
 		f.execImage = f.buildImage(func(s *Section) bool { return s.Exec })
 	}
 	return f.execImage
+}
+
+// SetDisasmAll switches ExecImage between executable-only and all-sections-with-
+// content. Disasm callers must rebuild any image-derived state after toggling.
+func (f *File) SetDisasmAll(on bool) { f.disasmAll = on }
+
+// DisasmAll reports whether disasm-all mode is active.
+func (f *File) DisasmAll() bool { return f.disasmAll }
+
+// HasPhysAddrs reports whether any section carries a distinct load/physical
+// address (a higher-half kernel, say) — so a caller can offer to interpret a
+// typed address as physical.
+func (f *File) HasPhysAddrs() bool {
+	for i := range f.Sections {
+		if f.Sections[i].PhysAddr != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// PhysToVirtual maps a physical/load (LMA) address to its virtual address via the
+// section whose load range contains it; ok is false when none does. Used to jump
+// to a physical address in a binary whose VMA differs from its LMA.
+func (f *File) PhysToVirtual(phys uint64) (uint64, bool) {
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		if s.PhysAddr == 0 || s.Size == 0 {
+			continue
+		}
+		if phys >= s.PhysAddr && phys < s.PhysAddr+s.Size {
+			return s.Addr + (phys - s.PhysAddr), true
+		}
+	}
+	return 0, false
+}
+
+// SyntheticAddrs reports whether section/symbol addresses are a synthetic layout
+// exex assigned because the file is a relocatable object whose sections all load
+// at address 0 (so they'd otherwise collide). The real position of any address is
+// section-relative: addr − SectionAt(addr).Addr within that section.
+func (f *File) SyntheticAddrs() bool { return f.synthetic }
+
+// AddrDisassemblable reports whether addr falls inside any section with file
+// content (the disasm-all image) — i.e. it could be shown in disasm-all mode even
+// if it isn't in an executable section (kernel/multiboot sections, data, …).
+func (f *File) AddrDisassemblable(addr uint64) bool {
+	if f.allImage == nil {
+		f.allImage = f.buildAllImage()
+	}
+	_, ok := f.allImage.PosForAddr(addr)
+	return ok
+}
+
+// HasExecCode reports whether the file has any executable section to disassemble
+// in the normal (exec-only) image — false for most relocatable object files.
+func (f *File) HasExecCode() bool {
+	if f.execImage == nil {
+		f.execImage = f.buildImage(func(s *Section) bool { return s.Exec })
+	}
+	return len(f.execImage.Regions) > 0
+}
+
+// IncludeInDisasmAll reports whether a section belongs in a disasm-all sweep.
+//
+// The disasm image is one monotonic address space, so it must stay coherent:
+//   - Metadata (symbol/string/debug/note/dynamic/relocation) is never code and
+//     lives at address 0; mixing it with real-VA code makes a window spanning the
+//     0 → high-VA jump decode to junk. Always excluded.
+//   - For a linked file (one with mapped executable code), include only the
+//     ALLOCATED sections — the actual loaded image: code plus non-exec loaded
+//     data (.multiboot, .rodata, .data). Non-allocated leftovers (.comment, …)
+//     sit at address 0 and would poison the space, so they're dropped.
+//   - For an object file (no mapped exec code; e.g. a Mach-O .o whose __text
+//     isn't flagged allocated), include code/data content sections at their
+//     sequential 0-based addresses — there's no real VA to conflict with.
+func (f *File) IncludeInDisasmAll(s *Section) bool {
+	switch s.Category {
+	case CatDebug, CatNote, CatSymtab, CatDynamic, CatReloc:
+		return false
+	}
+	if f.HasExecCode() && !s.Alloc {
+		return false // a loadable image's non-allocated sections are metadata, not code
+	}
+	return true
+}
+
+// buildAllImage flattens the disasm-all sections (see IncludeInDisasmAll) that
+// carry file bytes into one image, ordered by address then file offset.
+func (f *File) buildAllImage() *Image {
+	var secs []*Section
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		if s.Size == 0 || !f.IncludeInDisasmAll(s) {
+			continue
+		}
+		if data := f.sectionData(s); len(data) > 0 {
+			secs = append(secs, s)
+		}
+	}
+	sort.SliceStable(secs, func(i, j int) bool {
+		if secs[i].Addr != secs[j].Addr {
+			return secs[i].Addr < secs[j].Addr
+		}
+		return secs[i].Offset < secs[j].Offset
+	})
+
+	im := &Image{}
+	for _, s := range secs {
+		data := f.sectionData(s)
+		im.Regions = append(im.Regions, Region{
+			Addr: s.Addr,
+			Size: uint64(len(data)),
+			Off:  im.size,
+			Name: s.Name,
+			b:    data,
+		})
+		im.size += len(data)
+	}
+	return im
 }

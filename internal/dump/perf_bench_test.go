@@ -35,6 +35,39 @@ func BenchmarkDisasmAll(b *testing.B) { benchDisasm(b, true) }
 // BenchmarkStringsDump and BenchmarkSymsDump cover the full `-o strings` / `-o
 // syms` CLI paths (re-Open each iteration so the string scan / symbol parse is
 // included), to profile their wall-time CPU against strings(1)/nm.
+// BenchmarkRelocs covers the `-o relocs` dump for EXEX_BENCH_BIN.
+func BenchmarkRelocs(b *testing.B) {
+	path := os.Getenv("EXEX_BENCH_BIN")
+	if path == "" {
+		b.Skip("set EXEX_BENCH_BIN to a real binary")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for range b.N {
+		_ = Relocs(f)
+	}
+}
+
+// BenchmarkSyscalls covers the full `-o syscalls` scan (decode + classify +
+// number resolution) for EXEX_BENCH_BIN.
+func BenchmarkSyscalls(b *testing.B) {
+	path := os.Getenv("EXEX_BENCH_BIN")
+	if path == "" {
+		b.Skip("set EXEX_BENCH_BIN to a real binary")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for range b.N {
+		_ = Syscalls(f, false)
+	}
+}
+
 func BenchmarkStringsDump(b *testing.B) {
 	path := os.Getenv("EXEX_BENCH_BIN")
 	if path == "" {

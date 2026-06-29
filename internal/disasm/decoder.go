@@ -253,8 +253,42 @@ func (x86) Decode(code []byte, addr uint64) (Inst, error) {
 	if err != nil {
 		return Inst{}, err
 	}
-	text := x86asm.GNUSyntax(inst, addr, nil)
+	text := mask32Targets(x86asm.GNUSyntax(inst, addr, nil))
 	return Inst{Addr: addr, Bytes: code[:inst.Len], Text: text, Class: Classify(text)}, nil
+}
+
+// mask32Targets narrows any hex literal wider than 32 bits to its low word.
+// x86asm computes PC-relative targets in 64-bit arithmetic, so a backward branch
+// in 32-bit code — e.g. a jump into a higher-half kernel's .text at 0xc0101000 —
+// overflows to a sign-extended 0xffffffffc0101000. The real target is the low 32
+// bits; masking it keeps the address matching the binary's 32-bit section/symbol
+// addresses, so it resolves to a name and can be followed. (32-bit code never
+// has a legitimately wider literal, so this only ever fixes overflowed targets.)
+func mask32Targets(text string) string {
+	if !strings.Contains(text, "0x") && !strings.Contains(text, "0X") {
+		return text
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] == '0' && i+1 < len(text) && (text[i+1] == 'x' || text[i+1] == 'X') {
+			start := i + 2
+			j := start
+			for j < len(text) && isHexDigit(text[j]) {
+				j++
+			}
+			if v, err := strconv.ParseUint(text[start:j], 16, 64); j > start && err == nil && v > 0xffffffff {
+				appendHexTo(&b, v&0xffffffff)
+				i = j
+				continue
+			}
+			b.WriteString(text[i:j])
+			i = j
+			continue
+		}
+		b.WriteByte(text[i])
+		i++
+	}
+	return b.String()
 }
 
 // decodeX86 wraps x86asm.Decode and turns decoder panics into errors.

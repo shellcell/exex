@@ -119,7 +119,7 @@ func (h *keyHarness) pump(msg tea.Msg) {
 }
 
 func (h *keyHarness) press(s string) { h.t.Helper(); h.pump(kp(s)) }
-func (h *keyHarness) m() *Model       { return h.model.(*Model) }
+func (h *keyHarness) m() *Model      { return h.model.(*Model) }
 
 func (h *keyHarness) goView(md mode, key string) {
 	h.t.Helper()
@@ -205,14 +205,27 @@ func TestKeysSections(t *testing.T) {
 		t.Fatal("r did not reverse the sort")
 	}
 
-	// t toggles sections <-> segments (when the binary has segments).
+	// t cycles sections -> segments -> header -> sections (when the binary has
+	// segments). Cycle all the way back to sections for the jump tests below.
 	if len(h.m().segments) > 0 {
 		seg0 := h.m().showSegments
 		h.press("t")
 		if h.m().showSegments == seg0 {
 			t.Fatal("t did not toggle sections/segments")
 		}
-		h.press("t") // back to sections for the jump tests
+		h.press("t") // -> back to sections (2-state cycle now)
+		if h.m().showSegments {
+			t.Fatal("second t did not return to the section table")
+		}
+	}
+	// The raw header moved from a Sections sub-mode to the ⇧H overlay.
+	h.press("H")
+	if !h.m().headerActive {
+		t.Fatal("H did not open the raw-header overlay")
+	}
+	h.press("esc") // close it so the rest of the section-key checks run on the table
+	if h.m().headerActive {
+		t.Fatal("esc did not close the raw-header overlay")
 	}
 
 	// Select an executable section, then d/h/m jump to disasm/hex/raw.
@@ -989,9 +1002,9 @@ func TestKeysActivate(t *testing.T) {
 	// instruction may have no in-file target).
 	h.goView(modeDisasm, "4")
 	if len(h.m().disasmInst) > 0 {
-		h.press("enter")     // follow (or status "no address")
-		h.press("left")      // history back
-		h.press("right")     // history forward
+		h.press("enter") // follow (or status "no address")
+		h.press("left")  // history back
+		h.press("right") // history forward
 		if h.m().mode != modeDisasm {
 			t.Fatalf("disasm history left mode = %v", h.m().mode)
 		}

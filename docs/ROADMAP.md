@@ -464,3 +464,73 @@ Extract all the pathes from strings
 ## 32. Search
 
 0x000106b6 should match with $0x106b6
+
+## 33. dyld shared cache resolution
+
+On macOS the system libraries (libsystem_kernel, libc++, the frameworks, the
+Swift runtime, …) are not standalone files — they live in the dyld shared cache
+(`/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/`, split into a main
+cache plus `.1/.2/…` sub-caches). Today that means:
+
+- **Syscalls (#30):** `-o syscalls-full` can't scan the libraries that actually
+  contain the `svc` instructions (the app's own code makes no direct syscalls),
+  so macOS apps report nothing. The unresolved libraries are currently collapsed
+  into a single "in the dyld shared cache — can't be scanned" note.
+- **Libs (#29):** cache-resident libraries are tagged `·cache` and can't be
+  opened.
+
+Add a reader for the dyld shared cache format — parse its header, mappings (each
+maps an address range to a file offset across the cache + sub-caches), and image
+list (address → install path) — so a cache-resident dylib can be extracted (its
+split segments stitched back via the mappings into a scannable Mach-O image).
+Then:
+
+- resolve cache-resident lib paths for `syscalls-full` and scan their `svc`
+  sites (giving macOS a real syscall surface);
+- let the Libs view open a `·cache` library as primary (its symbols/disasm).
+
+## 34. CPU-feature detection  ✅ (done)
+
+Scan the decoded instruction stream — reusing the syscall scan's infrastructure
+(windowed `decodeAcross` over the exec image, parallel, cancellable) — and
+classify mnemonics into feature families, so a user can see *what CPU the binary
+needs to run*:
+
+- **x86/64:** SSE, SSE2, SSE3/SSSE3, SSE4.1/4.2, AVX/AVX2/AVX-512 (VEX/EVEX
+  `v`-prefixed), FMA, BMI1/2, AES, POPCNT, RDRAND, …
+- **arm64:** NEON/ASIMD, crypto (AES/SHA), CRC32, LSE atomics, SVE/SVE2,
+  pointer-auth, FP16, …
+
+Output the set used and the implied baseline (e.g. x86-64-v3). A sibling to the
+syscalls feature: same scan, a per-arch mnemonic→feature table, a modal in the
+disasm view plus an `-o cpu-features` dump.
+
+## 35. Requirements panel  ✅ (done)
+
+Consolidate the scattered "what it takes to run this" facts into one block in the
+Info view: arch + bits + endianness · OS/ABI (ELF `OSABI`; Mach-O — decode
+`LC_BUILD_VERSION` / `LC_VERSION_MIN_*` into the min macOS/iOS/… version, today
+only counted) · static/dynamic/PIE · interpreter · needed-library count · CPU
+baseline (from #34).
+
+## 36. Find-anything quick jump
+
+Broaden the goto modal (#…/`g`) beyond symbols + addresses to also rank sections
+and strings, so one keystroke finds *any* named thing in the binary and jumps to
+it — a single fuzzy "jump to anything" entry point.
+
+## 37. Architecture cleanup (internal)
+
+Reduce duplication and the cache-invalidation bug surface in `internal/ui`:
+
+- **`listState[T]` generic** for the five list views (sections, symbols, strings,
+  libs, sources) — own the filter text, sort key + direction, cursor/top,
+  filtered-index slice and row cache once, with `match`/`less`/`row` hooks.
+  Migrate one view at a time. (~1k LOC, fewer drift bugs.)
+- **Fold per-view row/height caches** into that generic so invalidation happens
+  in one place (filter/sort/width change), shrinking the ~13-cache surface.
+- **Shared modal-list helper** (sibling to `listGeometry`) to dedupe
+  xref/goto/settings and give xref the syscall modal's filter/sort/colour.
+- **UX consistency pass**: a uniform address vocabulary (`synthetic` / `load`
+  (LMA) / physical) across disasm/hex/sections/Info, and group the `?` help by
+  the same role order as the footer hints.

@@ -26,6 +26,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// While the help overlay is up, scroll keys page through it (it can be taller
 	// than the terminal); any other key dismisses it.
+	if m.headerActive {
+		switch key {
+		case "up", "k":
+			m.headerScroll--
+		case "down", "j":
+			m.headerScroll++
+		case "pgup":
+			m.headerScroll -= headerPageStep
+		case "pgdown":
+			m.headerScroll += headerPageStep
+		case "home", "g":
+			m.headerScroll = 0
+		case "end", "G":
+			m.headerScroll = 1 << 20
+		default:
+			m.headerActive = false
+		}
+		return m, nil
+	}
 	if m.helpActive {
 		switch key {
 		case "up", "k":
@@ -53,9 +72,23 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelXref()
 		return m, nil
 	}
+	if m.syscallRunning && key == "esc" {
+		m.cancelSyscall()
+		return m, nil
+	}
+	if m.cpufeatRunning && key == "esc" {
+		m.cancelCPUFeat()
+		return m, nil
+	}
+	if m.cpufeatActive {
+		return m.updateCPUFeatModal(key)
+	}
 
 	if m.xrefActive {
-		return m.updateXrefModal(key)
+		return m.updateXrefModal(msg, key)
+	}
+	if m.syscallActive {
+		return m.updateSyscallModal(msg, key)
 	}
 	if m.settingsActive {
 		return m.updateSettings(key)
@@ -208,6 +241,7 @@ var macOptionGlyph = map[rune]rune{
 //   - Alt/Super/Meta modifier + base letter (option-as-alt, or Cmd) → "alt+<l>"
 //   - Alt modifier + a composed Text (Kitty protocol, e.g. ⌥t → "†")  → "alt+<l>"
 //   - no modifier at all, just the composed glyph (ghostty default)   → "alt+<l>"
+//
 // tea.Key.String() returns the composed Text and drops the modifier, so it can't
 // be trusted for these; we read the modifier bits and the glyph table instead.
 // Shift-only and unmodified keys keep String(), so "A" (Shift+a) and the special
@@ -247,6 +281,7 @@ type cursorState struct {
 	stringsCur  int
 	sourcesCur  int
 	libsCur     int
+	memberSel   int
 	srcFile     string
 	srcCur      int
 }
@@ -263,6 +298,7 @@ func (m *Model) activeCursorState() cursorState {
 		stringsCur:  m.stringsCur,
 		sourcesCur:  m.sourcesCur,
 		libsCur:     m.libsCur,
+		memberSel:   m.memberSel,
 		srcFile:     m.srcFile,
 		srcCur:      m.srcCur,
 	}
@@ -316,6 +352,21 @@ func (m *Model) updateGotoInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd)
 	case "enter":
 		m.activateGoto()
 		m.closeGoto()
+		return m, nil
+	case "tab":
+		m.gotoScope = (m.gotoScope + 1) % gsScopeCount
+		m.recomputeGoto()
+		return m, nil
+	case "shift+tab":
+		m.gotoScope = (m.gotoScope + gsScopeCount - 1) % gsScopeCount
+		m.recomputeGoto()
+		return m, nil
+	case "alt+p":
+		// Toggle physical-address interpretation (only meaningful when LMA differs).
+		if m.file.HasPhysAddrs() {
+			m.gotoAddrPhys = !m.gotoAddrPhys
+			m.recomputeGoto()
+		}
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -372,6 +423,8 @@ func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) 
 		return filterCapture(&m.stringsFilter, key, msg, m.recomputeStrings)
 	case modeLibs:
 		return filterCapture(&m.libsFilter, key, msg, m.buildLibRows)
+	case modeRelocs:
+		return filterCapture(&m.libsFilter, key, msg, m.recomputeRelocs)
 	case modeSources:
 		if m.srcFile == "" {
 			return filterCapture(&m.sourcesFilter, key, msg, m.recomputeSourceFiles)
@@ -402,6 +455,8 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 		return m, m.switchMode(modeStrings), true
 	case actionViewSources:
 		return m, m.switchMode(modeSources), true
+	case actionViewRelocs:
+		return m, m.switchMode(modeRelocs), true
 	case actionGoto:
 		m.gotoActive = true
 		m.gotoInput.Focus()
@@ -412,6 +467,17 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	case actionSettings:
 		m.openSettings()
+		return m, nil, true
+	case actionBack:
+		if nm, cmd, ok := m.goBackFile(); ok {
+			return nm, cmd, true
+		}
+		return m, nil, false
+	case actionCPUFeatures:
+		return m, m.startCPUFeatScan(), true
+	case actionHeader:
+		m.headerActive = true
+		m.headerScroll = 0
 		return m, nil, true
 	}
 	return m, nil, false
@@ -530,6 +596,8 @@ func (m *Model) dispatchViewKey(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd)
 		return m.updateSources(key)
 	case modeLibs:
 		return m.updateLibs(key)
+	case modeRelocs:
+		return m.updateRelocs(key)
 	case modeInfo:
 		return m.updateInfo(msg, key)
 	}

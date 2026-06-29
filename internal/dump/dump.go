@@ -27,14 +27,16 @@ const dumpMaxBytes = 1 << 20
 func IsView(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "info", "header", "headers", "sections", "segments",
-		"symbols", "syms", "strings", "libs", "libraries", "sources", "disasm", "disasm-all":
+		"symbols", "syms", "strings", "libs", "libraries", "sources",
+		"relocs", "relocations", "syscalls", "syscalls-all", "syscalls-full",
+		"cpu-features", "cpufeatures", "features", "disasm", "disasm-all":
 		return true
 	}
 	return false
 }
 
 // ViewNames lists the canonical view keywords for help/usage text.
-var ViewNames = []string{"info", "sections", "segments", "symbols", "strings", "libs", "sources", "disasm", "disasm-all"}
+var ViewNames = []string{"info", "sections", "segments", "symbols", "strings", "libs", "sources", "relocs", "syscalls", "syscalls-all", "cpu-features", "disasm", "disasm-all"}
 
 // IsDisasm reports whether name selects a (streaming) disassembly dump, and
 // whether it is the all-sections variant. The CLI routes these to DisasmTo
@@ -78,6 +80,16 @@ func View(f *binfile.File, name string) (string, error) {
 		return Libs(f), nil
 	case "sources":
 		return Sources(f), nil
+	case "relocs", "relocations":
+		return Relocs(f), nil
+	case "syscalls":
+		return Syscalls(f, false), nil
+	case "syscalls-all":
+		return Syscalls(f, true), nil
+	case "syscalls-full":
+		return SyscallsFull(f), nil
+	case "cpu-features", "cpufeatures", "features":
+		return CPUFeatures(f)
 	}
 	return "", fmt.Errorf("unknown view %q (try: %s)", name, strings.Join(ViewNames, ", "))
 }
@@ -97,11 +109,21 @@ func DisasmTo(w io.Writer, f *binfile.File, all bool) error {
 		return fmt.Errorf("no disassembler for this architecture")
 	}
 	var secs []binfile.Section
-	for _, s := range f.Sections {
-		if s.FileSize == 0 || s.Addr == 0 {
-			continue // need file bytes and a load address to disassemble
+	for i := range f.Sections {
+		s := f.Sections[i]
+		if s.FileSize == 0 {
+			continue // need file bytes to disassemble
 		}
-		if !all && !s.Exec {
+		if all {
+			// All-sections: the loaded image's code+data for a linked file, or an
+			// object file's code/data content — but never symbol/debug/etc. metadata
+			// (see binfile.IncludeInDisasmAll), which would decode to junk.
+			if !f.IncludeInDisasmAll(&s) {
+				continue
+			}
+		} else if !s.Exec {
+			// Plain disasm wants executable code. (Address 0 is kept — a relocatable
+			// object's .text sections sit there until the linker lays them out.)
 			continue
 		}
 		secs = append(secs, s)

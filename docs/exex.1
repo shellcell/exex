@@ -77,6 +77,15 @@ to standard output and exit, without starting the TUI. Recognised views:
 .BR strings ,
 .BR libs ,
 .BR sources ,
+.B relocs
+(relocation table, like
+.BR "readelf \-r" ),
+.B syscalls
+(distinct system calls, with recovered numbers and vDSO calls),
+.B syscalls-all
+(every syscall site with its address),
+.B syscalls-full
+(distinct syscalls of the binary and its linked libraries, tagged with origin),
 .B disasm
 (executable sections, like
 .BR "objdump \-d" )

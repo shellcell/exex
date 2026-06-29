@@ -29,7 +29,7 @@ import (
 
 // nonDisasmViews are the buffered views (everything dump.View handles). The two
 // disasm variants stream and are measured separately.
-var nonDisasmViews = []string{"info", "sections", "segments", "symbols", "strings", "libs", "sources"}
+var nonDisasmViews = []string{"info", "sections", "segments", "symbols", "strings", "libs", "sources", "relocs", "syscalls", "cpu-features"}
 
 func main() {
 	runs := flag.Int("runs", 5, "timing runs per stage (the fastest is reported)")

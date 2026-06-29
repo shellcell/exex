@@ -7,7 +7,7 @@
 
 _exex() {
 	local -a views
-	views=(info sections segments symbols strings libs sources disasm disasm-all)
+	views=(info sections segments symbols strings libs sources relocs syscalls syscalls-all syscalls-full disasm disasm-all)
 
 	_arguments -s \
 		'(-d -debug)'{-d,-debug}'[external debug-symbols file or directory]:debug path:_files' \

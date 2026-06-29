@@ -20,3 +20,32 @@ const (
 	ArchPPC          // 32-bit PowerPC, big-endian
 	ArchPPCLE        // 32-bit PowerPC, little-endian
 )
+
+// String returns the conventional name of the architecture.
+func (a Arch) String() string {
+	switch a {
+	case ArchX86:
+		return "x86 (32-bit)"
+	case ArchAMD64:
+		return "x86-64"
+	case ArchARM64:
+		return "arm64"
+	case ArchRISCV64:
+		return "riscv64"
+	case ArchARM:
+		return "arm (32-bit)"
+	case ArchPPC64:
+		return "ppc64"
+	case ArchPPC64LE:
+		return "ppc64le"
+	case ArchS390X:
+		return "s390x"
+	case ArchLoong64:
+		return "loong64"
+	case ArchPPC:
+		return "ppc"
+	case ArchPPCLE:
+		return "ppcle"
+	}
+	return "unknown"
+}

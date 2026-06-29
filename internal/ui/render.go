@@ -54,6 +54,30 @@ func bytesHexSpaced(b []byte, maxN int) string {
 	return sb.String()
 }
 
+// placeCentred renders msg as a dim, centred block within w_view × h, wrapping the
+// text to the window width (capped for readability) so it stays inside narrow or
+// short terminals instead of overflowing.
+func (m *Model) placeCentred(msg string, h int) string {
+	w := clamp(m.width-4, 1, 60)
+	styled := m.theme.srcShadowStyle.Width(w).Align(lipgloss.Center).Render(msg)
+	return lipgloss.Place(m.width, max(1, h), lipgloss.Center, lipgloss.Center, styled)
+}
+
+// emptyBody centres a dim message in the whole body area, for a view that has no
+// entries at all (no filter/header rows to keep).
+func (m *Model) emptyBody(msg string) string {
+	return m.placeCentred(msg, m.bodyHeight())
+}
+
+// emptyList renders a list view's empty state: the leading rows (filter / column
+// header) are kept and a dim message is centred in the body below them, so an
+// empty (or fully-filtered) table reads clearly instead of as a blank area.
+func (m *Model) emptyList(msg string, leading ...string) string {
+	bodyH := m.bodyHeight()
+	rows := append(leading, strings.Split(m.placeCentred(msg, bodyH-len(leading)), "\n")...)
+	return padBodyRows(rows, m.width, bodyH)
+}
+
 // truncateMiddle keeps both ends of a string visible within n columns.
 func truncateMiddle(s string, n int) string {
 	if n <= 0 {

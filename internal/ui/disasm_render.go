@@ -18,18 +18,9 @@ import (
 
 // renderInstText colours an instruction's assembly text, caching the result.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
-	key := disasmAsmCacheKey{text: text, addr: instAddr, cls: class}
-	if m.disasmAsmCache != nil {
-		if rendered, ok := m.disasmAsmCache[key]; ok {
-			return rendered
-		}
-	}
-	rendered := m.renderInstTextStyled(text, class, instAddr)
-	if m.disasmAsmCache == nil {
-		m.disasmAsmCache = make(map[disasmAsmCacheKey]string)
-	}
-	m.disasmAsmCache[key] = rendered
-	return rendered
+	return m.disasmAsmCache.get(disasmAsmCacheKey{text: text, addr: instAddr, cls: class}, func() string {
+		return m.renderInstTextStyled(text, class, instAddr)
+	})
 }
 
 // disasmAddrSpan marks a run of instruction text (a followable mapped address)
@@ -96,6 +87,38 @@ func (m *Model) instAnnotation(text string, class disasm.InstClass) string {
 	return strings.Join(notes, ", ")
 }
 
+// relocNote describes any relocation whose patched address lies within the
+// instruction's bytes [addr, addr+n) — the resolved target of a placeholder
+// operand. "" when the instruction carries no relocation.
+func (m *Model) relocNote(addr uint64, n int) string {
+	// Only relocatable objects have relocs against code operands; gating on this
+	// (a cheap flag) keeps the lazy reloc build from ever firing for a linked
+	// binary that never needs it.
+	if n <= 0 || !m.file.IsRelocatable() || !m.file.HasRelocs() {
+		return ""
+	}
+	rs := m.file.RelocsInRange(addr, addr+uint64(n))
+	if len(rs) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, r := range rs {
+		target := r.Sym
+		if target == "" {
+			target = r.Type // no symbol (e.g. a section-relative reloc): name the type
+		}
+		if r.HasAddend && r.Addend != 0 {
+			if r.Addend > 0 {
+				target += fmt.Sprintf("+0x%x", r.Addend)
+			} else {
+				target += fmt.Sprintf("-0x%x", -r.Addend)
+			}
+		}
+		parts = append(parts, "→ "+target)
+	}
+	return strings.Join(parts, ", ")
+}
+
 // firstToken returns the mnemonic (first whitespace-delimited token), lowered.
 func firstToken(text string) string {
 	text = strings.TrimSpace(text)
@@ -135,11 +158,10 @@ func (m *Model) targetAnnotation(addr uint64) string {
 func (m *Model) renderDisasm() string {
 	bodyH := m.bodyHeight()
 	if m.disasmDecoding {
-		return padBody("decoding instructions…\n", m.width, bodyH)
+		return m.emptyBody("decoding instructions…")
 	}
 	if len(m.disasmInst) == 0 {
-		msg := "no disassembly loaded — press g to go to an address, or pick a symbol from view 3"
-		return padBody(msg+"\n", m.width, bodyH)
+		return m.emptyBody("no disassembly loaded — press g to go to an address, or pick a symbol from view 3")
 	}
 	// The source pane only makes sense when the binary actually carries debug
 	// info; otherwise keep the disasm full-width instead of opening an empty
@@ -189,6 +211,15 @@ func (m *Model) renderStickySymbol(w int) string {
 		}
 	} else {
 		text = fmt.Sprintf(" (no symbol)   @  0x%0*x", m.file.AddrHexWidth(), addr)
+	}
+	// Relocatable object: the address is synthetic — flag it and show the real
+	// (section-relative) position.
+	if m.file.SyntheticAddrs() {
+		if sec := m.file.SectionAt(addr); sec != nil {
+			text += fmt.Sprintf("   ~synthetic · %s+0x%x", sec.Name, addr-sec.Addr)
+		} else {
+			text += "   ~synthetic"
+		}
 	}
 	return m.theme.stickyTitleLine(text, w)
 }
@@ -272,27 +303,21 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	if i < 0 || i >= len(m.disasmInst) {
 		return 1
 	}
-	key := disasmHeightKey{i: i, w: w, wrap: m.wrap}
-	if h, ok := m.disasmHeightCache[key]; ok {
-		return h
-	}
-	inst := m.disasmInst[i]
-	h := len(m.disasmInstRows(inst, w, false, nil))
-	if _, ok := m.disasmSectionStart(i); ok {
-		h++ // the "═══ .section ═══" separator row
-	}
-	if m.disasmIsSymbolStart(i) {
-		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			h += len(m.disasmLabelRows(m.displaySymbolName(sym), w))
-		} else {
-			h++
+	return m.disasmHeightCache.get(disasmHeightKey{i: i, w: w, wrap: m.wrap}, func() int {
+		inst := m.disasmInst[i]
+		h := len(m.disasmInstRows(inst, w, false, nil))
+		if _, ok := m.disasmSectionStart(i); ok {
+			h++ // the "═══ .section ═══" separator row
 		}
-	}
-	if m.disasmHeightCache == nil {
-		m.disasmHeightCache = make(map[disasmHeightKey]int)
-	}
-	m.disasmHeightCache[key] = h
-	return h
+		if m.disasmIsSymbolStart(i) {
+			if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
+				h += len(m.disasmLabelRows(m.displaySymbolName(sym), w))
+			} else {
+				h++
+			}
+		}
+		return h
+	})
 }
 
 // instByteWidth is the number of instruction bytes the byte column is sized for:
@@ -373,6 +398,15 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	note := ""
 	if !m.cfg.Behavior.HideAnnotations {
 		note = m.instAnnotation(inst.Text, inst.Class)
+		// A relocation landing in this instruction resolves a placeholder operand
+		// (`call 0x0` → printf) — the key context for object files. Show it first.
+		if rn := m.relocNote(inst.Addr, len(inst.Bytes)); rn != "" {
+			if note != "" {
+				note = rn + ", " + note
+			} else {
+				note = rn
+			}
+		}
 	}
 
 	asmFit := fitANSIWidth(asm, max(1, w-asmCol))
@@ -527,16 +561,32 @@ func (m *Model) disasmSectionStart(i int) (string, bool) {
 		return "", false
 	}
 	if m.execSecStarts == nil {
+		// Derive banners from the active disasm image's regions, so all-sections
+		// mode labels data/object-file sections too (not just executable ones). When
+		// a section's load address (LMA) differs from its virtual address — a
+		// higher-half kernel, say — note it once here (it's a constant per-section
+		// offset) rather than on every instruction row.
 		m.execSecStarts = make(map[uint64]string)
-		for j := range m.file.Sections {
-			s := &m.file.Sections[j]
-			if s.Exec && s.Size > 0 {
-				m.execSecStarts[s.Addr] = s.Name
+		for _, r := range m.file.ExecImage().Regions {
+			label := r.Name
+			if sec := m.file.SectionAt(r.Addr); sec != nil {
+				label += m.lmaNote(sec.PhysAddr)
 			}
+			m.execSecStarts[r.Addr] = label
 		}
 	}
 	name, ok := m.execSecStarts[m.disasmInst[i].Addr]
 	return name, ok
+}
+
+// lmaNote formats a section's load address (LMA) as a banner suffix, or "" when
+// it matches the virtual address. Shown once per section (the offset is constant
+// across the section) in the disasm and hex/raw section banners.
+func (m *Model) lmaNote(phys uint64) string {
+	if phys == 0 {
+		return ""
+	}
+	return fmt.Sprintf("   LMA 0x%0*x", m.file.AddrHexWidth(), phys)
 }
 
 // disasmSectionBanner renders the centred section separator row (matching the

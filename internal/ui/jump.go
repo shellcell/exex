@@ -6,12 +6,25 @@ package ui
 // status line when the target can't be shown.
 
 // jumpDisasmAtAddr opens the disassembly view at addr, or reports why it can't.
+// When the target isn't in the current (exec-only) image but a section with
+// content covers it — e.g. a kernel/multiboot section that isn't flagged
+// executable — it switches to disasm-all mode so the code can still be shown.
 func (m *Model) jumpDisasmAtAddr(addr uint64) {
-	if addr == 0 {
-		m.setStatus("no address to disassemble", true)
+	if m.dis == nil {
+		m.setStatus("no disassembler for this architecture", true)
 		return
 	}
+	// Note: address 0 is not special-cased — in a relocatable object (.o, kernel
+	// module) the sections and their functions legitimately live at address 0, so
+	// canDisasmAt decides whether it's reachable.
 	if !m.canDisasmAt(addr) {
+		if !m.file.DisasmAll() && m.file.AddrDisassemblable(addr) {
+			m.file.SetDisasmAll(true)
+			m.resetDisasmImageState()
+			m.setStatus("disasm: all sections (target isn't in an executable section)", false)
+			m.loadDisasmAt(addr)
+			return
+		}
 		m.setStatus("address is not in executable code", true)
 		return
 	}

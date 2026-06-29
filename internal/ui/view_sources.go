@@ -610,7 +610,7 @@ func (m *Model) renderSources() string {
 	bodyH := m.bodyHeight()
 	m.ensureSources()
 	if !m.file.HasDWARF() {
-		return padBody("no debug info — the Sources view needs DWARF (build with -g, or place a .dSYM / .debug sidecar next to the binary)\n", m.width, bodyH)
+		return m.emptyBody("no debug info — the Sources view needs DWARF (build with -g, or place a .dSYM / .debug sidecar next to the binary)")
 	}
 	// The Sources view is only ever the file list; opening a file switches to the
 	// disasm view (source-first), which owns the split panes.
@@ -660,13 +660,16 @@ func (m *Model) renderSourceList(bodyH int) string {
 		end = len(m.sourcesRows)
 	}
 
+	if len(m.sourcesRows) == 0 {
+		msg := "no source files"
+		if m.sourcesFilter.Value() != "" || m.sourcesAvail != availAll {
+			msg = "no matching source files  ·  Esc clears filters"
+		}
+		return m.emptyList(msg, filterRow)
+	}
 	var b strings.Builder
 	b.WriteString(filterRow)
 	b.WriteString("\n")
-	if len(m.sourcesRows) == 0 {
-		b.WriteString(m.theme.footerStyle.Render(" (no source files)"))
-		return padBody(b.String(), m.width, bodyH)
-	}
 	for i := top; i < end; i++ {
 		row := m.sourcesRows[i]
 		n := row.node
@@ -930,31 +933,22 @@ func (m *Model) sourceAsmAnchorIndex() int {
 }
 
 func (m *Model) sourceAsmRow(i, addrW, w int) string {
-	key := sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}
-	if m.sourceAsmRowCache != nil {
-		if row, ok := m.sourceAsmRowCache[key]; ok {
-			return row
+	return m.sourceAsmRowCache.get(sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}, func() string {
+		inst := m.disasmInst[i]
+		// Colour only the address by mapping (shared addrMapStyle policy); the
+		// instruction text keeps its normal class colours so the pane reads like
+		// real disassembly.
+		addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
+		addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
+		asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
+		var line string
+		if m.disasmByteColWidth() > 0 {
+			line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
+		} else {
+			line = fmt.Sprintf(" %s  %s", addr, asm)
 		}
-	}
-	inst := m.disasmInst[i]
-	// Colour only the address by mapping (shared addrMapStyle policy); the
-	// instruction text keeps its normal class colours so the pane reads like
-	// real disassembly.
-	addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
-	addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
-	asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
-	var line string
-	if m.disasmByteColWidth() > 0 {
-		line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
-	} else {
-		line = fmt.Sprintf(" %s  %s", addr, asm)
-	}
-	row := fitANSIWidth(line, w)
-	if m.sourceAsmRowCache == nil {
-		m.sourceAsmRowCache = make(map[sourceAsmRowCacheKey]string)
-	}
-	m.sourceAsmRowCache[key] = row
-	return row
+		return fitANSIWidth(line, w)
+	})
 }
 
 // clampScroll keeps a viewport top within [0, n-h] so an independent-scroll

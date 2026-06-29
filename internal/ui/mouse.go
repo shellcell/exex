@@ -96,6 +96,10 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.pinCurrentByteSectionStart()
 		}
 		if isDouble && !suppressDouble {
+			// Double-clicking a member loads it (the new model must propagate).
+			if m.mode == modeInfo && m.isArchive() && m.infoMembers {
+				return m.loadArchiveMember(m.memberSel)
+			}
 			m.handleDoubleClick()
 		}
 	}
@@ -109,7 +113,7 @@ func (m *Model) mouseOverRightPane(x int) bool {
 // modalActive reports whether a list/field overlay modal (not the search prompt,
 // which handles its own clicks) is open.
 func (m *Model) modalActive() bool {
-	return m.xrefActive || m.gotoActive || m.settingsActive
+	return m.xrefActive || m.syscallActive || m.cpufeatActive || m.gotoActive || m.settingsActive
 }
 
 // modalList returns the open modal's selection pointer, rendered scroll top, item
@@ -117,7 +121,11 @@ func (m *Model) modalActive() bool {
 func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 	switch {
 	case m.xrefActive:
-		return &m.xrefSel, m.xrefTop, len(m.xrefResults), false, true
+		return &m.xrefSel, m.xrefTop, len(m.xrefShown), false, true
+	case m.syscallActive:
+		return &m.syscallSel, m.syscallTop, len(m.syscallShown), false, true
+	case m.cpufeatActive:
+		return &m.cpufeatSel, m.cpufeatTop, len(m.cpufeatFeats), false, true
 	case m.gotoActive:
 		return &m.gotoSel, m.gotoTop, len(m.gotoResults), false, true
 	case m.settingsActive:
@@ -147,6 +155,10 @@ func (m *Model) modalClick(x, y int) bool {
 	switch {
 	case m.xrefActive:
 		modal = m.renderXrefModal()
+	case m.syscallActive:
+		modal = m.renderSyscallModal()
+	case m.cpufeatActive:
+		modal = m.renderCPUFeatModal()
 	case m.gotoActive:
 		modal = m.renderGotoModal()
 	case m.settingsActive:
@@ -176,7 +188,11 @@ func (m *Model) modalClick(x, y int) bool {
 func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 	switch {
 	case m.xrefActive:
-		return m.updateXrefModal("enter")
+		return m.xrefJump()
+	case m.syscallActive:
+		return m.syscallJump()
+	case m.cpufeatActive:
+		return m.cpufeatJump()
 	case m.gotoActive:
 		m.activateGoto()
 		m.closeGoto()
@@ -257,6 +273,10 @@ func oneRow(int) int { return 1 }
 // any lazy load it needs first, or ok=false for views that aren't list-style.
 func (m *Model) listGeometryFor() (listGeometry, bool) {
 	switch m.mode {
+	case modeInfo:
+		if m.isArchive() && m.infoMembers { // the archive members list scrolls/clicks like any list
+			return listGeometry{len(m.archiveMembers), 2, oneRow, &m.memberSel, &m.memberTop, m.memberTop}, true
+		}
 	case modeSections:
 		return listGeometry{len(m.sectionsFiltered), 2, m.sectionRowHeight, &m.sectionsCur, &m.sectionsTop, m.renderedSectionsTop}, true
 	case modeSymbols:
@@ -270,6 +290,9 @@ func (m *Model) listGeometryFor() (listGeometry, bool) {
 	case modeSources:
 		m.ensureSources()
 		return listGeometry{len(m.sourcesRows), 1, oneRow, &m.sourcesCur, &m.sourcesTop, m.renderedSourcesTop}, true
+	case modeRelocs:
+		m.recomputeRelocs()
+		return listGeometry{len(m.relocFiltered), 2, oneRow, &m.relocCur, &m.relocTop, m.relocTop}, true
 	case modeLibs:
 		if m.file.Info == nil {
 			return listGeometry{}, false

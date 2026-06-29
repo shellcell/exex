@@ -8,7 +8,7 @@ _exex() {
 	local cur prev views flags i pos
 	cur="${COMP_WORDS[COMP_CWORD]}"
 	prev="${COMP_WORDS[COMP_CWORD-1]}"
-	views="info sections segments symbols strings libs sources disasm disasm-all"
+	views="info sections segments symbols strings libs sources relocs syscalls syscalls-all syscalls-full disasm disasm-all"
 	flags="-s -o -d -debug -arch -h"
 
 	# Value completion for the flag immediately before the cursor.
@@ -39,7 +39,7 @@ _exex() {
 		-d|--d|-debug|--debug|-s|--s|-arch|--arch) (( i++ )) ;;
 		-o|--o)
 			case "${COMP_WORDS[i+1]}" in
-			info|sections|segments|symbols|strings|libs|sources|disasm|disasm-all) (( i++ )) ;;
+			info|sections|segments|symbols|strings|libs|sources|relocs|syscalls|syscalls-all|syscalls-full|disasm|disasm-all) (( i++ )) ;;
 			esac ;;
 		-*) ;;
 		*) (( pos++ )) ;;

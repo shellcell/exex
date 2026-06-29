@@ -106,11 +106,21 @@ func DisasmTo(w io.Writer, f *binfile.File, all bool) error {
 		return fmt.Errorf("no disassembler for this architecture")
 	}
 	var secs []binfile.Section
-	for _, s := range f.Sections {
-		if s.FileSize == 0 || s.Addr == 0 {
-			continue // need file bytes and a load address to disassemble
+	for i := range f.Sections {
+		s := f.Sections[i]
+		if s.FileSize == 0 {
+			continue // need file bytes to disassemble
 		}
-		if !all && !s.Exec {
+		if all {
+			// All-sections: the loaded image's code+data for a linked file, or an
+			// object file's code/data content — but never symbol/debug/etc. metadata
+			// (see binfile.IncludeInDisasmAll), which would decode to junk.
+			if !f.IncludeInDisasmAll(&s) {
+				continue
+			}
+		} else if !s.Exec {
+			// Plain disasm wants executable code. (Address 0 is kept — a relocatable
+			// object's .text sections sit there until the linker lays them out.)
 			continue
 		}
 		secs = append(secs, s)

@@ -189,6 +189,15 @@ func (m *Model) renderStickySymbol(w int) string {
 	} else {
 		text = fmt.Sprintf(" (no symbol)   @  0x%0*x", m.file.AddrHexWidth(), addr)
 	}
+	// Relocatable object: the address is synthetic — flag it and show the real
+	// (section-relative) position.
+	if m.file.SyntheticAddrs() {
+		if sec := m.file.SectionAt(addr); sec != nil {
+			text += fmt.Sprintf("   ~synthetic · %s+0x%x", sec.Name, addr-sec.Addr)
+		} else {
+			text += "   ~synthetic"
+		}
+	}
 	return m.theme.stickyTitleLine(text, w)
 }
 
@@ -526,16 +535,32 @@ func (m *Model) disasmSectionStart(i int) (string, bool) {
 		return "", false
 	}
 	if m.execSecStarts == nil {
+		// Derive banners from the active disasm image's regions, so all-sections
+		// mode labels data/object-file sections too (not just executable ones). When
+		// a section's load address (LMA) differs from its virtual address — a
+		// higher-half kernel, say — note it once here (it's a constant per-section
+		// offset) rather than on every instruction row.
 		m.execSecStarts = make(map[uint64]string)
-		for j := range m.file.Sections {
-			s := &m.file.Sections[j]
-			if s.Exec && s.Size > 0 {
-				m.execSecStarts[s.Addr] = s.Name
+		for _, r := range m.file.ExecImage().Regions {
+			label := r.Name
+			if sec := m.file.SectionAt(r.Addr); sec != nil {
+				label += m.lmaNote(sec.PhysAddr)
 			}
+			m.execSecStarts[r.Addr] = label
 		}
 	}
 	name, ok := m.execSecStarts[m.disasmInst[i].Addr]
 	return name, ok
+}
+
+// lmaNote formats a section's load address (LMA) as a banner suffix, or "" when
+// it matches the virtual address. Shown once per section (the offset is constant
+// across the section) in the disasm and hex/raw section banners.
+func (m *Model) lmaNote(phys uint64) string {
+	if phys == 0 {
+		return ""
+	}
+	return fmt.Sprintf("   load 0x%0*x", m.file.AddrHexWidth(), phys)
 }
 
 // disasmSectionBanner renders the centred section separator row (matching the

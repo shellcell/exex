@@ -156,18 +156,7 @@ func (s *DisasmService) DecodeRange(start, size, lead int) []disasm.Inst {
 		return nil
 	}
 	decodeStart := max(0, win.Start-lead)
-	decodeWin := img.Window(decodeStart, win.End-decodeStart)
-	insts := disasm.Range(s.dis, decodeWin.Data, decodeWin.Addr, 0)
-	lo, hi := win.Addr, win.Addr+uint64(len(win.Data))
-	out := insts[:0]
-	for _, in := range insts {
-		end := in.Addr + uint64(len(in.Bytes))
-		if end <= lo || in.Addr >= hi {
-			continue
-		}
-		out = append(out, in)
-	}
-	return out
+	return s.decodeAcross(img, decodeStart, win.End, win.Start)
 }
 
 // DecodeAt returns a window containing addr and the instructions overlapping it.
@@ -240,22 +229,46 @@ func (s *DisasmService) decodeInstWindow(win binfile.Window, decodeStart int) []
 	if insts, ok := s.cacheGet(key); ok {
 		return insts
 	}
-	img := s.file.ExecImage()
-	decodeWin := img.Window(decodeStart, win.End-decodeStart)
-	insts := disasm.Range(s.dis, decodeWin.Data, decodeWin.Addr, 0)
-	lo := win.Addr
-	hi := win.Addr + uint64(len(win.Data))
-	keep := insts[:0]
-	for _, inst := range insts {
-		end := inst.Addr + uint64(len(inst.Bytes))
-		if end <= lo || inst.Addr >= hi {
-			continue
-		}
-		keep = append(keep, inst)
-	}
-	insts = append([]disasm.Inst(nil), keep...)
+	insts := s.decodeAcross(s.file.ExecImage(), decodeStart, win.End, win.Start)
 	s.cachePut(key, insts)
 	return insts
+}
+
+// decodeAcross decodes [decodeStart, end) of img one region at a time, so each
+// section's bytes are addressed from its own virtual address — correct even when
+// the image flattens sections with non-contiguous addresses (a higher-half
+// kernel's low .multiboot code and high .text, an object file's sections, …). A
+// single linear decode across such a gap would mis-address everything past the
+// jump. Only instructions at offset >= visibleStart are returned; the bytes
+// before it are decode-resync context that is dropped.
+func (s *DisasmService) decodeAcross(img *binfile.Image, decodeStart, end, visibleStart int) []disasm.Inst {
+	if img == nil || s.dis == nil || decodeStart < 0 || end > img.Len() {
+		end = min(end, img.Len())
+	}
+	var out []disasm.Inst
+	for p := decodeStart; p < end; {
+		r := img.RegionAt(p)
+		if r == nil {
+			break // gap (sparse maps only); section images are contiguous in offset
+		}
+		regEnd := min(r.Off+int(r.Size), end)
+		data := img.Bytes(p, regEnd)
+		if len(data) == 0 {
+			break
+		}
+		for _, in := range disasm.Range(s.dis, data, img.AddrAt(p), 0) {
+			off := r.Off + int(in.Addr-r.Addr) // this instruction's image offset
+			if off < visibleStart {
+				continue // resync context before the visible window
+			}
+			if off >= end {
+				break
+			}
+			out = append(out, in)
+		}
+		p = regEnd
+	}
+	return out
 }
 
 // options returns a consistent snapshot of mutable service options.

@@ -24,10 +24,12 @@ type PerfStat struct {
 var perfViews = []struct {
 	name string
 	mode mode
+	all  bool // disasm-all mode: every section, via the windowed region decode
 }{
-	{"info", modeInfo}, {"sections", modeSections}, {"symbols", modeSymbols},
-	{"disasm", modeDisasm}, {"hex", modeHex}, {"raw", modeRaw},
-	{"strings", modeStrings}, {"libs", modeLibs}, {"sources", modeSources},
+	{"info", modeInfo, false}, {"sections", modeSections, false}, {"symbols", modeSymbols, false},
+	{"disasm", modeDisasm, false}, {"disasm-all", modeDisasm, true},
+	{"hex", modeHex, false}, {"raw", modeRaw, false},
+	{"strings", modeStrings, false}, {"libs", modeLibs, false}, {"sources", modeSources, false},
 }
 
 // RenderViewStats builds a model at w×h on f and measures every view's
@@ -45,6 +47,12 @@ func RenderViewStats(f *binfile.File, w, h, runs int) []PerfStat {
 	out := make([]PerfStat, 0, len(perfViews))
 	for _, v := range perfViews {
 		mm := m.(*Model)
+		// disasm-all sweeps every section through the windowed region-by-region
+		// decode; toggle it on for that row and back off afterwards.
+		if mm.file.DisasmAll() != v.all {
+			mm.file.SetDisasmAll(v.all)
+			mm.resetDisasmImageState()
+		}
 		mm.switchMode(v.mode)
 		// Finish any background decode the disasm view kicked off so the frame is
 		// measured fully rendered, not mid-"decoding…".
@@ -72,5 +80,6 @@ func RenderViewStats(f *binfile.File, w, h, runs int) []PerfStat {
 		runtime.ReadMemStats(&m1)
 		out = append(out, PerfStat{View: v.name, Dur: best, Alloc: m1.TotalAlloc - m0.TotalAlloc})
 	}
+	f.SetDisasmAll(false) // leave the shared file in its default mode
 	return out
 }

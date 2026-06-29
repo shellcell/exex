@@ -109,6 +109,11 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	if cfg.Behavior.DisasmSearchWorkers > 0 {
 		m.disasmSearchWorkers = cfg.Behavior.DisasmSearchWorkers
 	}
+	// Relocatable object files (and archive members) usually have no executable
+	// section in the normal image; default them to disasm-all so their code shows.
+	if d != nil && !f.HasExecCode() {
+		f.SetDisasmAll(true)
+	}
 	m.disasmSvc = explorer.NewDisasmService(f, d, m.disasmMaxBytes, m.disasmSearchWorkers)
 	m.disasmInitAddr = explorer.DefaultExecAddr(f, m.disasmTarget)
 

@@ -250,30 +250,44 @@ func (m *Model) updateSections(key string) (tea.Model, tea.Cmd) {
 			m.openRawAt(sec.Offset)
 		}
 	case "d":
+		// jumpDisasmAtAddr falls back to disasm-all when the target isn't in an
+		// executable section (e.g. a multiboot/boot section), so kernel code that
+		// isn't flagged executable can still be disassembled.
 		if m.showSegments {
-			if seg, ok := m.currentSegment(); ok && seg.X && seg.Addr != 0 && m.dis != nil {
-				m.loadDisasmAt(seg.Addr)
+			if seg, ok := m.currentSegment(); ok && seg.Addr != 0 {
+				m.jumpDisasmAtAddr(seg.Addr)
 			} else {
-				m.setStatus("segment is not executable", true)
+				m.setStatus("segment has no address to disassemble", true)
 			}
 			return m, nil
 		}
-		sec, ok := m.currentSection()
-		if !ok {
-			return m, nil
-		}
-		if binfile.IsExecSection(&sec) && m.dis != nil {
-			m.loadDisasmAt(sec.Addr)
-		} else {
-			m.setStatus("section is not executable", true)
+		if sec, ok := m.currentSection(); ok {
+			m.jumpDisasmAtAddr(sec.Addr)
 		}
 	case "h":
 		if addr, ok := m.currentSectionAddr(); ok {
 			m.jumpHexAtAddr(addr)
 		}
 	case "m":
-		if addr, ok := m.currentSectionAddr(); ok {
-			m.jumpRawAtAddr(addr)
+		// Raw is file-offset based, so jump by the section/segment's file offset
+		// directly — non-allocated sections (.symtab, .strtab, …) have no virtual
+		// address but do have file bytes, so an address-based jump would fail.
+		if m.showSegments {
+			if seg, ok := m.currentSegment(); ok {
+				if seg.FileSize > 0 {
+					m.openRawAt(seg.Offset)
+				} else {
+					m.setStatus("segment has no file bytes", true)
+				}
+			}
+			return m, nil
+		}
+		if sec, ok := m.currentSection(); ok {
+			if sec.FileSize > 0 {
+				m.openRawAt(sec.Offset)
+			} else {
+				m.setStatus("section has no file bytes (e.g. .bss)", true)
+			}
 		}
 	case "s":
 		m.sectionsSort = (m.sectionsSort + 1) % 4

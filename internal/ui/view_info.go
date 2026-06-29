@@ -28,11 +28,13 @@ func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 		m.headerVP.GotoBottom()
 		return m, nil
 	case "enter":
-		// Follow the entry point into disasm; fall back to hex when disassembly
-		// isn't possible (no decoder for this CPU, or entry not in exec code).
+		// Follow the entry point into disasm; fall back to hex only when it can't be
+		// disassembled at all (no decoder, or not in any code/data section). An entry
+		// in a non-executable section (e.g. a kernel's multiboot stub) still goes to
+		// disasm via disasm-all.
 		if entry := m.file.Entry(); entry != 0 {
-			if m.canDisasmAt(entry) {
-				m.loadDisasmAt(entry)
+			if m.dis != nil && (m.canDisasmAt(entry) || m.file.AddrDisassemblable(entry)) {
+				m.jumpDisasmAtAddr(entry)
 			} else {
 				m.openHexAt(entry)
 			}
@@ -193,6 +195,9 @@ func (m *Model) buildInfoContent(innerW int) string {
 	}
 	if m.dis != nil {
 		kvText("Disassembler", m.dis.Name())
+	}
+	if m.file.SyntheticAddrs() {
+		kvText("Addresses", m.theme.warnStyle.Render("synthetic")+dim("  — relocatable object; exex lays sections out so they don't collide. Real positions are section-relative."))
 	}
 	// Universal (fat) Mach-O: a per-architecture listing. Shown for every fat
 	// binary; the slice currently loaded is marked, and `a` switches between them.

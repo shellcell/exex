@@ -137,6 +137,7 @@ func (m *Model) renderHelpModal() string {
 		row("[ ]", "previous / next symbol"),
 		row("x", "find references (xrefs)"),
 		row("y", "list system calls"),
+		row("a", "disassemble all sections / exec-only (object files, data)"),
 		row("⇧a/⇧s/⇧c", "copy addr / symbol / function asm"),
 		row("Tab", "show / hide right pane"),
 		row("⇧Tab", "swap source / disasm"),
@@ -521,11 +522,11 @@ func (m *Model) viewHints() []footerHint {
 			return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
 		case m.showSource && dwarf:
 			// Disasm-first with the source pane open.
-			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"a", m.disasmAllHint()}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 		default:
 			// Disasm-first, no pane. Offer tab to open the pane only when there is
 			// debug info to show.
-			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"a", m.disasmAllHint()}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 			if dwarf {
 				hints = append(hints, footerHint{"tab", "pane"})
 			}

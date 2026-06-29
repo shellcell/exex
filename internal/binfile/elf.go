@@ -109,6 +109,32 @@ func (f *File) loadELF() error {
 		f.Sections = append(f.Sections, sec)
 	}
 
+	// Relocatable objects (.o, kernel modules) load every section at address 0, so
+	// the sections — and all their functions — would collide in one address space
+	// and only one could be shown. Lay them out at synthetic sequential addresses
+	// so each is distinct and navigable; the real position stays section-relative.
+	// synthBase[i] is section i's assigned base (0 for sections left at address 0).
+	synthBase := make([]uint64, len(f.Sections))
+	if ef.Type == elf.ET_REL {
+		var base uint64
+		for i := range f.Sections {
+			s := &f.Sections[i]
+			if !s.Alloc || s.Size == 0 {
+				continue
+			}
+			align := uint64(1)
+			if i < len(ef.Sections) && ef.Sections[i].Addralign > 1 {
+				align = ef.Sections[i].Addralign
+			}
+			base = (base + align - 1) &^ (align - 1)
+			synthBase[i] = base
+			s.Addr = base
+			s.SynthAddr = true
+			base += s.Size
+		}
+		f.synthetic = base > 0
+	}
+
 	staticSyms, _ := ef.Symbols()
 	dynSyms, _ := ef.DynamicSymbols()
 	type symKey struct {
@@ -126,12 +152,20 @@ func (f *File) loadELF() error {
 		}
 		seen[key] = true
 		sec := ""
+		addr := s.Value
+		realOff := s.Value
 		if int(s.Section) >= 0 && int(s.Section) < len(ef.Sections) {
 			sec = ef.Sections[s.Section].Name
+			// In the synthetic layout, a symbol's real value is its offset within
+			// its section; its synthetic address is that section's base + offset.
+			if f.synthetic && int(s.Section) < len(f.Sections) && f.Sections[s.Section].SynthAddr {
+				addr = synthBase[s.Section] + s.Value
+			}
 		}
 		f.Symbols = append(f.Symbols, Symbol{
 			Name:    s.Name,
-			Addr:    s.Value,
+			Addr:    addr,
+			RealOff: realOff,
 			Size:    s.Size,
 			Kind:    elfSymKind(elf.ST_TYPE(s.Info)),
 			Bind:    elfSymBind(elf.ST_BIND(s.Info)),

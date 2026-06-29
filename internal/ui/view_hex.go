@@ -335,12 +335,9 @@ func (m *Model) updateHex(key string) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "d":
-		addr := m.hexImg.AddrAt(m.hexCur)
-		if _, ok := m.file.ExecImage().PosForAddr(addr); ok && m.dis != nil {
-			m.loadDisasmAt(addr)
-		} else {
-			m.setStatus("address is not executable", true)
-		}
+		// jumpDisasmAtAddr falls back to disasm-all for addresses that aren't in an
+		// executable section (kernel/multiboot/data), so d works there too.
+		m.jumpDisasmAtAddr(m.hexImg.AddrAt(m.hexCur))
 	case "m":
 		m.jumpRawAtAddr(m.hexImg.AddrAt(m.hexCur))
 	case "w":
@@ -603,6 +600,8 @@ func (m *Model) renderHex() string {
 	if m.hexInspect {
 		banner = m.inspectorBanner(m.hexImg, m.hexCur,
 			fmt.Sprintf(" 0x%0*x", m.file.AddrHexWidth(), m.hexImg.AddrAt(m.hexCur)))
+	} else if m.file.SyntheticAddrs() {
+		banner += "  ·  ~synthetic (real = section+offset)"
 	}
 	return m.renderHexDump(modeHex, m.hexImg, m.hexCur, &m.hexTop, m.hexImg.AddrAt, banner)
 }
@@ -795,14 +794,18 @@ func (m *Model) hexSectionStartName(md mode, off int) string {
 	}
 	if md == modeHex {
 		if r := m.hexImg.RegionAt(off); r != nil && r.Off == off {
-			return r.Name
+			name := r.Name
+			if sec := m.file.SectionAt(r.Addr); sec != nil {
+				name += m.lmaNote(sec.PhysAddr)
+			}
+			return name
 		}
 		return ""
 	}
 	secs := m.rawSectionsByOffset()
 	i := sort.Search(len(secs), func(i int) bool { return secs[i].Offset >= uint64(off) })
 	if i < len(secs) && secs[i].Offset == uint64(off) {
-		return secs[i].Name
+		return secs[i].Name + m.lmaNote(secs[i].PhysAddr)
 	}
 	return ""
 }

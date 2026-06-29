@@ -117,23 +117,100 @@ func (m *Model) cycleStringSectionFilter() {
 
 // recomputeStrings rebuilds stringsFiltered from the current filter text,
 // matching on the string text and its owning section.
-// looksLikePath reports whether a string is a plausible filesystem path or URL:
-// it contains a path separator and alphanumerics, and no whitespace or control
-// characters. Deliberately inclusive (paths, URLs, "a/b") — the goal is to surface
-// every path-ish string, which the text filter can then narrow.
+// looksLikePath reports whether a string is a plausible filesystem path or URL.
+// It is deliberately *precise* rather than inclusive: a bare separator is not
+// enough (that admits "text/html", "application/json", "%s/%s", "and/or"). A
+// string qualifies only if it is a URL (scheme://…), is anchored as a path
+// (leading "/", "./", "../", "~/", "@rpath/…", a Windows drive or UNC), or has
+// real path structure (≥2 separators or a file extension) using only path-like
+// bytes and no whitespace/control.
 func looksLikePath(b []byte) bool {
-	hasSep, hasAlnum := false, false
+	if len(b) < 2 || len(b) > 4096 {
+		return false
+	}
 	for _, c := range b {
-		switch {
-		case c == '/' || c == '\\':
-			hasSep = true
-		case c <= ' ', c == 0x7f:
+		if c <= ' ' || c == 0x7f {
 			return false // whitespace/control → not a clean path
-		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'):
-			hasAlnum = true
 		}
 	}
-	return hasSep && hasAlnum
+	if schemeEnd(b) > 0 { // URL: scheme://rest — query chars allowed, skip the strict scan
+		return true
+	}
+
+	anchored := false
+	switch {
+	case b[0] == '/' || b[0] == '~' || b[0] == '@':
+		anchored = true // /abs, ~/home, @rpath/@executable_path
+	case b[0] == '.' && (b[1] == '/' || (b[1] == '.' && len(b) >= 3 && b[2] == '/')):
+		anchored = true // ./rel or ../rel
+	case b[0] == '\\' && b[1] == '\\': // UNC \\host\share
+		anchored = true
+	case len(b) >= 3 && isAlpha(b[0]) && b[1] == ':' && (b[2] == '\\' || b[2] == '/'):
+		anchored = true // C:\ or C:/
+	}
+
+	seps, lastSeg, hasAlnum, hasAlpha := 0, 0, false, false
+	for i, c := range b {
+		switch {
+		case c == '/' || c == '\\':
+			seps++
+			lastSeg = i + 1
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+			hasAlnum, hasAlpha = true, true
+		case c >= '0' && c <= '9':
+			hasAlnum = true
+		case c == '.' || c == '_' || c == '-' || c == '+' || c == '~' || c == '@' || c == '%' || c == ':' || c == '$':
+			// allowed path-component punctuation
+		default:
+			return false // unusual punctuation → not a clean path
+		}
+	}
+	if seps == 0 || !hasAlnum {
+		return false
+	}
+	if anchored {
+		return true
+	}
+	// Unanchored relative path: demand real structure (≥2 separators or a file
+	// extension) and at least one letter, so single-separator tokens ("text/html",
+	// "%s/%s") and all-digit runs ("2024/01/02") don't slip through.
+	if !hasAlpha {
+		return false
+	}
+	hasExt := false
+	for j := lastSeg + 1; j+1 < len(b); j++ {
+		if b[j] == '.' {
+			hasExt = true
+			break
+		}
+	}
+	return seps >= 2 || hasExt
+}
+
+// isAlpha reports whether b is an ASCII letter.
+func isAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// schemeEnd returns the index of the ':' in a leading URL scheme ("http://…") or
+// 0 if b doesn't start with a scheme followed by "://".
+func schemeEnd(b []byte) int {
+	if len(b) < 4 || !isAlpha(b[0]) {
+		return 0
+	}
+	i := 1
+	for i < len(b) {
+		c := b[i]
+		if isAlpha(c) || (c >= '0' && c <= '9') || c == '+' || c == '.' || c == '-' {
+			i++
+			continue
+		}
+		break
+	}
+	if i+2 < len(b) && b[i] == ':' && b[i+1] == '/' && b[i+2] == '/' {
+		return i
+	}
+	return 0
 }
 
 func (m *Model) recomputeStrings() {
@@ -200,15 +277,40 @@ func (m *Model) currentString() (binfile.StringEntry, bool) {
 
 func (m *Model) updateStrings(key string) (tea.Model, tea.Cmd) {
 	m.ensureStrings()
-	// In the compact flow, strings read left-to-right, so ←/→ step the selection
-	// too (in the table they're unused).
-	if m.stringsCompact && (key == "left" || key == "right") {
-		if key == "left" {
+	// In the compact flow the strings tile a 2-D grid: ←/→ step one string along
+	// the flow, ↑/↓ move a visual line keeping roughly the same column (so a long
+	// scan reads like text, not a single ribbon).
+	if m.stringsCompact {
+		switch key {
+		case "left":
 			m.stringsCur = max(0, m.stringsCur-1)
-		} else {
+			return m, nil
+		case "right":
 			m.stringsCur = min(len(m.stringsFiltered)-1, m.stringsCur+1)
+			return m, nil
+		case "up":
+			m.flowMoveLine(-1)
+			return m, nil
+		case "down":
+			m.flowMoveLine(1)
+			return m, nil
+		case "pgup", "[": // also ⌥↑ / ctrl+↑ (normalised to pgup)
+			for p := max(1, m.listPage()); p > 0; p-- {
+				m.flowMoveLine(-1)
+			}
+			return m, nil
+		case "pgdown", "]": // also ⌥↓ / ctrl+↓
+			for p := max(1, m.listPage()); p > 0; p-- {
+				m.flowMoveLine(1)
+			}
+			return m, nil
+		case "home": // also cmd+↑
+			m.stringsCur = 0
+			return m, nil
+		case "end", "G": // also cmd+↓
+			m.stringsCur = max(0, len(m.stringsFiltered)-1)
+			return m, nil
 		}
-		return m, nil
 	}
 	if navKey(&m.stringsCur, len(m.stringsFiltered), m.listPage(), key) {
 		return m, nil
@@ -387,7 +489,9 @@ func (m *Model) renderStringsFlow(bodyH int, filterRow string) string {
 	// (width == byte length), so the bytes are written straight from the file image
 	// (zero-copy) and only the highlighted caret string is converted to a string.
 	pack := func(top int) (lines []string, last int) {
+		lines = make([]string, 0, visible)
 		var line strings.Builder
+		line.Grow(m.width + len(sep))
 		lineW := 0
 		last = top - 1
 		for i := top; i < n; i++ {
@@ -545,6 +649,78 @@ func (m *Model) flowStringAt(top, line, x int) (int, bool) {
 		col = end
 	}
 	return 0, false
+}
+
+// flowLineStartOf returns the start index of the compact-flow line that the
+// string idx sits on. It anchors at the rendered top (a known line boundary) and
+// walks the few lines to idx, so the result is stable under the same packing.
+func (m *Model) flowLineStartOf(idx int) int {
+	ls := m.stringsTop
+	if idx < ls {
+		for ls > 0 && idx < ls {
+			ls = m.flowLineStart(ls, m.width)
+		}
+		return ls
+	}
+	for {
+		end := m.flowLineEnd(ls, m.width)
+		if idx < end || end >= len(m.stringsFiltered) {
+			return ls
+		}
+		ls = end
+	}
+}
+
+// flowColInLine returns the visual start column of string idx on the line that
+// starts at ls.
+func (m *Model) flowColInLine(ls, idx int) int {
+	col := 0
+	for i := ls; i < idx; i++ {
+		col += m.flowStrW(i) + flowSepW
+	}
+	return col
+}
+
+// flowStringInLine returns the string on the line starting at ls whose span
+// covers column col, or the last string on the line when col is past its end.
+func (m *Model) flowStringInLine(ls, col int) int {
+	end := m.flowLineEnd(ls, m.width)
+	c := 0
+	for i := ls; i < end; i++ {
+		sw := m.flowStrW(i)
+		if col < c+sw { // within the string's text
+			return i
+		}
+		c += sw + flowSepW
+		if col < c { // within the separator following it
+			return i
+		}
+	}
+	return end - 1
+}
+
+// flowMoveLine moves the caret dl visual lines (−1 up, +1 down) in the compact
+// flow, holding roughly the same column.
+func (m *Model) flowMoveLine(dl int) {
+	n := len(m.stringsFiltered)
+	if n == 0 {
+		return
+	}
+	ls := m.flowLineStartOf(m.stringsCur)
+	col := m.flowColInLine(ls, m.stringsCur)
+	var target int
+	if dl > 0 {
+		target = m.flowLineEnd(ls, m.width)
+		if target >= n { // already on the last line
+			return
+		}
+	} else {
+		if ls <= 0 { // already on the first line
+			return
+		}
+		target = m.flowLineStart(ls, m.width)
+	}
+	m.stringsCur = m.flowStringInLine(target, col)
 }
 
 // scrollStringsFlow moves the compact view by delta lines (wheel scrolling).

@@ -61,6 +61,9 @@ func (f *File) elfRawHeader(ef *elf.File) []HeaderField {
 	add("Type", ef.Type.String())
 	add("Machine", ef.Machine.String())
 	add("Entry", fmt.Sprintf("0x%x", ef.Entry))
+	if interp := f.elfInterp(ef); interp != "" {
+		add("Interpreter", interp)
+	}
 
 	// Offsets, counts and sizes live at fixed positions after e_ident (16).
 	if is64 {
@@ -80,7 +83,63 @@ func (f *File) elfRawHeader(ef *elf.File) []HeaderField {
 		add("Section headers", fmt.Sprintf("%d × %d bytes", u16(48), u16(46)))
 		add("Section str index", fmt.Sprintf("%d", u16(50)))
 	}
+
+	// Program-header (segment) breakdown — what the e_phnum count above only totals.
+	// Each segment's type and R/W/X permissions, with its virtual address and the
+	// file-vs-memory sizes (the gap is .bss). Mirrors the Mach-O load-command list.
+	if len(ef.Progs) > 0 {
+		add("", "── program headers ──")
+		for _, p := range ef.Progs {
+			val := fmt.Sprintf("%s  vaddr 0x%x  filesz 0x%x  memsz 0x%x",
+				elfProgPerm(p.Flags), p.Vaddr, p.Filesz, p.Memsz)
+			add(p.Type.String(), val)
+		}
+	}
 	return fs
+}
+
+// elfInterp returns the dynamic-linker path from the PT_INTERP segment, or "".
+func (f *File) elfInterp(ef *elf.File) string {
+	for _, p := range ef.Progs {
+		if p.Type != elf.PT_INTERP {
+			continue
+		}
+		end := p.Off + p.Filesz
+		if p.Off >= uint64(len(f.raw)) || end > uint64(len(f.raw)) || end <= p.Off {
+			return ""
+		}
+		s := f.raw[p.Off:end]
+		if i := indexByte(s, 0); i >= 0 { // drop the trailing NUL
+			s = s[:i]
+		}
+		return string(s)
+	}
+	return ""
+}
+
+// indexByte is bytes.IndexByte without pulling the import for a single use.
+func indexByte(b []byte, c byte) int {
+	for i, x := range b {
+		if x == c {
+			return i
+		}
+	}
+	return -1
+}
+
+// elfProgPerm renders a segment's permission bits as an "rwx" triad.
+func elfProgPerm(fl elf.ProgFlag) string {
+	b := []byte("---")
+	if fl&elf.PF_R != 0 {
+		b[0] = 'r'
+	}
+	if fl&elf.PF_W != 0 {
+		b[1] = 'w'
+	}
+	if fl&elf.PF_X != 0 {
+		b[2] = 'x'
+	}
+	return string(b)
 }
 
 // be64 reads a 64-bit value at off using the file's byte order, guarding bounds.

@@ -742,29 +742,18 @@ func (m *Model) stringRowHeight(i int) int {
 		return 1
 	}
 	addrW := m.file.AddrHexWidth()
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.stringHeightCache != nil {
-		if h, ok := m.stringHeightCache[key]; ok {
-			return h
-		}
-	}
-	line := m.stringRow(i, addrW)
-	h := len(renderLineRowsIndented(line, m.width, m.wrap, addrW+33))
-	if m.stringHeightCache == nil {
-		m.stringHeightCache = make(map[rowCacheKey]int)
-	}
-	m.stringHeightCache[key] = h
-	return h
+	return m.stringHeightCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() int {
+		return len(renderLineRowsIndented(m.stringRow(i, addrW), m.width, m.wrap, addrW+33))
+	})
 }
 
 func (m *Model) stringRow(i, addrW int) string {
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.stringRowCache != nil {
-		if s, ok := m.stringRowCache[key]; ok {
-			return s
-		}
-	}
+	return m.stringRowCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() string {
+		return m.stringRowText(i, addrW)
+	})
+}
 
+func (m *Model) stringRowText(i, addrW int) string {
 	s := m.stringsList[m.stringsFiltered[i]]
 	addr := strings.Repeat(" ", 2+addrW)
 	if s.HasAddr {
@@ -780,13 +769,7 @@ func (m *Model) stringRow(i, addrW int) string {
 		m.theme.addrStyle.Render(padVisual(addr, 2+addrW)),
 		m.theme.footerStyle.Render(padVisual(truncateMiddle(s.Section, 16), 16)),
 		m.theme.tableRowStyle.Render(text))
-	line = m.stringRowStyle(s).Render(line)
-
-	if m.stringRowCache == nil {
-		m.stringRowCache = make(map[rowCacheKey]string)
-	}
-	m.stringRowCache[key] = line
-	return line
+	return m.stringRowStyle(s).Render(line)
 }
 
 // stringRowStyle colours a string row by the category of its owning section

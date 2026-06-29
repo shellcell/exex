@@ -933,31 +933,22 @@ func (m *Model) sourceAsmAnchorIndex() int {
 }
 
 func (m *Model) sourceAsmRow(i, addrW, w int) string {
-	key := sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}
-	if m.sourceAsmRowCache != nil {
-		if row, ok := m.sourceAsmRowCache[key]; ok {
-			return row
+	return m.sourceAsmRowCache.get(sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}, func() string {
+		inst := m.disasmInst[i]
+		// Colour only the address by mapping (shared addrMapStyle policy); the
+		// instruction text keeps its normal class colours so the pane reads like
+		// real disassembly.
+		addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
+		addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
+		asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
+		var line string
+		if m.disasmByteColWidth() > 0 {
+			line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
+		} else {
+			line = fmt.Sprintf(" %s  %s", addr, asm)
 		}
-	}
-	inst := m.disasmInst[i]
-	// Colour only the address by mapping (shared addrMapStyle policy); the
-	// instruction text keeps its normal class colours so the pane reads like
-	// real disassembly.
-	addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
-	addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
-	asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
-	var line string
-	if m.disasmByteColWidth() > 0 {
-		line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
-	} else {
-		line = fmt.Sprintf(" %s  %s", addr, asm)
-	}
-	row := fitANSIWidth(line, w)
-	if m.sourceAsmRowCache == nil {
-		m.sourceAsmRowCache = make(map[sourceAsmRowCacheKey]string)
-	}
-	m.sourceAsmRowCache[key] = row
-	return row
+		return fitANSIWidth(line, w)
+	})
 }
 
 // clampScroll keeps a viewport top within [0, n-h] so an independent-scroll

@@ -313,12 +313,12 @@ func (m *Model) renderRelocs() string {
 // relocRow renders one relocation row: offset (address colour), type, section,
 // and the target symbol with any addend.
 func (m *Model) relocRow(ri, addrW int) string {
-	key := rowCacheKey{ri, m.width, addrW, m.wrap}
-	if m.relocRowCache != nil {
-		if s, ok := m.relocRowCache[key]; ok {
-			return s
-		}
-	}
+	return m.relocRowCache.get(rowCacheKey{ri, m.width, addrW, m.wrap}, func() string {
+		return m.relocRowText(ri, addrW)
+	})
+}
+
+func (m *Model) relocRowText(ri, addrW int) string {
 	r := m.file.Relocations()[ri]
 	target := r.Sym
 	if r.HasAddend {
@@ -341,10 +341,6 @@ func (m *Model) relocRow(ri, addrW int) string {
 		m.theme.tableRowStyle.Render(padVisual(typ, 24)),
 		m.theme.srcShadowStyle.Render(padVisual(sec, 12)),
 		m.theme.symbolNameStyle.Render(target))
-	if m.relocRowCache == nil {
-		m.relocRowCache = make(map[rowCacheKey]string)
-	}
-	m.relocRowCache[key] = row
 	return row
 }
 

@@ -488,3 +488,49 @@ Then:
 - resolve cache-resident lib paths for `syscalls-full` and scan their `svc`
   sites (giving macOS a real syscall surface);
 - let the Libs view open a `·cache` library as primary (its symbols/disasm).
+
+## 34. CPU-feature detection
+
+Scan the decoded instruction stream — reusing the syscall scan's infrastructure
+(windowed `decodeAcross` over the exec image, parallel, cancellable) — and
+classify mnemonics into feature families, so a user can see *what CPU the binary
+needs to run*:
+
+- **x86/64:** SSE, SSE2, SSE3/SSSE3, SSE4.1/4.2, AVX/AVX2/AVX-512 (VEX/EVEX
+  `v`-prefixed), FMA, BMI1/2, AES, POPCNT, RDRAND, …
+- **arm64:** NEON/ASIMD, crypto (AES/SHA), CRC32, LSE atomics, SVE/SVE2,
+  pointer-auth, FP16, …
+
+Output the set used and the implied baseline (e.g. x86-64-v3). A sibling to the
+syscalls feature: same scan, a per-arch mnemonic→feature table, a modal in the
+disasm view plus an `-o cpu-features` dump.
+
+## 35. Requirements panel
+
+Consolidate the scattered "what it takes to run this" facts into one block in the
+Info view: arch + bits + endianness · OS/ABI (ELF `OSABI`; Mach-O — decode
+`LC_BUILD_VERSION` / `LC_VERSION_MIN_*` into the min macOS/iOS/… version, today
+only counted) · static/dynamic/PIE · interpreter · needed-library count · CPU
+baseline (from #34).
+
+## 36. Find-anything quick jump
+
+Broaden the goto modal (#…/`g`) beyond symbols + addresses to also rank sections
+and strings, so one keystroke finds *any* named thing in the binary and jumps to
+it — a single fuzzy "jump to anything" entry point.
+
+## 37. Architecture cleanup (internal)
+
+Reduce duplication and the cache-invalidation bug surface in `internal/ui`:
+
+- **`listState[T]` generic** for the five list views (sections, symbols, strings,
+  libs, sources) — own the filter text, sort key + direction, cursor/top,
+  filtered-index slice and row cache once, with `match`/`less`/`row` hooks.
+  Migrate one view at a time. (~1k LOC, fewer drift bugs.)
+- **Fold per-view row/height caches** into that generic so invalidation happens
+  in one place (filter/sort/width change), shrinking the ~13-cache surface.
+- **Shared modal-list helper** (sibling to `listGeometry`) to dedupe
+  xref/goto/settings and give xref the syscall modal's filter/sort/colour.
+- **UX consistency pass**: a uniform address vocabulary (`synthetic` / `load`
+  (LMA) / physical) across disasm/hex/sections/Info, and group the `?` help by
+  the same role order as the footer hints.

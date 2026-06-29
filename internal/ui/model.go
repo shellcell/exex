@@ -82,8 +82,8 @@ type sectionsState struct {
 	sectionsFlagsOn    bool        // flags column filter active
 	sectionsFlags      string      // the flag string it restricts to
 	sectionsFlagsList  []string    // distinct flag strings, for cycling
-	sectionRowCache    map[rowCacheKey]string
-	sectionHeightCache map[rowCacheKey]int
+	sectionRowCache    rowMemo[rowCacheKey, string]
+	sectionHeightCache rowMemo[rowCacheKey, int]
 }
 
 // rowCacheKey identifies a rendered table-row variant. The Sections, Symbols
@@ -95,6 +95,28 @@ type rowCacheKey struct {
 	addrW int
 	wrap  bool
 }
+
+// rowMemo is a lazily-allocated memo cache for rendered rows (or their heights),
+// keyed by K. It centralises the "nil-check → lookup → build → store" pattern the
+// list/disasm renderers repeated by hand, so a renderer can't forget to allocate
+// or to populate the cache, and invalidation is a single clear(). The zero value
+// (nil map) is ready to use.
+type rowMemo[K comparable, V any] map[K]V
+
+// get returns the cached value for key, building and caching it on a miss.
+func (m *rowMemo[K, V]) get(key K, build func() V) V {
+	if *m == nil {
+		*m = make(rowMemo[K, V])
+	} else if v, ok := (*m)[key]; ok {
+		return v
+	}
+	v := build()
+	(*m)[key] = v
+	return v
+}
+
+// clear drops all cached entries (next get rebuilds).
+func (m *rowMemo[K, V]) clear() { *m = nil }
 
 // symbolsState stores list/filter state for the Symbols view.
 type symbolsState struct {
@@ -121,8 +143,8 @@ type symbolsState struct {
 	symbolsTreeInit     bool            // collapse-default applied once
 	symbolsByDisplay    []int           // all symbol indices sorted by Display(); built lazily
 	symbolFacets        []facetHit      // clickable toggle buttons on the status line (x ranges)
-	symbolRowCache      map[rowCacheKey][]string
-	symbolHeightCache   map[rowCacheKey]int
+	symbolRowCache      rowMemo[rowCacheKey, []string]
+	symbolHeightCache   rowMemo[rowCacheKey, int]
 }
 
 // facetKind identifies a clickable toggle button on the symbols status line.
@@ -216,15 +238,15 @@ type disasmState struct {
 	rightScroll         int // extra scroll offset for the follower (right) pane; 0 = auto-follow
 	srcVP               viewport.Model
 	srcHighlighter      *syntax.Highlighter
-	sourceAsmRowCache   map[sourceAsmRowCacheKey]string
-	disasmAsmCache      map[disasmAsmCacheKey]string
+	sourceAsmRowCache   rowMemo[sourceAsmRowCacheKey, string]
+	disasmAsmCache      rowMemo[disasmAsmCacheKey, string]
 	// disasmTokenStyles caches Chroma token-type → style (default build only); it
 	// is keyed by int(chroma.TokenType) so the model stays chroma-free for `lite`.
 	disasmTokenStyles map[int]lipgloss.Style
 	// disasmHeightCache memoizes per-instruction rendered height (it otherwise
 	// re-renders each instruction to count rows, which the scroll math calls
 	// dozens of times per wheel tick). Reset whenever disasmInst is replaced.
-	disasmHeightCache map[disasmHeightKey]int
+	disasmHeightCache rowMemo[disasmHeightKey, int]
 	// execSecStarts maps each executable section's start address to its name, so
 	// the disasm scroller's per-row section-separator check is an O(1) lookup
 	// instead of a scan over all sections. Built once (sections are immutable).
@@ -308,7 +330,7 @@ type libsState struct {
 	relocSecOn    bool           // section facet filter active
 	relocSec      string         // the section it restricts to
 	relocSecs     []string       // distinct sections, for cycling
-	relocRowCache map[rowCacheKey]string
+	relocRowCache rowMemo[rowCacheKey, string]
 }
 
 // stringsState stores list, filter and cache state for printable strings.
@@ -325,8 +347,8 @@ type stringsState struct {
 	stringsSortDesc   bool       // reverse the active sort
 	stringsCompact    bool       // flow strings inline (· separated, no columns) vs the table
 	stringsPathsOnly  bool       // show only path-like strings (filesystem paths / URLs)
-	stringRowCache    map[rowCacheKey]string
-	stringHeightCache map[rowCacheKey]int
+	stringRowCache    rowMemo[rowCacheKey, string]
+	stringHeightCache rowMemo[rowCacheKey, int]
 }
 
 // sourcesState stores file-list and open-file state for the Sources view.

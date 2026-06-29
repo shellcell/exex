@@ -18,18 +18,9 @@ import (
 
 // renderInstText colours an instruction's assembly text, caching the result.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
-	key := disasmAsmCacheKey{text: text, addr: instAddr, cls: class}
-	if m.disasmAsmCache != nil {
-		if rendered, ok := m.disasmAsmCache[key]; ok {
-			return rendered
-		}
-	}
-	rendered := m.renderInstTextStyled(text, class, instAddr)
-	if m.disasmAsmCache == nil {
-		m.disasmAsmCache = make(map[disasmAsmCacheKey]string)
-	}
-	m.disasmAsmCache[key] = rendered
-	return rendered
+	return m.disasmAsmCache.get(disasmAsmCacheKey{text: text, addr: instAddr, cls: class}, func() string {
+		return m.renderInstTextStyled(text, class, instAddr)
+	})
 }
 
 // disasmAddrSpan marks a run of instruction text (a followable mapped address)
@@ -280,27 +271,21 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	if i < 0 || i >= len(m.disasmInst) {
 		return 1
 	}
-	key := disasmHeightKey{i: i, w: w, wrap: m.wrap}
-	if h, ok := m.disasmHeightCache[key]; ok {
-		return h
-	}
-	inst := m.disasmInst[i]
-	h := len(m.disasmInstRows(inst, w, false, nil))
-	if _, ok := m.disasmSectionStart(i); ok {
-		h++ // the "═══ .section ═══" separator row
-	}
-	if m.disasmIsSymbolStart(i) {
-		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			h += len(m.disasmLabelRows(m.displaySymbolName(sym), w))
-		} else {
-			h++
+	return m.disasmHeightCache.get(disasmHeightKey{i: i, w: w, wrap: m.wrap}, func() int {
+		inst := m.disasmInst[i]
+		h := len(m.disasmInstRows(inst, w, false, nil))
+		if _, ok := m.disasmSectionStart(i); ok {
+			h++ // the "═══ .section ═══" separator row
 		}
-	}
-	if m.disasmHeightCache == nil {
-		m.disasmHeightCache = make(map[disasmHeightKey]int)
-	}
-	m.disasmHeightCache[key] = h
-	return h
+		if m.disasmIsSymbolStart(i) {
+			if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
+				h += len(m.disasmLabelRows(m.displaySymbolName(sym), w))
+			} else {
+				h++
+			}
+		}
+		return h
+	})
 }
 
 // instByteWidth is the number of instruction bytes the byte column is sized for:

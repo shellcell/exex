@@ -472,41 +472,18 @@ func (m *Model) sectionRowHeight(i int) int {
 		return 1
 	}
 	addrW := m.file.AddrHexWidth()
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.sectionHeightCache != nil {
-		if h, ok := m.sectionHeightCache[key]; ok {
-			return h
-		}
-	}
-	line := m.sectionRow(i, addrW)
-	h := len(renderLineRowsIndented(line, m.width, m.wrap, 6))
-	if m.sectionHeightCache == nil {
-		m.sectionHeightCache = make(map[rowCacheKey]int)
-	}
-	m.sectionHeightCache[key] = h
-	return h
+	return m.sectionHeightCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() int {
+		return len(renderLineRowsIndented(m.sectionRow(i, addrW), m.width, m.wrap, 6))
+	})
 }
 
 func (m *Model) sectionRow(i, addrW int) string {
-	key := rowCacheKey{i, m.width, addrW, m.wrap}
-	if m.sectionRowCache != nil {
-		if s, ok := m.sectionRowCache[key]; ok {
-			return s
+	return m.sectionRowCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() string {
+		if m.showSegments {
+			return m.segmentRow(i, addrW)
 		}
-	}
-
-	var line string
-	if m.showSegments {
-		line = m.segmentRow(i, addrW)
-	} else {
-		line = m.sectionRowText(i, addrW)
-	}
-
-	if m.sectionRowCache == nil {
-		m.sectionRowCache = make(map[rowCacheKey]string)
-	}
-	m.sectionRowCache[key] = line
-	return line
+		return m.sectionRowText(i, addrW)
+	})
 }
 
 // sectionsHavePhys / segmentsHavePhys report whether any row carries a distinct

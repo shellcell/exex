@@ -120,8 +120,8 @@ func (m *Model) renderHelpModal() string {
 		row("↵ · +/−", "tree: expand/collapse all below · all"),
 		blank,
 		head("Info"),
-		row("t / ⇥", "switch fat-Mach-O arch slice"),
-		row("↵ Enter", "open entry point"),
+		row("t / ⇥", "fat-Mach-O arch slice · static-lib members list"),
+		row("↵ Enter", "open entry point · open selected member"),
 		blank,
 		head("Sections"),
 		row(altKeys("t", "f"), "filter by type / flags"),
@@ -490,8 +490,14 @@ var globalHints = []footerHint{
 func (m *Model) viewHints() []footerHint {
 	switch m.mode {
 	case modeInfo:
+		if m.isArchive() && m.infoMembers {
+			return []footerHint{{"↑/↓", "select"}, {"↵/t", "open member"}, {"esc", "back"}}
+		}
 		hints := []footerHint{{"↵", "disasm entry"}}
-		if len(m.file.FatArches) > 1 {
+		switch {
+		case m.isArchive():
+			hints = append(hints, footerHint{"t", "members"})
+		case len(m.file.FatArches) > 1:
 			hints = append(hints, footerHint{"t", "switch arch"})
 		}
 		return hints

@@ -96,6 +96,10 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.pinCurrentByteSectionStart()
 		}
 		if isDouble && !suppressDouble {
+			// Double-clicking a member loads it (the new model must propagate).
+			if m.mode == modeInfo && m.isArchive() && m.infoMembers {
+				return m.loadArchiveMember(m.memberSel)
+			}
 			m.handleDoubleClick()
 		}
 	}
@@ -263,6 +267,10 @@ func oneRow(int) int { return 1 }
 // any lazy load it needs first, or ok=false for views that aren't list-style.
 func (m *Model) listGeometryFor() (listGeometry, bool) {
 	switch m.mode {
+	case modeInfo:
+		if m.isArchive() && m.infoMembers { // the archive members list scrolls/clicks like any list
+			return listGeometry{len(m.archiveMembers), 2, oneRow, &m.memberSel, &m.memberTop, m.memberTop}, true
+		}
 	case modeSections:
 		return listGeometry{len(m.sectionsFiltered), 2, m.sectionRowHeight, &m.sectionsCur, &m.sectionsTop, m.renderedSectionsTop}, true
 	case modeSymbols:

@@ -255,6 +255,7 @@ type cursorState struct {
 	stringsCur  int
 	sourcesCur  int
 	libsCur     int
+	memberSel   int
 	srcFile     string
 	srcCur      int
 }
@@ -271,6 +272,7 @@ func (m *Model) activeCursorState() cursorState {
 		stringsCur:  m.stringsCur,
 		sourcesCur:  m.sourcesCur,
 		libsCur:     m.libsCur,
+		memberSel:   m.memberSel,
 		srcFile:     m.srcFile,
 		srcCur:      m.srcCur,
 	}

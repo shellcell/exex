@@ -86,6 +86,11 @@ func ArchiveMembers(raw []byte) ([]ArchiveMember, error) {
 		default:
 			name = strings.TrimSuffix(rawName, "/") // GNU appends '/' to short names
 		}
+		// The BSD symbol table is stored as a regular member with an extended name
+		// (`#1/…` → "__.SYMDEF" / "__.SYMDEF SORTED"); skip it like the GNU one.
+		if strings.HasPrefix(name, "__.SYMDEF") {
+			name = ""
+		}
 
 		if name != "" && len(data) > 0 {
 			members = append(members, ArchiveMember{Name: name, Data: data})

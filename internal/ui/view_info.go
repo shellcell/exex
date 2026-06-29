@@ -17,6 +17,9 @@ import (
 )
 
 func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
+	if m.isArchive() && m.infoMembers {
+		return m.updateMembersList(key)
+	}
 	switch key {
 	case "home":
 		m.headerVP.GotoTop()
@@ -36,8 +39,13 @@ func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "t":
-		// Toggle to the next architecture slice of a fat Mach-O (doc #27: `t`
-		// toggles arches in Info, mirroring its toggle role in the other views).
+		// For a static library, `t`/`tab` opens the members list (doc #22). For a
+		// fat Mach-O it toggles the next architecture slice (doc #27). Both mirror
+		// the toggle role `t` plays in the other views.
+		if m.isArchive() {
+			m.enterMembersList()
+			return m, nil
+		}
 		if len(m.file.FatArches) > 1 {
 			return m.switchFatArch()
 		}
@@ -85,6 +93,9 @@ func (m *Model) switchFatArch() (tea.Model, tea.Cmd) {
 const infoKeyWidth = 15
 
 func (m *Model) renderInfo() string {
+	if m.isArchive() && m.infoMembers {
+		return m.renderMembersList()
+	}
 	bodyH := m.bodyHeight()
 	innerW := max(1, m.width-4) // panel border (2) + padding (2)
 

@@ -541,6 +541,7 @@ type Model struct {
 	settingsState
 	xrefState
 	syscallState
+	archiveState
 	statusState
 	keyState
 }

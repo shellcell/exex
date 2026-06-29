@@ -73,10 +73,14 @@ func main() {
 	}
 	f, err := binfile.Open(path, openOpts...)
 	if err != nil {
-		// A static-library (ar) archive isn't a single object, but `-o syscalls`
-		// can still scan its members (e.g. which syscalls a static libc.a provides).
-		if outputMode && binfile.IsArchive(readPrefix(path, len("!<arch>\n"))) {
-			runArchiveOutput(path, outputView)
+		// A static-library (ar) archive isn't a single object. `-o syscalls` scans
+		// its members non-interactively; otherwise browse them in the TUI.
+		if binfile.IsArchive(readPrefix(path, len("!<arch>\n"))) {
+			if outputMode {
+				runArchiveOutput(path, outputView)
+			} else {
+				runArchiveViewer(path)
+			}
 			return
 		}
 		// Not a recognised binary: if it's a readable text file (a shell/python/…
@@ -270,6 +274,32 @@ func runArchiveOutput(path, view string) {
 		fmt.Fprintf(os.Stderr, "exex: %q is an archive (%d members); only -o syscalls / syscalls-all are supported for archives\n",
 			path, len(members))
 		os.Exit(2)
+	}
+}
+
+// runArchiveViewer opens a static-library (ar) archive in the TUI: its object
+// members are browsable from the Info view's members list. The archive image
+// stays mapped for the whole session (members slice into it).
+func runArchiveViewer(path string) {
+	members, closer, err := binfile.OpenArchive(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	defer closer()
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	m, err := ui.NewArchive(path, members, ui.Options{Config: cfg})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := tea.NewProgram(m).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/dump"
 )
 
@@ -101,6 +102,7 @@ type syscallState struct {
 	syscallFullDone    bool
 	syscallFullRunning bool
 	syscallFullSeq     int
+	syscallFullCancel  chan struct{}
 }
 
 // syscallRow is one displayed line: a representative site and, in unique scope,
@@ -347,6 +349,7 @@ func (m *Model) syscallLegend() string {
 
 // syscallDoneMsg delivers a finished syscall scan.
 type syscallDoneMsg struct {
+	file  *binfile.File
 	seq   int
 	sites []dump.SyscallSite
 }
@@ -486,14 +489,14 @@ func (m *Model) syscallScanCmd(seq int, done <-chan struct{}) tea.Cmd {
 				}
 			}
 		}
-		return syscallDoneMsg{seq: seq, sites: sites}
+		return syscallDoneMsg{file: file, seq: seq, sites: sites}
 	}
 }
 
 // handleSyscallDone stores a finished scan and opens the modal (or reports none),
 // landing the selection on the first site inside the function under the cursor.
 func (m *Model) handleSyscallDone(msg syscallDoneMsg) (tea.Model, tea.Cmd) {
-	if !m.syscallRunning || msg.seq != m.syscallSeq {
+	if msg.file != m.file || !m.syscallRunning || msg.seq != m.syscallSeq {
 		return m, nil // cancelled or superseded
 	}
 	m.syscallRunning = false
@@ -558,6 +561,7 @@ func (m *Model) cancelSyscall() {
 	m.syscallSeq++
 	m.syscallRunning = false
 	m.stopSyscallScan()
+	m.cancelSyscallFullScan()
 	m.setStatus("syscall scan cancelled", false)
 }
 
@@ -570,6 +574,7 @@ func (m *Model) stopSyscallScan() {
 
 // syscallFullDoneMsg delivers a finished full (binary + libs) scan.
 type syscallFullDoneMsg struct {
+	file  *binfile.File
 	seq   int
 	sites []dump.SyscallSite
 	objs  int
@@ -580,23 +585,42 @@ type syscallFullDoneMsg struct {
 // goroutine (opening and decoding each library is I/O- and CPU-heavy, so it must
 // not block rendering). The result feeds the modal's full scope.
 func (m *Model) startSyscallFullScan() tea.Cmd {
+	m.stopSyscallFullScan()
 	m.syscallFullSeq++
 	m.syscallFullRunning = true
 	seq := m.syscallFullSeq
 	file := m.file
+	done := make(chan struct{})
+	m.syscallFullCancel = done
 	return func() tea.Msg {
-		sites, objs, notes := dump.CollectSyscallsFull(file)
-		return syscallFullDoneMsg{seq: seq, sites: sites, objs: objs, notes: notes}
+		sites, objs, notes := dump.CollectSyscallsFullCancel(file, done)
+		return syscallFullDoneMsg{file: file, seq: seq, sites: sites, objs: objs, notes: notes}
+	}
+}
+
+func (m *Model) stopSyscallFullScan() {
+	if m.syscallFullCancel != nil {
+		close(m.syscallFullCancel)
+		m.syscallFullCancel = nil
+	}
+}
+
+func (m *Model) cancelSyscallFullScan() {
+	if m.syscallFullRunning || m.syscallFullCancel != nil {
+		m.syscallFullSeq++
+		m.syscallFullRunning = false
+		m.stopSyscallFullScan()
 	}
 }
 
 // handleSyscallFullDone stores a finished full scan and refreshes the rows if the
 // modal is still in full scope.
 func (m *Model) handleSyscallFullDone(msg syscallFullDoneMsg) (tea.Model, tea.Cmd) {
-	if msg.seq != m.syscallFullSeq {
+	if msg.file != m.file || !m.syscallFullRunning || msg.seq != m.syscallFullSeq {
 		return m, nil // superseded
 	}
 	m.syscallFullRunning = false
+	m.syscallFullCancel = nil
 	m.syscallFullDone = true
 	m.syscallFull = msg.sites
 	m.syscallFullObjs = msg.objs
@@ -653,7 +677,11 @@ func (m *Model) updateSyscallModal(msg tea.KeyMsg, key string) (tea.Model, tea.C
 		m.syscallFiltering = true
 		return m, m.syscallFilter.Focus()
 	case "t":
+		oldScope := m.syscallScope
 		m.syscallScope = (m.syscallScope + 1) % sysScopeCount
+		if oldScope == sysScopeFull && m.syscallScope != sysScopeFull {
+			m.cancelSyscallFullScan()
+		}
 		m.syscallSel, m.syscallTop = 0, 0
 		m.rebuildSyscallRows()
 		m.setStatus("syscalls: "+m.scopeLabel(), false)
@@ -697,6 +725,7 @@ func (m *Model) syscallJump() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.syscallActive = false
+	m.cancelSyscallFullScan()
 	m.loadDisasmAt(site.Addr)
 	return m, nil
 }

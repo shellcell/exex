@@ -28,6 +28,30 @@ func TestFinalizeSymbolsInfersSizesOnCanonicalSymbols(t *testing.T) {
 	}
 }
 
+func TestSymbolAtPrefersSizedSymbolOverSameAddressAlias(t *testing.T) {
+	f := &File{
+		Sections: []Section{{Name: ".text", Addr: 0x1000, Size: 0x100, Alloc: true, Exec: true}},
+		Symbols: []Symbol{
+			{Name: "alias", Addr: 0x1000, Kind: SymOther},
+			{Name: "func", Addr: 0x1000, Size: 0x40, Kind: SymFunc},
+			{Name: "next", Addr: 0x1080, Kind: SymFunc},
+		},
+	}
+
+	f.finalizeSymbols()
+
+	for _, sym := range f.Symbols {
+		if sym.Name == "alias" && sym.Size != 0 {
+			t.Fatalf("alias size = 0x%x, want exact-only alias", sym.Size)
+		}
+	}
+	for _, addr := range []uint64{0x1000, 0x1010} {
+		if sym, ok := f.SymbolAt(addr); !ok || sym.Name != "func" {
+			t.Fatalf("SymbolAt(0x%x) = %#v, %v; want func", addr, sym, ok)
+		}
+	}
+}
+
 func TestSymbolDisplay(t *testing.T) {
 	if got := (Symbol{Name: "_Z3foov", Demangled: "foo()"}).Display(); got != "foo()" {
 		t.Fatalf("Display demangled = %q, want foo()", got)

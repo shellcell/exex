@@ -202,6 +202,7 @@ type File struct {
 	relocSortOnce sync.Once      // guards the sorted-reloc build
 
 	symByAddr      []int    // indices into Symbols, sorted by Addr
+	symMaxEnd      []uint64 // prefix maximum symbol end by symByAddr position
 	lowerName      []string // lazily-built lowercased Symbols[i].Name (for filtering)
 	lowerDemangled []string // lazily-built lowercased Symbols[i].Demangled
 
@@ -279,12 +280,41 @@ func (f *File) finalizeSymbols() {
 	sortAddrIdx()
 
 	f.symByAddr = addrIdx
+	f.buildSymbolMaxEnds()
+}
+
+func (f *File) buildSymbolMaxEnds() {
+	f.symMaxEnd = make([]uint64, len(f.symByAddr))
+	var maxEnd uint64
+	for i, idx := range f.symByAddr {
+		end := symbolLookupEnd(f.Symbols[idx])
+		if end > maxEnd {
+			maxEnd = end
+		}
+		f.symMaxEnd[i] = maxEnd
+	}
+}
+
+func symbolLookupEnd(s Symbol) uint64 {
+	if s.Size == 0 {
+		return s.Addr
+	}
+	end := s.Addr + s.Size
+	if end < s.Addr {
+		return ^uint64(0)
+	}
+	return end
 }
 
 // inferSymbolSizes gives zero-sized symbols an extent reaching to the next
 // symbol at a higher address (clamped to the containing section's end). Symbols
 // that already carry a size are left untouched.
 func (f *File) inferSymbolSizes(addrIdx []int) {
+	explicitSize := make([]bool, len(f.Symbols))
+	for i := range f.Symbols {
+		explicitSize[i] = f.Symbols[i].Size != 0
+	}
+
 	var secs []*Section
 	for i := range f.Sections {
 		if f.Sections[i].Alloc && f.Sections[i].Size != 0 {
@@ -319,6 +349,11 @@ func (f *File) inferSymbolSizes(addrIdx []int) {
 		if f.Symbols[idx].Size != 0 {
 			continue
 		}
+		// If another symbol at this exact address already carries an extent, keep
+		// this alias exact-only instead of inferring a competing, often larger range.
+		if hasExplicitSameAddr(f.Symbols, explicitSize, addrIdx, i) {
+			continue
+		}
 		next := nextAddr
 		if end := sectionEnd(addr); end != 0 {
 			if next == 0 || next > end {
@@ -329,6 +364,21 @@ func (f *File) inferSymbolSizes(addrIdx []int) {
 			f.Symbols[idx].Size = next - addr
 		}
 	}
+}
+
+func hasExplicitSameAddr(symbols []Symbol, explicitSize []bool, addrIdx []int, pos int) bool {
+	addr := symbols[addrIdx[pos]].Addr
+	for i := pos - 1; i >= 0 && symbols[addrIdx[i]].Addr == addr; i-- {
+		if explicitSize[addrIdx[i]] {
+			return true
+		}
+	}
+	for i := pos + 1; i < len(addrIdx) && symbols[addrIdx[i]].Addr == addr; i++ {
+		if explicitSize[addrIdx[i]] {
+			return true
+		}
+	}
+	return false
 }
 
 // ComputeDemangled returns the demangled form of every symbol name, indexed
@@ -692,20 +742,36 @@ func (f *File) SymbolAt(addr uint64) (Symbol, bool) {
 		return Symbol{}, false
 	}
 	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.Symbols[f.symByAddr[i]].Addr > addr })
-	if i == 0 {
-		return Symbol{}, false
-	}
-	s := f.Symbols[f.symByAddr[i-1]]
-	if s.Size == 0 {
-		if s.Addr == addr {
-			return s, true
+	for i > 0 {
+		groupEnd := i
+		groupAddr := f.Symbols[f.symByAddr[groupEnd-1]].Addr
+		if groupAddr != addr && len(f.symMaxEnd) == len(f.symByAddr) && f.symMaxEnd[groupEnd-1] <= addr {
+			break
 		}
-		return Symbol{}, false
-	}
-	if addr >= s.Addr && addr < s.Addr+s.Size {
-		return s, true
+		groupStart := groupEnd - 1
+		for groupStart > 0 && f.Symbols[f.symByAddr[groupStart-1]].Addr == groupAddr {
+			groupStart--
+		}
+		for j := groupStart; j < groupEnd; j++ {
+			s := f.Symbols[f.symByAddr[j]]
+			if symbolCoversAddr(s, addr) {
+				return s, true
+			}
+		}
+		i = groupStart
 	}
 	return Symbol{}, false
+}
+
+func symbolCoversAddr(s Symbol, addr uint64) bool {
+	if s.Size == 0 {
+		return s.Addr == addr
+	}
+	end := s.Addr + s.Size
+	if end < s.Addr {
+		return addr >= s.Addr
+	}
+	return addr >= s.Addr && addr < end
 }
 
 // SymbolsInRange returns address-indexed symbols that overlap [from, to).

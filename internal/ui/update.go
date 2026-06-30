@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	"github.com/rabarbra/exex/internal/binfile"
 )
 
 func (m *Model) Init() tea.Cmd {
@@ -97,6 +98,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case demangleDoneMsg:
+		if msg.file != m.file {
+			return m, nil
+		}
 		// Background demangle finished: keep the computed names so the setting can
 		// be toggled later without recomputing, and apply them unless the user has
 		// turned demangling off.
@@ -172,7 +176,7 @@ func (m *Model) resize(width, height int) {
 
 func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	// Ignore late delivery if a synchronous jump already loaded a newer span.
-	if !m.disasmDecoding || msg.addr != m.disasmPendingAddr {
+	if (msg.file != nil && msg.file != m.file) || !m.disasmDecoding || msg.addr != m.disasmPendingAddr {
 		return m, nil
 	}
 	m.disasmInst = msg.insts
@@ -200,7 +204,7 @@ func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Model, tea.Cmd) {
-	if !m.searchRunning || msg.seq != m.searchSeq {
+	if msg.file != m.file || !m.searchRunning || msg.seq != m.searchSeq {
 		return m, nil
 	}
 	m.cacheDisasmSearchHits(msg.found, msg.forward)
@@ -236,7 +240,10 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 }
 
 // demangleDoneMsg carries the result of the background symbol demangle.
-type demangleDoneMsg struct{ names []string }
+type demangleDoneMsg struct {
+	file  *binfile.File
+	names []string
+}
 
 // applyDemangledNames stores the demangled names onto the symbol table, then
 // invalidates the now-stale display order, tree and name-keyed caches.
@@ -308,7 +315,7 @@ func (m *Model) toggleDemangle() {
 // shows up immediately (with raw names) instead of blocking on startup.
 func (m *Model) demangleCmd() tea.Cmd {
 	f := m.file
-	return func() tea.Msg { return demangleDoneMsg{names: f.ComputeDemangled()} }
+	return func() tea.Msg { return demangleDoneMsg{file: f, names: f.ComputeDemangled()} }
 }
 
 // copyToClipboard puts text on the system clipboard and reports success or

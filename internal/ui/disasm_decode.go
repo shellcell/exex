@@ -28,6 +28,7 @@ func (m *Model) functionInsts(sym binfile.Symbol) []disasm.Inst {
 
 // disasmReadyMsg carries the finished decode from the background worker.
 type disasmReadyMsg struct {
+	file  *binfile.File
 	addr  uint64
 	posLo int
 	posHi int
@@ -100,10 +101,11 @@ func (m *Model) ensureDisasm() bool {
 // delivers it as a disasmReadyMsg.
 func (m *Model) decodeDisasmCmd(addr uint64) tea.Cmd {
 	svc := m.disasmService()
+	file := m.file
 	before := svc.LeadBytes()
 	return func() tea.Msg {
 		win, insts := svc.DecodeAt(addr, before)
-		return disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts}
+		return disasmReadyMsg{file: file, addr: addr, posLo: win.Start, posHi: win.End, insts: insts}
 	}
 }
 

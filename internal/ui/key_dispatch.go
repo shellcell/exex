@@ -76,6 +76,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelSyscall()
 		return m, nil
 	}
+	if m.syscallFullRunning && key == "esc" {
+		m.cancelSyscallFullScan()
+		m.setStatus("syscall scan cancelled", false)
+		return m, nil
+	}
 	if m.cpufeatRunning && key == "esc" {
 		m.cancelCPUFeat()
 		return m, nil

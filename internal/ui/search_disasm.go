@@ -27,6 +27,7 @@ type disasmSearchHit struct {
 }
 
 type disasmSearchStep struct {
+	file      *binfile.File
 	seq       int
 	label     string
 	query     string
@@ -40,6 +41,7 @@ type disasmSearchStep struct {
 }
 
 type disasmSearchProgressMsg struct {
+	file      *binfile.File
 	seq       int
 	forward   bool
 	next      disasmSearchStep
@@ -223,6 +225,7 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 	done := make(chan struct{})
 	m.searchCancel = done
 	step := disasmSearchStep{
+		file:      m.file,
 		seq:       m.searchSeq,
 		label:     m.searchQuery,
 		query:     canonicalSearchQuery(m.searchQuery),
@@ -391,7 +394,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if scanCancelled(step.cancel) {
-			return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, done: true}
+			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, done: true}
 		}
 		batch := svc.SearchBatchChunks()
 		if batch < 1 {
@@ -399,7 +402,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		}
 		if step.forward {
 			if step.logical >= img.Len() {
-				return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, next: step, scannedLo: step.logical, scannedHi: step.logical, done: true}
+				return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, next: step, scannedLo: step.logical, scannedHi: step.logical, done: true}
 			}
 			var wins []binfile.Window
 			logical := step.logical
@@ -452,14 +455,14 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 				}
 			}
 			if len(found) > 0 {
-				return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: step.logical, scannedHi: logical, done: true}
+				return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: step.logical, scannedHi: logical, done: true}
 			}
 			next := step
 			next.logical = logical
-			return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, next: next, scannedLo: step.logical, scannedHi: logical, status: fmt.Sprintf("searching disasm for %q (%d%%, Esc cancels)", step.label, 100*min(next.logical, next.total)/max(1, next.total))}
+			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, next: next, scannedLo: step.logical, scannedHi: logical, status: fmt.Sprintf("searching disasm for %q (%d%%, Esc cancels)", step.label, 100*min(next.logical, next.total)/max(1, next.total))}
 		}
 		if step.logical <= 0 {
-			return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, next: step, scannedLo: step.logical, scannedHi: step.logical, done: true}
+			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, next: step, scannedLo: step.logical, scannedHi: step.logical, done: true}
 		}
 		var wins []binfile.Window
 		logical := step.logical
@@ -514,11 +517,11 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 			}
 		}
 		if len(found) > 0 {
-			return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: logical, scannedHi: step.logical, done: true}
+			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: logical, scannedHi: step.logical, done: true}
 		}
 		next := step
 		next.logical = logical
 		progress := 100 * (step.total - max(0, next.logical)) / max(1, step.total)
-		return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, next: next, scannedLo: logical, scannedHi: step.logical, status: fmt.Sprintf("searching disasm for %q (%d%%, Esc cancels)", step.label, progress)}
+		return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, next: next, scannedLo: logical, scannedHi: step.logical, status: fmt.Sprintf("searching disasm for %q (%d%%, Esc cancels)", step.label, progress)}
 	}
 }

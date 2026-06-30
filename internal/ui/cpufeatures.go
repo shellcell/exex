@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/dump"
 )
 
@@ -30,9 +31,10 @@ type cpufeatState struct {
 }
 
 type cpufeatDoneMsg struct {
-	seq int
-	set dump.CPUFeatureSet
-	err error
+	file *binfile.File
+	seq  int
+	set  dump.CPUFeatureSet
+	err  error
 }
 
 // startCPUFeatScan kicks off a CPU-feature scan (no-op + status when unsupported).
@@ -56,12 +58,12 @@ func (m *Model) startCPUFeatScan() tea.Cmd {
 	m.setStatus("scanning for CPU features … (Esc cancels)", false)
 	return func() tea.Msg {
 		set, err := dump.ScanCPUFeaturesCancel(file, done)
-		return cpufeatDoneMsg{seq: seq, set: set, err: err}
+		return cpufeatDoneMsg{file: file, seq: seq, set: set, err: err}
 	}
 }
 
 func (m *Model) handleCPUFeatDone(msg cpufeatDoneMsg) (tea.Model, tea.Cmd) {
-	if !m.cpufeatRunning || msg.seq != m.cpufeatSeq {
+	if msg.file != m.file || !m.cpufeatRunning || msg.seq != m.cpufeatSeq {
 		return m, nil
 	}
 	m.cpufeatRunning = false

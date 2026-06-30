@@ -21,6 +21,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rabarbra/exex/internal/binfile"
 )
 
 // xrefMaxHits caps how many references are collected (the modal scrolls).
@@ -105,6 +106,7 @@ func (k xrefSortKey) String() string {
 
 // xrefDoneMsg delivers a finished cross-reference scan.
 type xrefDoneMsg struct {
+	file   *binfile.File
 	seq    int
 	target uint64
 	hits   []xrefHit
@@ -238,7 +240,7 @@ func (m *Model) xrefScanCmd(target uint64, seq int, done <-chan struct{}) tea.Cm
 		if len(hits) > xrefMaxHits {
 			hits = hits[:xrefMaxHits]
 		}
-		return xrefDoneMsg{seq: seq, target: target, hits: hits}
+		return xrefDoneMsg{file: file, seq: seq, target: target, hits: hits}
 	}
 }
 
@@ -259,7 +261,7 @@ func instReferences(text string, target uint64) bool {
 
 // handleXrefDone stores a finished scan and opens the modal (or reports none).
 func (m *Model) handleXrefDone(msg xrefDoneMsg) (tea.Model, tea.Cmd) {
-	if !m.xrefRunning || msg.seq != m.xrefSeq {
+	if msg.file != m.file || !m.xrefRunning || msg.seq != m.xrefSeq {
 		return m, nil // cancelled or superseded
 	}
 	m.xrefRunning = false

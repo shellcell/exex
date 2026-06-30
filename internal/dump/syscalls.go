@@ -376,13 +376,27 @@ func SyscallsFull(f *binfile.File) string {
 // the number of objects scanned, and notes about libraries that couldn't be
 // scanned. Shared by the `syscalls-full` dump and the TUI's full scope.
 func CollectSyscallsFull(f *binfile.File) (sites []SyscallSite, objects int, notes []string) {
-	sites = append(sites, scanObject(f, "this binary")...)
+	return CollectSyscallsFullCancel(f, nil)
+}
+
+// CollectSyscallsFullCancel is CollectSyscallsFull with cooperative cancellation.
+// When done is closed it stops scheduling new library/object work and asks active
+// decode workers to exit early. Partial results may be returned; UI callers guard
+// cancelled results by sequence/file identity.
+func CollectSyscallsFullCancel(f *binfile.File, done <-chan struct{}) (sites []SyscallSite, objects int, notes []string) {
+	if scanCancelled(done) {
+		return sites, objects, notes
+	}
+	sites = append(sites, scanObjectCancel(f, "this binary", done)...)
 	objects = 1
-	if f.Info == nil {
+	if f.Info == nil || scanCancelled(done) {
 		return sites, objects, notes
 	}
 	seen := map[string]bool{}
 	for _, lib := range f.Info.DynamicLibs {
+		if scanCancelled(done) {
+			break
+		}
 		path, ok := explorer.ResolveLibPath(lib, f.Path, f.Info, nil)
 		if !ok {
 			notes = append(notes, "· "+lib+" — not resolved on disk")
@@ -397,7 +411,7 @@ func CollectSyscallsFull(f *binfile.File) (sites []SyscallSite, objects int, not
 			notes = append(notes, "· "+lib+" — open failed: "+err.Error())
 			continue
 		}
-		sites = append(sites, scanObject(lf, lib)...)
+		sites = append(sites, scanObjectCancel(lf, lib, done)...)
 		objects++
 		lf.Close()
 	}
@@ -441,11 +455,15 @@ func SyscallsArchive(members []binfile.ArchiveMember, full bool) string {
 
 // scanObject collects one object's syscall sites, tagging each with origin.
 func scanObject(f *binfile.File, origin string) []SyscallSite {
+	return scanObjectCancel(f, origin, nil)
+}
+
+func scanObjectCancel(f *binfile.File, origin string, done <-chan struct{}) []SyscallSite {
 	dis, err := disasm.For(f.Arch())
 	if err != nil || dis == nil {
 		return nil
 	}
-	sites := collectSyscalls(f, dis)
+	sites := collectSyscallsCancel(f, dis, done)
 	for i := range sites {
 		sites[i].Origin = origin
 	}
@@ -657,6 +675,10 @@ type chunkTask struct {
 // vDSO symbols — the common case — so a large stripped binary's scan is just a
 // cheap mnemonic test per instruction.
 func collectSyscalls(f *binfile.File, dis disasm.Disassembler) []SyscallSite {
+	return collectSyscallsCancel(f, dis, nil)
+}
+
+func collectSyscallsCancel(f *binfile.File, dis disasm.Disassembler, done <-chan struct{}) []SyscallSite {
 	var secs []binfile.Section
 	for _, s := range f.Sections {
 		// Exec section with file bytes. Addr may be 0 in a relocatable object
@@ -697,21 +719,27 @@ func collectSyscalls(f *binfile.File, dis disasm.Disassembler) []SyscallSite {
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 	for i, tk := range tasks {
+		if scanCancelled(done) {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int, tk chunkTask) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			if scanCancelled(done) {
+				return
+			}
 			code := raw[tk.lo:tk.hi]
 			if symAt == nil {
 				// With no vDSO call heuristic to run, locate syscall opcodes by byte
 				// signature and decode only a bounded window around each candidate.
 				if instLen := syscallInstLen(a); instLen > 0 {
-					results[i] = scanChunkLocalized(dis, code, tk.baseVA, tk.emitVA, tk.emitEndVA, a, instLen, f)
+					results[i] = scanChunkLocalized(dis, code, tk.baseVA, tk.emitVA, tk.emitEndVA, a, instLen, f, done)
 					return
 				}
 				if a == disasm.ArchAMD64 || a == disasm.ArchX86 {
-					results[i] = scanChunkX86Localized(dis, code, tk.baseVA, tk.emitVA, tk.emitEndVA, a, f)
+					results[i] = scanChunkX86Localized(dis, code, tk.baseVA, tk.emitVA, tk.emitEndVA, a, f, done)
 					return
 				}
 			}
@@ -719,10 +747,10 @@ func collectSyscalls(f *binfile.File, dis disasm.Disassembler) []SyscallSite {
 			// patterns are present in every real syscall/trampoline encoding), then
 			// fully decode the rest — needed for variable-length x86 and the vDSO
 			// call heuristic.
-			if !chunkHasSyscallCandidate(code, a) {
+			if !chunkHasSyscallCandidate(code, a, done) {
 				return
 			}
-			results[i] = scanChunk(dis, code, tk.baseVA, tk.emitVA, tk.emitEndVA, a, symAt, f)
+			results[i] = scanChunk(dis, code, tk.baseVA, tk.emitVA, tk.emitEndVA, a, symAt, f, done)
 		}(i, tk)
 	}
 	wg.Wait()
@@ -750,7 +778,10 @@ func collectSyscalls(f *binfile.File, dis disasm.Disassembler) []SyscallSite {
 // arm64/arm scan for the svc encoding at any offset (an unaligned coincidence just
 // decodes the chunk — still correct, never a miss). Other arches have no compact
 // signature and are always decoded.
-func chunkHasSyscallCandidate(code []byte, a disasm.Arch) bool {
+func chunkHasSyscallCandidate(code []byte, a disasm.Arch, done <-chan struct{}) bool {
+	if scanCancelled(done) {
+		return false
+	}
 	switch a {
 	case disasm.ArchAMD64, disasm.ArchX86:
 		// syscall (0f 05), sysenter (0f 34), int 0x80/0x2e, gs-indirect call such
@@ -764,6 +795,9 @@ func chunkHasSyscallCandidate(code []byte, a disasm.Arch) bool {
 	case disasm.ArchARM64:
 		// svc #imm16 = 0xd4000001 | (imm<<5).
 		for i := 0; i+4 <= len(code); i++ {
+			if i&0xfff == 0 && scanCancelled(done) {
+				return false
+			}
 			if binary.LittleEndian.Uint32(code[i:])&0xffe0001f == 0xd4000001 {
 				return true
 			}
@@ -772,6 +806,9 @@ func chunkHasSyscallCandidate(code []byte, a disasm.Arch) bool {
 	case disasm.ArchARM:
 		// ARM-mode SVC: cond·1111·imm24 → opcode bits 27..24 all set.
 		for i := 0; i+4 <= len(code); i++ {
+			if i&0xfff == 0 && scanCancelled(done) {
+				return false
+			}
 			if binary.LittleEndian.Uint32(code[i:])&0x0f000000 == 0x0f000000 {
 				return true
 			}
@@ -813,11 +850,14 @@ func isSvcEncoding(b []byte, a disasm.Arch) bool {
 // so the (overwhelming majority of) non-syscall instructions are never decoded or
 // text-formatted. Used when there is no vDSO heuristic to run (the common case);
 // the full scanChunk is kept for variable-length arches and vDSO-bearing binaries.
-func scanChunkLocalized(dis disasm.Disassembler, code []byte, baseVA, emitVA, emitEndVA uint64, a disasm.Arch, instLen int, f *binfile.File) []SyscallSite {
+func scanChunkLocalized(dis disasm.Disassembler, code []byte, baseVA, emitVA, emitEndVA uint64, a disasm.Arch, instLen int, f *binfile.File, done <-chan struct{}) []SyscallSite {
 	var out []SyscallSite
 	il := uint64(instLen)
 	start := int((il - baseVA%il) % il) // align the scan to instruction boundaries
 	for i := start; i+instLen <= len(code); i += instLen {
+		if scanCancelled(done) {
+			break
+		}
 		if !isSvcEncoding(code[i:], a) {
 			continue
 		}
@@ -852,9 +892,12 @@ func scanChunkLocalized(dis disasm.Disassembler, code []byte, baseVA, emitVA, em
 	return out
 }
 
-func scanChunkX86Localized(dis disasm.Disassembler, code []byte, baseVA, emitVA, emitEndVA uint64, a disasm.Arch, f *binfile.File) []SyscallSite {
+func scanChunkX86Localized(dis disasm.Disassembler, code []byte, baseVA, emitVA, emitEndVA uint64, a disasm.Arch, f *binfile.File, done <-chan struct{}) []SyscallSite {
 	var out []SyscallSite
-	for _, off := range x86SyscallCandidateOffsets(code) {
+	for _, off := range x86SyscallCandidateOffsets(code, done) {
+		if scanCancelled(done) {
+			break
+		}
 		va := baseVA + uint64(off)
 		if va < emitVA {
 			continue
@@ -862,7 +905,7 @@ func scanChunkX86Localized(dis disasm.Disassembler, code []byte, baseVA, emitVA,
 		if va >= emitEndVA {
 			break
 		}
-		site, vdso, num, hasNum, ok := decodeX86Candidate(dis, code, baseVA, off, a)
+		site, vdso, num, hasNum, ok := decodeX86Candidate(dis, code, baseVA, off, a, done)
 		if !ok {
 			continue // opcode bytes inside another instruction
 		}
@@ -878,7 +921,7 @@ func scanChunkX86Localized(dis disasm.Disassembler, code []byte, baseVA, emitVA,
 	return out
 }
 
-func decodeX86Candidate(dis disasm.Disassembler, code []byte, baseVA uint64, off int, a disasm.Arch) (disasm.Inst, bool, int64, bool, bool) {
+func decodeX86Candidate(dis disasm.Disassembler, code []byte, baseVA uint64, off int, a disasm.Arch, done <-chan struct{}) (disasm.Inst, bool, int64, bool, bool) {
 	// An x86 instruction is at most 15 bytes. Try every possible previous
 	// instruction start in that window; a true linear instruction boundary must
 	// have a decode path that reaches the candidate offset exactly. This avoids
@@ -893,6 +936,9 @@ func decodeX86Candidate(dis disasm.Disassembler, code []byte, baseVA uint64, off
 	}
 	va := baseVA + uint64(off)
 	for start := lo; start < off || (off == 0 && start == 0); start++ {
+		if scanCancelled(done) {
+			return disasm.Inst{}, false, 0, false, false
+		}
 		var prev [syscallScanBack]disasm.Inst
 		prevN := 0
 		var site disasm.Inst
@@ -900,6 +946,9 @@ func decodeX86Candidate(dis disasm.Disassembler, code []byte, baseVA uint64, off
 		var num int64
 		var hasNum, found bool
 		disasm.RangeFunc(dis, code[start:hi], baseVA+uint64(start), func(in disasm.Inst) bool {
+			if scanCancelled(done) {
+				return false
+			}
 			if in.Addr > va {
 				return false
 			}
@@ -928,9 +977,12 @@ func decodeX86Candidate(dis disasm.Disassembler, code []byte, baseVA uint64, off
 	return disasm.Inst{}, false, 0, false, false
 }
 
-func x86SyscallCandidateOffsets(code []byte) []int {
+func x86SyscallCandidateOffsets(code []byte, done <-chan struct{}) []int {
 	var out []int
 	for i := 0; i+1 < len(code); i++ {
+		if i&0xfff == 0 && scanCancelled(done) {
+			return out
+		}
 		switch {
 		case code[i] == 0x0f && (code[i+1] == 0x05 || code[i+1] == 0x34): // syscall/sysenter
 		case code[i] == 0xcd && (code[i+1] == 0x80 || code[i+1] == 0x2e): // int 0x80/0x2e
@@ -946,10 +998,13 @@ func x86SyscallCandidateOffsets(code []byte) []int {
 // scanChunk decodes one chunk and returns its syscall sites within the chunk's
 // real range, recovering each number from a bounded ring of preceding instructions.
 func scanChunk(dis disasm.Disassembler, code []byte, baseVA, emitVA, emitEndVA uint64, a disasm.Arch,
-	symAt func(uint64) (binfile.Symbol, bool), f *binfile.File) []SyscallSite {
+	symAt func(uint64) (binfile.Symbol, bool), f *binfile.File, done <-chan struct{}) []SyscallSite {
 	var out []SyscallSite
 	recent := make([]disasm.Inst, 0, syscallScanBack)
 	disasm.RangeFunc(dis, code, baseVA, func(in disasm.Inst) bool {
+		if scanCancelled(done) {
+			return false
+		}
 		if in.Addr >= emitEndVA {
 			return false
 		}

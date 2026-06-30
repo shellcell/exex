@@ -210,6 +210,7 @@ type File struct {
 	dwarfOnce    sync.Once          // guards the lazy DWARF decode
 	lines        []lineEntry        // sorted by Addr (loaded lazily from dwarf)
 	lineFiles    []string           // file-name table; lineEntry.File indexes into this
+	sourceFiles  []string           // sorted DWARF source filenames, without line rows
 	linesOnce    sync.Once          // guards the lazy line-table decode
 	indexOnce    sync.Once          // builds line lookup indexes from lines
 	lineCols     map[lineKey][]int  // distinct DWARF columns by source file:line
@@ -559,13 +560,70 @@ func loadLines(d *dwarf.Data) ([]lineEntry, []string) {
 	return out, files
 }
 
-// SourceFiles returns the sorted, de-duplicated set of source files referenced
-// by the DWARF line table.
-func (f *File) SourceFiles() []string {
-	f.lineEntries() // populates f.lineFiles (already de-duplicated by interning)
-	out := make([]string, len(f.lineFiles))
-	copy(out, f.lineFiles)
+func sourceFilesOnly(d *dwarf.Data) []string {
+	seen := map[string]bool{}
+	r := d.Reader()
+	for {
+		cu, err := r.Next()
+		if err != nil || cu == nil {
+			break
+		}
+		if cu.Tag != dwarf.TagCompileUnit {
+			r.SkipChildren()
+			continue
+		}
+		lr, err := d.LineReader(cu)
+		if err != nil || lr == nil {
+			r.SkipChildren()
+			continue
+		}
+		addFiles := func() {
+			for _, file := range lr.Files() {
+				if file != nil && file.Name != "" {
+					seen[file.Name] = true
+				}
+			}
+		}
+		addFiles()
+		var le dwarf.LineEntry
+		for {
+			if err := lr.Next(&le); err != nil {
+				break
+			}
+			if le.File != nil && le.File.Name != "" {
+				seen[le.File.Name] = true
+			}
+		}
+		addFiles()
+		r.SkipChildren()
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
 	sort.Strings(out)
+	return out
+}
+
+// SourceFiles returns the sorted, de-duplicated set of source files referenced
+// by the DWARF line table. It reads only the per-CU file tables and does not
+// build the full address-sorted line-entry table used by source lookup.
+func (f *File) SourceFiles() []string {
+	if f.sourceFiles == nil {
+		if len(f.lineFiles) > 0 {
+			f.sourceFiles = append([]string(nil), f.lineFiles...)
+			sort.Strings(f.sourceFiles)
+		} else {
+			f.ensureDWARF()
+		}
+		if f.sourceFiles == nil && f.dwarf != nil {
+			f.sourceFiles = sourceFilesOnly(f.dwarf)
+		} else if f.sourceFiles == nil {
+			f.sourceFiles = []string{}
+		}
+	}
+	out := make([]string, len(f.sourceFiles))
+	copy(out, f.sourceFiles)
 	return out
 }
 

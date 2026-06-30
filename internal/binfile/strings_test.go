@@ -41,6 +41,23 @@ func TestStringsCachesExtraction(t *testing.T) {
 	}
 }
 
+func TestScanStringsDoesNotPopulateCache(t *testing.T) {
+	f := &File{raw: []byte("hello\x00world\x00tiny")}
+	var got []string
+	if err := f.ScanStrings(func(e StringEntry) error {
+		got = append(got, f.StringText(e))
+		return nil
+	}); err != nil {
+		t.Fatalf("ScanStrings: %v", err)
+	}
+	if len(got) != 3 || got[0] != "hello" || got[1] != "world" || got[2] != "tiny" {
+		t.Fatalf("ScanStrings = %#v, want hello/world/tiny", got)
+	}
+	if f.strings != nil {
+		t.Fatalf("ScanStrings populated cache: %#v", f.strings)
+	}
+}
+
 func TestExtractStringsMapsAddress(t *testing.T) {
 	// A section whose file bytes cover the string maps it to a virtual address.
 	raw := make([]byte, 64)

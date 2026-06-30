@@ -1,6 +1,7 @@
 package binfile
 
 import (
+	"io"
 	"runtime"
 	"sort"
 	"sync"
@@ -141,6 +142,52 @@ func (f *File) extractStringsRange(data []byte, secs []*Section, lo, hi int) []S
 		flush(end)
 	}
 	return out
+}
+
+// ScanStrings walks printable strings in file order and calls emit for each one,
+// without caching the full result. It is used by streaming CLI output where a
+// downstream pipe may close early and the retained StringEntry table would be
+// wasted.
+func (f *File) ScanStrings(emit func(StringEntry) error) error {
+	data := f.raw
+	secs := f.fileSectionsByOffset()
+	printable := func(b byte) bool { return b >= 0x20 && b < 0x7f }
+	start := -1
+	flush := func(end int) error {
+		if start >= 0 && end-start >= minString {
+			e := StringEntry{Offset: uint64(start), Len: uint32(end - start)}
+			if sec := sectionAtSortedOffset(secs, uint64(start)); sec != nil {
+				e.Section = sec.Name
+				if sec.Alloc {
+					e.Addr = sec.Addr + (uint64(start) - sec.Offset)
+					e.HasAddr = true
+				}
+			}
+			if err := emit(e); err != nil {
+				return err
+			}
+		}
+		start = -1
+		return nil
+	}
+	for i, b := range data {
+		if printable(b) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if err := flush(i); err != nil {
+			if err == io.ErrClosedPipe {
+				return nil
+			}
+			return err
+		}
+	}
+	if err := flush(len(data)); err != nil && err != io.ErrClosedPipe {
+		return err
+	}
+	return nil
 }
 
 // fileSectionsByOffset returns the sections that occupy file bytes, sorted by

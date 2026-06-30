@@ -416,7 +416,7 @@ func StringsTo(w io.Writer, f *binfile.File) error {
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
 	var line []byte
-	for _, e := range f.Strings() {
+	return f.ScanStrings(func(e binfile.StringEntry) error {
 		line = line[:0]
 		if e.HasAddr {
 			line = append(line, '0', 'x')
@@ -432,16 +432,16 @@ func StringsTo(w io.Writer, f *binfile.File) error {
 		}
 		line = append(line, ' ', ' ')
 		if _, err := bw.Write(line); err != nil {
-			return nil
+			return io.ErrClosedPipe
 		}
 		if _, err := bw.Write(f.StringBytes(e)); err != nil {
-			return nil
+			return io.ErrClosedPipe
 		}
 		if err := bw.WriteByte('\n'); err != nil {
-			return nil
+			return io.ErrClosedPipe
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // StreamView writes a view straight to w when it has a streaming form (the large

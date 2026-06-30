@@ -16,8 +16,10 @@ func DefaultExecAddr(f *binfile.File, strategy string) uint64 {
 		return 0
 	}
 	inExec := func(a uint64) bool {
-		_, ok := f.ExecImage().PosForAddr(a)
-		return ok
+		if s := f.SectionAt(a); s != nil {
+			return s.Exec && s.FileSize != 0
+		}
+		return false
 	}
 	try := func(s string) (uint64, bool) {
 		switch s {
@@ -38,8 +40,20 @@ func DefaultExecAddr(f *binfile.File, strategy string) uint64 {
 				return a, true
 			}
 		case "lowest":
-			if im := f.ExecImage(); len(im.Regions) > 0 {
-				return im.Regions[0].Addr, true
+			var best uint64
+			ok := false
+			for i := range f.Sections {
+				s := &f.Sections[i]
+				if !s.Alloc || !s.Exec || s.Size == 0 || s.FileSize == 0 {
+					continue
+				}
+				if !ok || s.Addr < best {
+					best = s.Addr
+					ok = true
+				}
+			}
+			if ok {
+				return best, true
 			}
 		}
 		return 0, false
@@ -60,7 +74,7 @@ func symbolAddr(f *binfile.File, names ...string) (uint64, bool) {
 	}
 	for _, s := range f.Symbols {
 		if want[s.Name] {
-			if _, ok := f.ExecImage().PosForAddr(s.Addr); ok {
+			if sec := f.SectionAt(s.Addr); sec != nil && sec.Exec && sec.FileSize != 0 {
 				return s.Addr, true
 			}
 		}
@@ -72,7 +86,7 @@ func symbolAddr(f *binfile.File, names ...string) (uint64, bool) {
 func execSectionAddr(f *binfile.File, names ...string) (uint64, bool) {
 	for i := range f.Sections {
 		s := &f.Sections[i]
-		if !s.Exec || s.Size == 0 {
+		if !s.Exec || s.Size == 0 || s.FileSize == 0 {
 			continue
 		}
 		for _, n := range names {

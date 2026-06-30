@@ -340,10 +340,13 @@ func (f *File) AddrDisassemblable(addr uint64) bool {
 // HasExecCode reports whether the file has any executable section to disassemble
 // in the normal (exec-only) image — false for most relocatable object files.
 func (f *File) HasExecCode() bool {
-	if f.execImage == nil {
-		f.execImage = f.buildImage(func(s *Section) bool { return s.Exec })
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		if s.Alloc && s.Exec && s.Size != 0 && s.FileSize != 0 {
+			return true
+		}
 	}
-	return len(f.execImage.Regions) > 0
+	return false
 }
 
 // IncludeInDisasmAll reports whether a section belongs in a disasm-all sweep.

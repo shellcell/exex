@@ -140,6 +140,7 @@ type symbolsState struct {
 	symbolsFiltering    bool            // whether a search filter is currently narrowing the tree
 	symbolsRoots        []*treeNode     // built tree; cached so collapse toggles only re-flatten
 	symbolsRows         []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
+	symbolsReady        bool            // rows/tree have been built at least once
 	symbolsTreeInit     bool            // collapse-default applied once
 	symbolsByDisplay    []int           // all symbol indices sorted by Display(); built lazily
 	demangledNames      []string        // cached ComputeDemangled result, for the live demangle toggle

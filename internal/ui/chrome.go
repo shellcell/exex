@@ -590,6 +590,8 @@ func (m *Model) switchMode(md mode) tea.Cmd {
 		m.ensureHex()
 	case modeRaw:
 		m.ensureRaw()
+	case modeSymbols:
+		m.ensureSymbols()
 	case modeStrings:
 		m.ensureStrings()
 	case modeSources:

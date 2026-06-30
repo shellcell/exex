@@ -38,11 +38,12 @@ func TestSymbolDisplay(t *testing.T) {
 }
 
 func TestSymbolsInRangeHandlesBoundsAndOverlaps(t *testing.T) {
-	f := &File{symByAddr: []Symbol{
+	f := &File{Symbols: []Symbol{
 		{Name: "a", Addr: 0x1000, Size: 0x10},
 		{Name: "b", Addr: 0x1020},
 		{Name: "c", Addr: 0x1030, Size: 0x08},
 	}}
+	f.symByAddr = []int{0, 1, 2}
 
 	tests := []struct {
 		name string
@@ -73,11 +74,12 @@ func TestSymbolsInRangeHandlesBoundsAndOverlaps(t *testing.T) {
 }
 
 func TestNextPrevSymbol(t *testing.T) {
-	f := &File{symByAddr: []Symbol{
+	f := &File{Symbols: []Symbol{
 		{Name: "a", Addr: 0x1000, Kind: SymFunc},
 		{Name: "b", Addr: 0x1010, Kind: SymObject},
 		{Name: "c", Addr: 0x1020, Kind: SymFunc},
 	}}
+	f.symByAddr = []int{0, 1, 2}
 	if got, ok := f.NextSymbol(0x1000, nil); !ok || got.Name != "b" {
 		t.Fatalf("NextSymbol = %#v, %v; want b", got, ok)
 	}

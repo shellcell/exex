@@ -171,13 +171,14 @@ type File struct {
 	FatArch      string
 	FatArchInfos []FatArchInfo
 
-	debugPath string       // explicit external debug-symbols path (--debug), or ""
-	reqArch   string       // requested fat-Mach-O slice (--arch), or ""
-	raw       []byte       // entire file contents (mmap'd or read; raw view + section data)
-	unmap     func() error // releases the mapping backing raw (nil-safe via Close)
-	arch      arch.Arch
-	entry     uint64
-	addrWidth int // hex digits in a printed address (8 or 16), set from the bitness
+	debugPath  string       // explicit external debug-symbols path (--debug), or ""
+	reqArch    string       // requested fat-Mach-O slice (--arch), or ""
+	raw        []byte       // entire file contents (mmap'd or read; raw view + section data)
+	unmap      func() error // releases the mapping backing raw (nil-safe via Close)
+	layoutOnly bool         // only architecture/sections/segments/raw were loaded
+	arch       arch.Arch
+	entry      uint64
+	addrWidth  int // hex digits in a printed address (8 or 16), set from the bitness
 	// compactAddr narrows AddrHexWidth to 8 digits for a 64-bit binary whose every
 	// address fits in 32 bits (set from the "compact addresses" preference). It only
 	// affects the *printed* width — PointerBytes keeps the true word size. dispWidth
@@ -190,7 +191,7 @@ type File struct {
 	maxAddr     uint64    // highest meaningful address (lazy; for compactAddr)
 	maxAddrOnce sync.Once // guards the maxAddr scan
 	header      []string
-	rawHeader []HeaderField // raw container-header fields (Header sub-view)
+	rawHeader   []HeaderField // raw container-header fields (Header sub-view)
 
 	relocs        []Reloc        // relocation entries (built lazily)
 	relocBuild    func() []Reloc // builds relocs on first Relocations() call
@@ -198,7 +199,7 @@ type File struct {
 	relocsByAddr  []Reloc        // relocs sorted by Offset, for address lookup (lazy)
 	relocSortOnce sync.Once      // guards the sorted-reloc build
 
-	symByAddr      []Symbol // sorted by Addr
+	symByAddr      []int    // indices into Symbols, sorted by Addr
 	lowerName      []string // lazily-built lowercased Symbols[i].Name (for filtering)
 	lowerDemangled []string // lazily-built lowercased Symbols[i].Demangled
 
@@ -218,13 +219,13 @@ type File struct {
 	sources      map[string][]string // resolved file -> lines
 	sourceExists map[string]bool     // resolved file -> exists on disk (cheap presence)
 
-	vaImage   *Image        // all mapped sections, in VA order (lazy)
-	execImage *Image        // executable sections only, in VA order (lazy)
-	allImage  *Image        // every section with file content (disasm-all), lazy
-	disasmAll bool          // ExecImage returns allImage (disassemble all sections)
-	synthetic bool          // section/symbol addresses are a synthetic layout (relocatable object)
-	relocatable bool        // a relocatable object (ELF ET_REL / Mach-O MH_OBJECT)
-	strings   []StringEntry // printable strings, extracted lazily
+	vaImage     *Image        // all mapped sections, in VA order (lazy)
+	execImage   *Image        // executable sections only, in VA order (lazy)
+	allImage    *Image        // every section with file content (disasm-all), lazy
+	disasmAll   bool          // ExecImage returns allImage (disassemble all sections)
+	synthetic   bool          // section/symbol addresses are a synthetic layout (relocatable object)
+	relocatable bool          // a relocatable object (ELF ET_REL / Mach-O MH_OBJECT)
+	strings     []StringEntry // printable strings, extracted lazily
 }
 
 // lineEntry maps a code address to a source location. File is an index into
@@ -248,8 +249,7 @@ type lineKey struct {
 // table, so callers run it separately (ComputeDemangled/ApplyDemangled) off the
 // critical path; until then Display() falls back to the raw name.
 func (f *File) finalizeSymbols() {
-	// Parallel chunk-sort + k-way merge; falls back to a plain sort for small
-	// tables. One of the larger Open costs on big symbol tables.
+	// One of the larger Open costs on big symbol tables.
 	sortSymbolsByName(f.Symbols)
 
 	addrIdx := make([]int, 0, len(f.Symbols))
@@ -275,33 +275,51 @@ func (f *File) finalizeSymbols() {
 	f.inferSymbolSizes(addrIdx)
 	sortAddrIdx()
 
-	f.symByAddr = make([]Symbol, 0, len(addrIdx))
-	for _, idx := range addrIdx {
-		f.symByAddr = append(f.symByAddr, f.Symbols[idx])
-	}
+	f.symByAddr = addrIdx
 }
 
 // inferSymbolSizes gives zero-sized symbols an extent reaching to the next
 // symbol at a higher address (clamped to the containing section's end). Symbols
 // that already carry a size are left untouched.
 func (f *File) inferSymbolSizes(addrIdx []int) {
-	for i, idx := range addrIdx {
+	var secs []*Section
+	for i := range f.Sections {
+		if f.Sections[i].Alloc && f.Sections[i].Size != 0 {
+			secs = append(secs, &f.Sections[i])
+		}
+	}
+	sort.Slice(secs, func(i, j int) bool { return secs[i].Addr < secs[j].Addr })
+	sectionEnd := func(addr uint64) uint64 {
+		i := sort.Search(len(secs), func(i int) bool { return secs[i].Addr > addr })
+		if i == 0 {
+			return 0
+		}
+		s := secs[i-1]
+		if addr >= s.Addr && addr < s.Addr+s.Size {
+			return s.Addr + s.Size
+		}
+		return 0
+	}
+
+	var groupAddr, nextAddr uint64
+	haveGroup := false
+	for i := len(addrIdx) - 1; i >= 0; i-- {
+		idx := addrIdx[i]
+		addr := f.Symbols[idx].Addr
+		if !haveGroup {
+			groupAddr = addr
+			haveGroup = true
+		} else if addr != groupAddr {
+			nextAddr = groupAddr
+			groupAddr = addr
+		}
 		if f.Symbols[idx].Size != 0 {
 			continue
 		}
-		addr := f.Symbols[idx].Addr
-		var next uint64
-		for j := i + 1; j < len(addrIdx); j++ {
-			candidate := f.Symbols[addrIdx[j]].Addr
-			if candidate > addr {
-				next = candidate
-				break
-			}
-		}
-		if sec := f.SectionAt(addr); sec != nil {
-			secEnd := sec.Addr + sec.Size
-			if next == 0 || next > secEnd {
-				next = secEnd
+		next := nextAddr
+		if end := sectionEnd(addr); end != 0 {
+			if next == 0 || next > end {
+				next = end
 			}
 		}
 		if next > addr {
@@ -340,23 +358,14 @@ func (f *File) ComputeDemangled() []string {
 	return out
 }
 
-// ApplyDemangled stores the result of ComputeDemangled onto the symbols (and the
-// address-indexed copies). Run it on the File's owning goroutine.
+// ApplyDemangled stores the result of ComputeDemangled onto the symbols. Run it
+// on the File's owning goroutine.
 func (f *File) ApplyDemangled(d []string) {
 	if len(d) != len(f.Symbols) {
 		return
 	}
-	byName := make(map[string]string, len(d))
 	for i := range f.Symbols {
 		f.Symbols[i].Demangled = d[i]
-		if d[i] != "" {
-			byName[f.Symbols[i].Name] = d[i]
-		}
-	}
-	for i := range f.symByAddr {
-		if dm, ok := byName[f.symByAddr[i].Name]; ok {
-			f.symByAddr[i].Demangled = dm
-		}
 	}
 	// Demangled names just changed; drop the lowercased filter index so it is
 	// rebuilt (with the demangled forms) on the next filter.
@@ -370,9 +379,6 @@ func (f *File) ApplyDemangled(d []string) {
 func (f *File) ClearDemangled() {
 	for i := range f.Symbols {
 		f.Symbols[i].Demangled = ""
-	}
-	for i := range f.symByAddr {
-		f.symByAddr[i].Demangled = ""
 	}
 	f.lowerName, f.lowerDemangled = nil, nil
 }
@@ -418,6 +424,7 @@ func (f *File) ensureDWARF() {
 		if f.dwarf == nil && f.dwarfBuild != nil {
 			f.dwarf = f.dwarfBuild()
 		}
+		f.dwarfBuild = nil
 	})
 }
 
@@ -626,11 +633,11 @@ func (f *File) SymbolAt(addr uint64) (Symbol, bool) {
 	if len(f.symByAddr) == 0 {
 		return Symbol{}, false
 	}
-	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.symByAddr[i].Addr > addr })
+	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.Symbols[f.symByAddr[i]].Addr > addr })
 	if i == 0 {
 		return Symbol{}, false
 	}
-	s := f.symByAddr[i-1]
+	s := f.Symbols[f.symByAddr[i-1]]
 	if s.Size == 0 {
 		if s.Addr == addr {
 			return s, true
@@ -648,9 +655,9 @@ func (f *File) SymbolsInRange(from uint64, to uint64) []Symbol {
 	if len(f.symByAddr) == 0 || to <= from {
 		return []Symbol{}
 	}
-	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.symByAddr[i].Addr >= from })
+	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.Symbols[f.symByAddr[i]].Addr >= from })
 	if i > 0 {
-		prev := f.symByAddr[i-1]
+		prev := f.Symbols[f.symByAddr[i-1]]
 		prevEnd := prev.Addr + prev.Size
 		if prev.Size > 0 && (prevEnd < prev.Addr || prevEnd > from) {
 			i--
@@ -658,7 +665,7 @@ func (f *File) SymbolsInRange(from uint64, to uint64) []Symbol {
 	}
 	res := []Symbol{}
 	for ; i < len(f.symByAddr); i++ {
-		s := f.symByAddr[i]
+		s := f.Symbols[f.symByAddr[i]]
 		if s.Addr >= to {
 			break
 		}
@@ -683,9 +690,9 @@ func (f *File) SymbolsInRange(from uint64, to uint64) []Symbol {
 // satisfies pred (a nil pred accepts any symbol). symByAddr is sorted by Addr,
 // so it binary-searches to the first candidate and scans only from there.
 func (f *File) NextSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
-	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.symByAddr[i].Addr > addr })
+	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.Symbols[f.symByAddr[i]].Addr > addr })
 	for ; i < len(f.symByAddr); i++ {
-		if s := f.symByAddr[i]; pred == nil || pred(s) {
+		if s := f.Symbols[f.symByAddr[i]]; pred == nil || pred(s) {
 			return s, true
 		}
 	}
@@ -696,9 +703,9 @@ func (f *File) NextSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
 // satisfies pred (a nil pred accepts any symbol). symByAddr is sorted by Addr,
 // so it binary-searches to the last candidate and scans only from there.
 func (f *File) PrevSymbol(addr uint64, pred func(Symbol) bool) (Symbol, bool) {
-	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.symByAddr[i].Addr >= addr })
+	i := sort.Search(len(f.symByAddr), func(i int) bool { return f.Symbols[f.symByAddr[i]].Addr >= addr })
 	for i--; i >= 0; i-- {
-		if s := f.symByAddr[i]; pred == nil || pred(s) {
+		if s := f.Symbols[f.symByAddr[i]]; pred == nil || pred(s) {
 			return s, true
 		}
 	}

@@ -35,6 +35,7 @@ func (f *File) Relocations() []Reloc {
 	f.relocOnce.Do(func() {
 		if f.relocBuild != nil {
 			f.relocs = f.relocBuild()
+			f.relocBuild = nil
 		}
 	})
 	return f.relocs

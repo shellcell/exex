@@ -92,7 +92,6 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 		keyState: newKeyState(cfg.Keys),
 	}
 	m.keyLog = os.Getenv("EXEX_KEYLOG") == "1"
-	m.recomputeSymbols()
 	m.buildSectionFacets()
 	m.recomputeSections()
 

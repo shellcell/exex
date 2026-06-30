@@ -52,6 +52,49 @@ func TestOpenSystemMachO(t *testing.T) {
 		len(f.Raw()), f.VAImage().Len(), f.ExecImage().Len())
 }
 
+func TestMachOLayoutOnlyMatchesFullLayout(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("system Mach-O binary only available on macOS")
+	}
+	const path = "/bin/ls"
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("%s not present", path)
+	}
+	full, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open full: %v", err)
+	}
+	defer full.Close()
+	lite, err := Open(path, WithLayoutOnly())
+	if err != nil {
+		t.Fatalf("Open layout-only: %v", err)
+	}
+	defer lite.Close()
+	if lite.Format != full.Format || lite.Arch() != full.Arch() || lite.Entry() != full.Entry() {
+		t.Fatalf("identity mismatch: lite %s/%d/0x%x full %s/%d/0x%x",
+			lite.Format, lite.Arch(), lite.Entry(), full.Format, full.Arch(), full.Entry())
+	}
+	if len(lite.Symbols) != 0 {
+		t.Fatalf("layout-only loaded %d symbols, want 0", len(lite.Symbols))
+	}
+	if len(lite.Sections) != len(full.Sections) || len(lite.Segments) != len(full.Segments) {
+		t.Fatalf("layout size mismatch: sections %d/%d segments %d/%d",
+			len(lite.Sections), len(full.Sections), len(lite.Segments), len(full.Segments))
+	}
+	for i := range full.Sections {
+		got, want := lite.Sections[i], full.Sections[i]
+		if got != want {
+			t.Fatalf("section %d mismatch:\n got  %#v\n want %#v", i, got, want)
+		}
+	}
+	for i := range full.Segments {
+		got, want := lite.Segments[i], full.Segments[i]
+		if got != want {
+			t.Fatalf("segment %d mismatch:\n got  %#v\n want %#v", i, got, want)
+		}
+	}
+}
+
 // TestMachODylibInfo guards that a Mach-O dylib reports no entry point and no
 // interpreter (only executables have those), and is treated as position-
 // independent. Regression for an earlier bug that invented an __text "entry" and

@@ -71,6 +71,9 @@ func main() {
 	if archName != "" {
 		openOpts = append(openOpts, binfile.WithArch(archName))
 	}
+	if outputMode && dump.ViewNeedsLayoutOnly(outputView) {
+		openOpts = append(openOpts, binfile.WithLayoutOnly())
+	}
 	f, err := binfile.Open(path, openOpts...)
 	if err != nil {
 		// A static-library (ar) archive isn't a single object. `-o syscalls` scans

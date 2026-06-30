@@ -361,6 +361,7 @@ func (sc symbolScope) includes(s binfile.Symbol) bool {
 // recomputeSymbols rebuilds the filtered set and the flattened visible rows from
 // the current filter, sort, and (in tree mode) collapse state.
 func (m *Model) recomputeSymbols() {
+	m.symbolsReady = true
 	m.clearSymbolCaches()
 	needle := strings.ToLower(m.symbolsFilter.Value())
 	// Entering a search auto-expands the tree so matches aren't hidden under
@@ -377,7 +378,10 @@ func (m *Model) recomputeSymbols() {
 		}
 		m.symbolsFiltering = filtering
 	}
-	lowerName, lowerDem := m.file.LowerNames()
+	var lowerName, lowerDem []string
+	if needle != "" {
+		lowerName, lowerDem = m.file.LowerNames()
+	}
 	m.symbolsFiltered = m.symbolsFiltered[:0]
 	scan := func(i int) {
 		s := m.file.Symbols[i]
@@ -393,8 +397,7 @@ func (m *Model) recomputeSymbols() {
 		if m.symbolsLib != "" && s.Library != m.symbolsLib {
 			return
 		}
-		if needle == "" ||
-			strings.Contains(lowerName[i], needle) ||
+		if needle == "" || strings.Contains(lowerName[i], needle) ||
 			(lowerDem[i] != "" && strings.Contains(lowerDem[i], needle)) {
 			m.symbolsFiltered = append(m.symbolsFiltered, i)
 		}
@@ -416,6 +419,12 @@ func (m *Model) recomputeSymbols() {
 	m.buildSymbolRows()
 	if m.symbolsCur >= len(m.symbolsRows) {
 		m.symbolsCur = max(0, len(m.symbolsRows)-1)
+	}
+}
+
+func (m *Model) ensureSymbols() {
+	if !m.symbolsReady {
+		m.recomputeSymbols()
 	}
 }
 
@@ -825,6 +834,7 @@ func (m *Model) openSymbol(sym binfile.Symbol) {
 }
 
 func (m *Model) renderSymbols() string {
+	m.ensureSymbols()
 	bodyH := m.bodyHeight()
 	if bodyH < 3 {
 		bodyH = 3

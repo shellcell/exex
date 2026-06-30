@@ -73,6 +73,18 @@ func elfDebugLink(ef *elf.File) string {
 	return ""
 }
 
+func (f *File) elfHasDWARF(ef *elf.File) bool {
+	if f.debugPath != "" || elfDebugLink(ef) != "" {
+		return true
+	}
+	for _, s := range ef.Sections {
+		if strings.HasPrefix(s.Name, ".debug") || strings.HasPrefix(s.Name, ".zdebug") {
+			return true
+		}
+	}
+	return false
+}
+
 // loadELF parses f.raw as an ELF object and populates the neutral model.
 func (f *File) loadELF() error {
 	ef, err := elf.NewFile(bytes.NewReader(f.raw))
@@ -136,6 +148,48 @@ func (f *File) loadELF() error {
 		f.synthetic = base > 0
 	}
 
+	for _, p := range ef.Progs {
+		paddr := p.Paddr
+		if paddr == p.Vaddr {
+			paddr = 0 // only carry a physical address when it differs
+		}
+		f.Segments = append(f.Segments, Segment{
+			Name:     strings.TrimPrefix(p.Type.String(), "PT_"),
+			Addr:     p.Vaddr,
+			PhysAddr: paddr,
+			Size:     p.Memsz,
+			Offset:   p.Off,
+			FileSize: p.Filesz,
+			Align:    p.Align,
+			R:        p.Flags&elf.PF_R != 0,
+			W:        p.Flags&elf.PF_W != 0,
+			X:        p.Flags&elf.PF_X != 0,
+		})
+	}
+	// Section load addresses (LMA): map each section through the PT_LOAD segment
+	// whose file bytes contain it. LMA = p_paddr + (sh_offset - p_offset). Only
+	// recorded when it differs from the virtual address (higher-half kernels etc.).
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		if s.Addr == 0 || s.FileSize == 0 {
+			continue
+		}
+		for _, p := range ef.Progs {
+			if p.Type != elf.PT_LOAD || p.Paddr == p.Vaddr || p.Filesz == 0 {
+				continue
+			}
+			if s.Offset >= p.Off && s.Offset < p.Off+p.Filesz {
+				if lma := p.Paddr + (s.Offset - p.Off); lma != s.Addr {
+					s.PhysAddr = lma
+				}
+				break
+			}
+		}
+	}
+	if f.layoutOnly {
+		return nil
+	}
+
 	staticSyms, _ := ef.Symbols()
 	dynSyms, _ := ef.DynamicSymbols()
 	type symKey struct {
@@ -181,47 +235,9 @@ func (f *File) loadELF() error {
 	}
 	f.appendELFImportSymbols(ef)
 
-	for _, p := range ef.Progs {
-		paddr := p.Paddr
-		if paddr == p.Vaddr {
-			paddr = 0 // only carry a physical address when it differs
-		}
-		f.Segments = append(f.Segments, Segment{
-			Name:     strings.TrimPrefix(p.Type.String(), "PT_"),
-			Addr:     p.Vaddr,
-			PhysAddr: paddr,
-			Size:     p.Memsz,
-			Offset:   p.Off,
-			FileSize: p.Filesz,
-			Align:    p.Align,
-			R:        p.Flags&elf.PF_R != 0,
-			W:        p.Flags&elf.PF_W != 0,
-			X:        p.Flags&elf.PF_X != 0,
-		})
-	}
-	// Section load addresses (LMA): map each section through the PT_LOAD segment
-	// whose file bytes contain it. LMA = p_paddr + (sh_offset - p_offset). Only
-	// recorded when it differs from the virtual address (higher-half kernels etc.).
-	for i := range f.Sections {
-		s := &f.Sections[i]
-		if s.Addr == 0 || s.FileSize == 0 {
-			continue
-		}
-		for _, p := range ef.Progs {
-			if p.Type != elf.PT_LOAD || p.Paddr == p.Vaddr || p.Filesz == 0 {
-				continue
-			}
-			if s.Offset >= p.Off && s.Offset < p.Off+p.Filesz {
-				if lma := p.Paddr + (s.Offset - p.Off); lma != s.Addr {
-					s.PhysAddr = lma
-				}
-				break
-			}
-		}
-	}
-
-	if d := f.elfDWARF(ef); d != nil {
-		f.dwarf = d // line table decoded lazily on first source lookup
+	if f.elfHasDWARF(ef) {
+		f.dwarfAvail = true
+		f.dwarfBuild = func() *dwarf.Data { return f.elfDWARF(ef) }
 	}
 
 	f.loadELFInfo(ef)
@@ -573,7 +589,7 @@ func (f *File) elfHeaderInfo(ef *elf.File) []string {
 		fmt.Sprintf("Entry:       0x%x", h.Entry),
 		fmt.Sprintf("Sections:    %d", len(f.Sections)),
 		fmt.Sprintf("Symbols:     %d", len(f.Symbols)),
-		fmt.Sprintf("DWARF info:  %v", f.dwarf != nil),
+		fmt.Sprintf("DWARF info:  %v", f.HasDWARF()),
 	}
 }
 

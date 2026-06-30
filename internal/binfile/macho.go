@@ -16,12 +16,14 @@ import (
 
 // Mach-O magic numbers (thin, both byte orders, plus the fat headers).
 const (
-	machoMagic32   = 0xfeedface
-	machoMagic64   = 0xfeedfacf
-	machoCigam32   = 0xcefaedfe
-	machoCigam64   = 0xcffaedfe
-	machoFatMagic  = 0xcafebabe
-	machoFatMagic2 = 0xbebafeca
+	machoMagic32    = 0xfeedface
+	machoMagic64    = 0xfeedfacf
+	machoCigam32    = 0xcefaedfe
+	machoCigam64    = 0xcffaedfe
+	machoFatMagic   = 0xcafebabe
+	machoFatMagic2  = 0xbebafeca
+	machoFatMagic64 = 0xcafebabf
+	machoFatCigam64 = 0xbfbafeca
 )
 
 // VM protection bits (mach/vm_prot.h).
@@ -62,7 +64,7 @@ func isMachO(raw []byte) bool {
 	switch binary.BigEndian.Uint32(raw) {
 	case machoMagic32, machoMagic64, machoCigam32, machoCigam64:
 		return true
-	case machoFatMagic, machoFatMagic2:
+	case machoFatMagic, machoFatMagic2, machoFatMagic64, machoFatCigam64:
 		return isFatMachO(raw)
 	}
 	return false
@@ -80,7 +82,7 @@ func isFatMachO(raw []byte) bool {
 		// means fat Mach-O; anything larger is a .class (or not fat at all).
 		n := binary.BigEndian.Uint32(raw[4:8])
 		return n >= 1 && n <= 0x14
-	case machoFatMagic2:
+	case machoFatMagic2, machoFatMagic64, machoFatCigam64:
 		// Byte-swapped fat magic (FAT_CIGAM) — not a Java class.
 		return true
 	}
@@ -128,6 +130,9 @@ func machoArchName(c macho.Cpu, sub uint32) string {
 // For universal ("fat") binaries it selects the slice named by f.reqArch, else
 // the host architecture's slice, else the first.
 func (f *File) loadMachO() error {
+	if f.layoutOnly {
+		return f.loadMachOLayout()
+	}
 	mf, base, arches, chosen, err := parseMachO(f.raw, f.reqArch)
 	if err != nil {
 		return err
@@ -259,6 +264,262 @@ func (f *File) loadMachO() error {
 	return nil
 }
 
+type machoLayoutHeader struct {
+	base       uint64
+	cmdOff     uint64
+	ncmds      uint32
+	sizeofcmds uint32
+	cpu        macho.Cpu
+	sub        uint32
+	typ        macho.Type
+	bits       int
+	bo         binary.ByteOrder
+}
+
+func (f *File) loadMachOLayout() error {
+	h, arches, chosen, err := parseMachOLayoutHeader(f.raw, f.reqArch)
+	if err != nil {
+		return err
+	}
+	if len(arches) > 1 {
+		f.FatArchInfos = arches
+		f.FatArches = make([]string, len(arches))
+		for i, a := range arches {
+			f.FatArches[i] = a.Name
+		}
+	}
+	f.FatArch = chosen
+	f.Format = FormatMachO
+	f.relocatable = h.typ == macho.TypeObj
+	f.arch = machoArch(h.cpu)
+	if h.bits == 64 {
+		f.addrWidth = 16
+	} else {
+		f.addrWidth = 8
+	}
+
+	cmdStart := h.cmdOff
+	cmdEnd := cmdStart + uint64(h.sizeofcmds)
+	if cmdStart > uint64(len(f.raw)) || cmdEnd > uint64(len(f.raw)) || cmdEnd < cmdStart {
+		return fmt.Errorf("truncated Mach-O load commands")
+	}
+	var textAddr, entryOff uint64
+	for off, i := cmdStart, uint32(0); i < h.ncmds; i++ {
+		if off+8 > cmdEnd {
+			return fmt.Errorf("truncated Mach-O load command")
+		}
+		cmd := h.bo.Uint32(f.raw[off:])
+		cmdSize := uint64(h.bo.Uint32(f.raw[off+4:]))
+		if cmdSize < 8 || off+cmdSize > cmdEnd || off+cmdSize < off {
+			return fmt.Errorf("invalid Mach-O load command size")
+		}
+		lc := f.raw[off : off+cmdSize]
+		switch cmd {
+		case lcSegment, lcSegment64:
+			if err := f.parseMachOSegmentLayout(h, lc); err != nil {
+				return err
+			}
+			if len(lc) >= 24 && machoName(lc[8:24]) == "__TEXT" {
+				if cmd == lcSegment64 && len(lc) >= 32 {
+					textAddr = h.bo.Uint64(lc[24:32])
+				} else if cmd == lcSegment && len(lc) >= 28 {
+					textAddr = uint64(h.bo.Uint32(lc[24:28]))
+				}
+			}
+		case lcMain:
+			if len(lc) >= 16 {
+				entryOff = h.bo.Uint64(lc[8:16])
+			}
+		}
+		off += cmdSize
+	}
+	if entryOff != 0 {
+		f.entry = textAddr + entryOff
+	}
+	f.header = []string{
+		fmt.Sprintf("Path:        %s", f.Path),
+		fmt.Sprintf("Format:      %s", f.Format),
+		fmt.Sprintf("CPU:         %s", h.cpu),
+		fmt.Sprintf("Type:        %s", h.typ),
+		fmt.Sprintf("64-bit:      %v", h.bits == 64),
+		fmt.Sprintf("Entry:       0x%x", f.entry),
+		fmt.Sprintf("Sections:    %d", len(f.Sections)),
+		"Symbols:     0",
+		"DWARF info:  false",
+	}
+	return nil
+}
+
+func parseMachOLayoutHeader(raw []byte, want string) (machoLayoutHeader, []FatArchInfo, string, error) {
+	base := uint64(0)
+	var arches []FatArchInfo
+	chosen := ""
+	if isFatMachO(raw) {
+		fas, err := parseFatMachOHeaders(raw)
+		if err != nil {
+			return machoLayoutHeader{}, nil, "", err
+		}
+		for _, fa := range fas {
+			arches = append(arches, FatArchInfo{
+				Name:   machoArchName(fa.cpu, fa.sub),
+				Type:   fa.typ,
+				Bits:   fa.bits,
+				Offset: fa.offset,
+				Size:   fa.size,
+			})
+		}
+		fa := pickFatArchLite(fas, want)
+		end := fa.offset + fa.size
+		if fa.offset > uint64(len(raw)) || end > uint64(len(raw)) || end < fa.offset {
+			return machoLayoutHeader{}, nil, "", fmt.Errorf("fat Mach-O slice %s is out of range", machoArchName(fa.cpu, fa.sub))
+		}
+		base = fa.offset
+		chosen = machoArchName(fa.cpu, fa.sub)
+	}
+	h, err := parseMachOThinHeader(raw, base)
+	if err != nil {
+		return machoLayoutHeader{}, nil, "", err
+	}
+	if chosen == "" {
+		chosen = machoArchName(h.cpu, h.sub)
+	}
+	return h, arches, chosen, nil
+}
+
+func parseMachOThinHeader(raw []byte, base uint64) (machoLayoutHeader, error) {
+	if base+28 > uint64(len(raw)) {
+		return machoLayoutHeader{}, fmt.Errorf("truncated Mach-O header")
+	}
+	magic := binary.BigEndian.Uint32(raw[base:])
+	var bo binary.ByteOrder = binary.BigEndian
+	bits := 32
+	hdrSize := uint64(28)
+	switch magic {
+	case machoMagic64:
+		bits = 64
+		hdrSize = 32
+	case machoMagic32:
+	case machoCigam64:
+		bo = binary.LittleEndian
+		bits = 64
+		hdrSize = 32
+	case machoCigam32:
+		bo = binary.LittleEndian
+	default:
+		return machoLayoutHeader{}, fmt.Errorf("unrecognised Mach-O magic 0x%x", magic)
+	}
+	if base+hdrSize > uint64(len(raw)) {
+		return machoLayoutHeader{}, fmt.Errorf("truncated Mach-O header")
+	}
+	return machoLayoutHeader{
+		base:       base,
+		cmdOff:     base + hdrSize,
+		ncmds:      bo.Uint32(raw[base+16:]),
+		sizeofcmds: bo.Uint32(raw[base+20:]),
+		cpu:        macho.Cpu(bo.Uint32(raw[base+4:])),
+		sub:        bo.Uint32(raw[base+8:]),
+		typ:        macho.Type(bo.Uint32(raw[base+12:])),
+		bits:       bits,
+		bo:         bo,
+	}, nil
+}
+
+func (f *File) parseMachOSegmentLayout(h machoLayoutHeader, lc []byte) error {
+	cmd := h.bo.Uint32(lc)
+	segName := machoName(lc[8:24])
+	var vmaddr, vmsize, fileoff, filesize uint64
+	var initprot, nsects uint32
+	secOff := 0
+	secSize := 0
+	switch cmd {
+	case lcSegment64:
+		if len(lc) < 72 {
+			return fmt.Errorf("truncated Mach-O segment")
+		}
+		vmaddr = h.bo.Uint64(lc[24:32])
+		vmsize = h.bo.Uint64(lc[32:40])
+		fileoff = h.bo.Uint64(lc[40:48])
+		filesize = h.bo.Uint64(lc[48:56])
+		initprot = h.bo.Uint32(lc[60:64])
+		nsects = h.bo.Uint32(lc[64:68])
+		secOff, secSize = 72, 80
+	case lcSegment:
+		if len(lc) < 56 {
+			return fmt.Errorf("truncated Mach-O segment")
+		}
+		vmaddr = uint64(h.bo.Uint32(lc[24:28]))
+		vmsize = uint64(h.bo.Uint32(lc[28:32]))
+		fileoff = uint64(h.bo.Uint32(lc[32:36]))
+		filesize = uint64(h.bo.Uint32(lc[36:40]))
+		initprot = h.bo.Uint32(lc[44:48])
+		nsects = h.bo.Uint32(lc[48:52])
+		secOff, secSize = 56, 68
+	}
+	f.Segments = append(f.Segments, Segment{
+		Name:     segName,
+		Addr:     vmaddr,
+		Size:     vmsize,
+		Offset:   h.base + fileoff,
+		FileSize: filesize,
+		R:        initprot&vmProtRead != 0,
+		W:        initprot&vmProtWrite != 0,
+		X:        initprot&vmProtExecute != 0,
+	})
+	if secOff+int(nsects)*secSize > len(lc) {
+		return fmt.Errorf("truncated Mach-O section table")
+	}
+	write := initprot&vmProtWrite != 0
+	for i := 0; i < int(nsects); i++ {
+		sec := lc[secOff+i*secSize:]
+		name := machoName(sec[:16])
+		seg := machoName(sec[16:32])
+		if seg == "" {
+			seg = segName
+		}
+		var addr, size uint64
+		var offset, flags uint32
+		if cmd == lcSegment64 {
+			addr = h.bo.Uint64(sec[32:40])
+			size = h.bo.Uint64(sec[40:48])
+			offset = h.bo.Uint32(sec[48:52])
+			flags = h.bo.Uint32(sec[64:68])
+		} else {
+			addr = uint64(h.bo.Uint32(sec[32:36]))
+			size = uint64(h.bo.Uint32(sec[36:40]))
+			offset = h.bo.Uint32(sec[40:44])
+			flags = h.bo.Uint32(sec[56:60])
+		}
+		exec := flags&(machoAttrPureInstr|machoAttrSomeInstr) != 0
+		zerofill := isZerofill(flags)
+		fileSize := size
+		if zerofill {
+			fileSize = 0
+		}
+		s := Section{
+			Name:     name,
+			Addr:     addr,
+			Size:     size,
+			Offset:   h.base + uint64(offset),
+			FileSize: fileSize,
+			TypeName: seg,
+			Category: machoCategoryFields(name, seg, addr, exec, write, zerofill),
+			Alloc:    addr != 0,
+			Exec:     exec,
+			Write:    write,
+		}
+		s.Flags = neutralFlags(s.Alloc, write, exec)
+		f.Sections = append(f.Sections, s)
+	}
+	return nil
+}
+
+func machoName(b []byte) string {
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		b = b[:i]
+	}
+	return string(b)
+}
+
 // machoHasDWARF reports whether DWARF is available without parsing it: an
 // embedded __DWARF segment, an explicit --debug path, or a companion .dSYM.
 func (f *File) machoHasDWARF(mf *macho.File) bool {
@@ -283,40 +544,141 @@ func (f *File) machoHasDWARF(mf *macho.File) bool {
 // of every architecture (nil for thin), and the chosen slice's name. want selects
 // a fat slice by name (e.g. "x86_64"); "" picks the host arch, else the first.
 func parseMachO(raw []byte, want string) (mf *macho.File, base uint64, arches []FatArchInfo, chosen string, err error) {
-	ra := bytes.NewReader(raw)
 	if isFatMachO(raw) {
-		ff, ferr := macho.NewFatFile(ra)
+		fas, ferr := parseFatMachOHeaders(raw)
 		if ferr != nil {
 			return nil, 0, nil, "", ferr
 		}
-		if len(ff.Arches) == 0 {
+		if len(fas) == 0 {
 			return nil, 0, nil, "", fmt.Errorf("fat Mach-O has no architectures")
 		}
-		for _, fa := range ff.Arches {
-			bits := 32
-			if fa.File != nil && fa.File.Magic == macho.Magic64 {
-				bits = 64
-			}
-			typ := ""
-			if fa.File != nil {
-				typ = fa.File.Type.String()
-			}
+		for _, fa := range fas {
 			arches = append(arches, FatArchInfo{
-				Name:   machoArchName(fa.Cpu, fa.SubCpu),
-				Type:   typ,
-				Bits:   bits,
-				Offset: uint64(fa.Offset),
-				Size:   uint64(fa.Size),
+				Name:   machoArchName(fa.cpu, fa.sub),
+				Type:   fa.typ,
+				Bits:   fa.bits,
+				Offset: fa.offset,
+				Size:   fa.size,
 			})
 		}
-		fa := pickFatArch(ff, want)
-		return fa.File, uint64(fa.Offset), arches, machoArchName(fa.Cpu, fa.SubCpu), nil
+		fa := pickFatArchLite(fas, want)
+		end := fa.offset + fa.size
+		if fa.offset > uint64(len(raw)) || end > uint64(len(raw)) || end < fa.offset {
+			return nil, 0, nil, "", fmt.Errorf("fat Mach-O slice %s is out of range", machoArchName(fa.cpu, fa.sub))
+		}
+		mf, err = macho.NewFile(bytes.NewReader(raw[fa.offset:end]))
+		if err != nil {
+			return nil, 0, nil, "", err
+		}
+		return mf, fa.offset, arches, machoArchName(fa.cpu, fa.sub), nil
 	}
-	mf, err = macho.NewFile(ra)
+	mf, err = macho.NewFile(bytes.NewReader(raw))
 	if err != nil {
 		return nil, 0, nil, "", err
 	}
 	return mf, 0, nil, machoArchName(mf.Cpu, mf.SubCpu), nil
+}
+
+type fatMachOArch struct {
+	cpu    macho.Cpu
+	sub    uint32
+	offset uint64
+	size   uint64
+	typ    string
+	bits   int
+}
+
+// parseFatMachOHeaders reads just the universal header and each slice's fixed
+// Mach-O header. Unlike debug/macho.NewFatFile, it does not instantiate every
+// slice and therefore does not parse every slice's symbol table just to list the
+// available architectures.
+func parseFatMachOHeaders(raw []byte) ([]fatMachOArch, error) {
+	if len(raw) < 8 {
+		return nil, fmt.Errorf("truncated fat Mach-O header")
+	}
+	magic := binary.BigEndian.Uint32(raw)
+	var bo binary.ByteOrder = binary.BigEndian
+	entrySize := 20
+	arch64 := false
+	switch magic {
+	case machoFatMagic:
+	case machoFatMagic2:
+		bo = binary.LittleEndian
+	case machoFatMagic64:
+		entrySize = 32
+		arch64 = true
+	case machoFatCigam64:
+		bo = binary.LittleEndian
+		entrySize = 32
+		arch64 = true
+	default:
+		return nil, fmt.Errorf("not a fat Mach-O")
+	}
+	n := bo.Uint32(raw[4:8])
+	if n == 0 || n > 0x1000 {
+		return nil, fmt.Errorf("invalid fat Mach-O architecture count %d", n)
+	}
+	if 8+int(n)*entrySize > len(raw) {
+		return nil, fmt.Errorf("truncated fat Mach-O architecture table")
+	}
+	out := make([]fatMachOArch, 0, n)
+	for i := 0; i < int(n); i++ {
+		off := 8 + i*entrySize
+		fa := fatMachOArch{
+			cpu:  macho.Cpu(bo.Uint32(raw[off:])),
+			sub:  bo.Uint32(raw[off+4:]),
+			bits: 32,
+		}
+		if arch64 {
+			fa.offset = bo.Uint64(raw[off+8:])
+			fa.size = bo.Uint64(raw[off+16:])
+		} else {
+			fa.offset = uint64(bo.Uint32(raw[off+8:]))
+			fa.size = uint64(bo.Uint32(raw[off+12:]))
+		}
+		fa.bits, fa.typ = machoSliceSummary(raw, fa.offset)
+		out = append(out, fa)
+	}
+	return out, nil
+}
+
+func machoSliceSummary(raw []byte, off uint64) (bits int, typ string) {
+	bits = 32
+	if off+16 > uint64(len(raw)) {
+		return bits, ""
+	}
+	magic := binary.BigEndian.Uint32(raw[off:])
+	var bo binary.ByteOrder = binary.BigEndian
+	switch magic {
+	case machoMagic64:
+		bits = 64
+	case machoMagic32:
+	case machoCigam64:
+		bits = 64
+		bo = binary.LittleEndian
+	case machoCigam32:
+		bo = binary.LittleEndian
+	default:
+		return bits, ""
+	}
+	return bits, macho.Type(bo.Uint32(raw[off+12:])).String()
+}
+
+func pickFatArchLite(arches []fatMachOArch, want string) fatMachOArch {
+	if want != "" {
+		for _, fa := range arches {
+			if machoArchName(fa.cpu, fa.sub) == want {
+				return fa
+			}
+		}
+	}
+	host := hostCPU()
+	for _, fa := range arches {
+		if fa.cpu == host {
+			return fa
+		}
+	}
+	return arches[0]
 }
 
 // machoDWARF returns DWARF for the binary: embedded if present, otherwise from
@@ -407,23 +769,6 @@ func (f *File) dsymDebugCandidates(base string) []string {
 	}
 }
 
-func pickFatArch(ff *macho.FatFile, want string) macho.FatArch {
-	if want != "" {
-		for _, fa := range ff.Arches {
-			if machoArchName(fa.Cpu, fa.SubCpu) == want {
-				return fa
-			}
-		}
-	}
-	host := hostCPU()
-	for _, fa := range ff.Arches {
-		if fa.Cpu == host {
-			return fa
-		}
-	}
-	return ff.Arches[0]
-}
-
 func hostCPU() macho.Cpu {
 	switch runtime.GOARCH {
 	case "amd64":
@@ -467,7 +812,15 @@ func isZerofill(flags uint32) bool {
 }
 
 func machoCategory(s *macho.Section, seg *macho.Segment, exec, write, zerofill bool) SectionCategory {
-	if seg != nil && (seg.Name == "__DWARF" || strings.Contains(strings.ToLower(s.Name), "debug")) {
+	segName := ""
+	if seg != nil {
+		segName = seg.Name
+	}
+	return machoCategoryFields(s.Name, segName, s.Addr, exec, write, zerofill)
+}
+
+func machoCategoryFields(secName, segName string, addr uint64, exec, write, zerofill bool) SectionCategory {
+	if segName == "__DWARF" || strings.Contains(strings.ToLower(secName), "debug") {
 		return CatDebug
 	}
 	if exec {
@@ -479,7 +832,7 @@ func machoCategory(s *macho.Section, seg *macho.Segment, exec, write, zerofill b
 	if write {
 		return CatData
 	}
-	if s.Addr != 0 {
+	if addr != 0 {
 		return CatRodata
 	}
 	return CatOther

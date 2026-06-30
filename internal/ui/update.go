@@ -22,29 +22,26 @@ func (m *Model) Init() tea.Cmd {
 	if m.disasmDecoding && !m.disasmBuilt && m.dis != nil {
 		cmds = append(cmds, m.decodeDisasmCmd(m.disasmPendingAddr))
 	}
-	// Pre-warm the deferred work (disasm decode, DWARF/line tables) right after the
-	// first frame so opening those views is instant. The cmd returns immediately,
-	// so its prewarmMsg is processed once the initial render is on screen.
+	// Pre-warm the initial disasm window right after the first frame. This keeps
+	// startup responsive while making the view ready for the common next action.
 	cmds = append(cmds, func() tea.Msg { return prewarmMsg{} })
 	return tea.Batch(cmds...)
 }
 
-// prewarmMsg fires just after the first render to kick the deferred background
-// work (so it's ready before the user navigates to it).
+// prewarmMsg fires just after the first render to kick the deferred disasm decode
+// in the background, so opening the Disasm view is usually instant without
+// blocking the initial screen.
 type prewarmMsg struct{}
 
-// handlePrewarm starts the deferred disasm decode and DWARF/line-table build in
-// the background, unless already done/in-flight (e.g. the default view is disasm).
+// handlePrewarm starts the deferred disasm decode in the background, unless
+// already done/in-flight (e.g. the default view is disasm). DWARF/source parsing
+// remains on-demand because it is large and only source-aware views need it.
 func (m *Model) handlePrewarm() (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if m.dis != nil && !m.disasmBuilt && !m.disasmDecoding {
 		m.disasmDecoding = true
 		m.disasmPendingAddr = m.disasmInitAddr
 		cmds = append(cmds, m.decodeDisasmCmd(m.disasmInitAddr))
-	}
-	if m.file.HasDWARF() {
-		f := m.file
-		cmds = append(cmds, func() tea.Msg { f.WarmDebugInfo(); return nil })
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -256,7 +253,9 @@ func (m *Model) invalidateSymbolNameState() {
 	m.symbolsByDisplay = nil
 	m.symbolsTreeInit = false
 	m.symbolsCollapsed = nil
-	m.recomputeSymbols()
+	if m.symbolsReady {
+		m.recomputeSymbols()
+	}
 	m.clearSymbolNameCaches()
 }
 

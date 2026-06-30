@@ -6,8 +6,9 @@ import "fmt"
 type Option func(*openOptions)
 
 type openOptions struct {
-	debugPath string
-	arch      string
+	debugPath  string
+	arch       string
+	layoutOnly bool
 }
 
 // WithDebugPath points the loader at an explicit external debug-symbols file or
@@ -24,26 +25,34 @@ func WithArch(name string) Option {
 	return func(o *openOptions) { o.arch = name }
 }
 
+// WithLayoutOnly loads just the container layout: architecture, entry, sections,
+// segments and raw bytes. It skips symbols, imports, relocations, DWARF and the
+// overview fields, for views that do not need them.
+func WithLayoutOnly() Option {
+	return func(o *openOptions) { o.layoutOnly = true }
+}
+
 // Open reads path, detects its container format, and builds the neutral model.
 func Open(path string, opts ...Option) (*File, error) {
 	var o openOptions
 	for _, opt := range opts {
 		opt(&o)
 	}
-	// mapFile mmaps the file where that's safe (always on Linux; on macOS only
-	// when the Mach-O carries no code signature, since mmap'ing a signed binary
-	// gets the process SIGKILL'd), otherwise it reads the file into the heap.
+	// mapFile mmaps the file where that's supported, otherwise it reads the file
+	// into the heap. On macOS the mmap path uses MAP_RESILIENT_CODESIGN so signed
+	// Mach-O pages do not SIGKILL the reader if code-signing validation fails.
 	raw, closer, err := mapFile(path)
 	if err != nil {
 		return nil, err
 	}
 	f := &File{
-		Path:      path,
-		debugPath: o.debugPath,
-		reqArch:   o.arch,
-		raw:       raw,
-		unmap:     closer,
-		sources:   map[string][]string{},
+		Path:       path,
+		debugPath:  o.debugPath,
+		reqArch:    o.arch,
+		layoutOnly: o.layoutOnly,
+		raw:        raw,
+		unmap:      closer,
+		sources:    map[string][]string{},
 	}
 	if err := f.load(); err != nil {
 		f.Close()
@@ -87,8 +96,10 @@ func (f *File) load() error {
 	default:
 		return fmt.Errorf("unrecognised file format (not ELF, Mach-O, or PE)")
 	}
-	f.finalizeSymbols()
-	f.computeOverview()
+	if !f.layoutOnly {
+		f.finalizeSymbols()
+		f.computeOverview()
+	}
 	return nil
 }
 

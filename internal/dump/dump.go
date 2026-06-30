@@ -63,6 +63,17 @@ func ViewNeedsDemangle(name string) bool {
 	return false
 }
 
+// ViewNeedsLayoutOnly reports whether a view can be rendered from the cheap
+// layout model (sections/segments/raw bytes) without symbols, imports, relocs,
+// DWARF, or computed overview fields.
+func ViewNeedsLayoutOnly(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "sections", "segments", "strings", "cpu-features", "cpufeatures", "features":
+		return true
+	}
+	return false
+}
+
 // View dumps a named view as plain text, or errors for an unknown name.
 func View(f *binfile.File, name string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {

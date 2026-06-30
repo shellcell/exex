@@ -82,6 +82,9 @@ func (f *File) loadPE() error {
 		sec.Flags = neutralFlags(true, write, exec)
 		f.Sections = append(f.Sections, sec)
 	}
+	if f.layoutOnly {
+		return nil
+	}
 
 	// COFF symbols (present in MinGW/gcc images; MSVC images are usually
 	// stripped, with debug info in a separate PDB). Value is treated as an RVA.
@@ -120,8 +123,9 @@ func (f *File) loadPE() error {
 	// filters work — mirroring appendELFImportSymbols / machoImportSymbols.
 	f.loadPEImports(pf, imageBase)
 
-	if d := peDWARF(pf); d != nil {
-		f.dwarf = d // line table decoded lazily on first source lookup
+	if peHasDWARF(pf) {
+		f.dwarfAvail = true
+		f.dwarfBuild = func() *dwarf.Data { return peDWARF(pf) }
 	}
 
 	f.loadPEInfo(pf, dllChars)
@@ -297,6 +301,15 @@ func peDWARF(pf *pe.File) *dwarf.Data {
 	return nil
 }
 
+func peHasDWARF(pf *pe.File) bool {
+	for _, s := range pf.Sections {
+		if strings.HasPrefix(s.Name, ".debug") || strings.HasPrefix(s.Name, ".zdebug") {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *File) loadPEInfo(pf *pe.File, dllChars uint32) {
 	in := &Info{}
 	if libs, err := pf.ImportedLibraries(); err == nil {
@@ -342,6 +355,6 @@ func (f *File) peHeaderInfo(pf *pe.File) []string {
 		fmt.Sprintf("Entry:       0x%x", f.entry),
 		fmt.Sprintf("Sections:    %d", len(f.Sections)),
 		fmt.Sprintf("Symbols:     %d", len(f.Symbols)),
-		fmt.Sprintf("DWARF info:  %v", f.dwarf != nil),
+		fmt.Sprintf("DWARF info:  %v", f.HasDWARF()),
 	}
 }

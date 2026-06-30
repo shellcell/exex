@@ -50,6 +50,9 @@ func main() {
 	// the last file for the view measurements.
 	var f *binfile.File
 	parse := measure(*runs, func() {
+		if f != nil {
+			f.Close()
+		}
 		var e error
 		f, e = binfile.Open(path)
 		if e != nil {
@@ -76,6 +79,13 @@ func main() {
 	}
 	for _, v := range nonDisasmViews {
 		rows = append(rows, row{"view: " + v, measure(*runs, func() {
+			if streamed, err := dump.StreamView(io.Discard, f, v); streamed {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", v, err)
+					os.Exit(1)
+				}
+				return
+			}
 			if _, err := dump.View(f, v); err != nil {
 				fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", v, err)
 				os.Exit(1)

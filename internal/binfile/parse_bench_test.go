@@ -18,6 +18,27 @@ func BenchmarkOpen(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		_ = f
+		if err := f.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkOpenLayout measures the cheap metadata/raw path used by -o sections,
+// segments, strings, and cpu-features.
+func BenchmarkOpenLayout(b *testing.B) {
+	path := os.Getenv("EXEX_BENCH_BIN")
+	if path == "" {
+		b.Skip("set EXEX_BENCH_BIN to a real binary")
+	}
+	b.ReportAllocs()
+	for range b.N {
+		f, err := Open(path, WithLayoutOnly())
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

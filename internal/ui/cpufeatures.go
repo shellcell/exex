@@ -25,6 +25,8 @@ type cpufeatState struct {
 	cpufeatFeats   []string // feature names in display order
 	cpufeatSel     int
 	cpufeatTop     int
+	cpufeatDone    bool
+	cpufeatCancel  chan struct{}
 }
 
 type cpufeatDoneMsg struct {
@@ -39,13 +41,21 @@ func (m *Model) startCPUFeatScan() tea.Cmd {
 		m.setStatus("no disassembler for this architecture", true)
 		return nil
 	}
+	if m.cpufeatDone {
+		m.openCPUFeatModal(m.cpufeatSet)
+		m.setStatus(fmt.Sprintf("%d CPU features (cached)", len(m.cpufeatFeats)), false)
+		return nil
+	}
+	m.stopCPUFeatScan()
 	m.cpufeatSeq++
 	m.cpufeatRunning = true
 	seq := m.cpufeatSeq
 	file := m.file
+	done := make(chan struct{})
+	m.cpufeatCancel = done
 	m.setStatus("scanning for CPU features … (Esc cancels)", false)
 	return func() tea.Msg {
-		set, err := dump.ScanCPUFeatures(file)
+		set, err := dump.ScanCPUFeaturesCancel(file, done)
 		return cpufeatDoneMsg{seq: seq, set: set, err: err}
 	}
 }
@@ -55,14 +65,13 @@ func (m *Model) handleCPUFeatDone(msg cpufeatDoneMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.cpufeatRunning = false
+	m.cpufeatCancel = nil
 	if msg.err != nil {
 		m.setStatus(msg.err.Error(), true)
 		return m, nil
 	}
-	m.cpufeatSet = msg.set
-	m.cpufeatFeats = msg.set.SortedFeatures()
-	m.cpufeatSel, m.cpufeatTop = 0, 0
-	m.cpufeatActive = true
+	m.cpufeatDone = true
+	m.openCPUFeatModal(msg.set)
 	base := ""
 	if msg.set.Baseline != "" {
 		base = " · " + msg.set.Baseline
@@ -71,10 +80,25 @@ func (m *Model) handleCPUFeatDone(msg cpufeatDoneMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) openCPUFeatModal(set dump.CPUFeatureSet) {
+	m.cpufeatSet = set
+	m.cpufeatFeats = set.SortedFeatures()
+	m.cpufeatSel, m.cpufeatTop = 0, 0
+	m.cpufeatActive = true
+}
+
 func (m *Model) cancelCPUFeat() {
 	m.cpufeatSeq++
 	m.cpufeatRunning = false
+	m.stopCPUFeatScan()
 	m.setStatus("CPU-feature scan cancelled", false)
+}
+
+func (m *Model) stopCPUFeatScan() {
+	if m.cpufeatCancel != nil {
+		close(m.cpufeatCancel)
+		m.cpufeatCancel = nil
+	}
 }
 
 // updateCPUFeatModal: navigate the feature list, Enter jumps to the first use of

@@ -47,6 +47,14 @@ type chunkFeatures struct {
 // counts instructions at or past the chunk's real start so the overlap isn't
 // double-counted.
 func ScanCPUFeatures(f *binfile.File) (CPUFeatureSet, error) {
+	return ScanCPUFeaturesCancel(f, nil)
+}
+
+// ScanCPUFeaturesCancel is ScanCPUFeatures with an optional cancellation channel.
+// When done is closed, workers stop decoding as soon as they observe it. The UI
+// still guards stale results by sequence number; cancellation is to stop wasting
+// CPU after the user dismisses/supersedes the scan.
+func ScanCPUFeaturesCancel(f *binfile.File, done <-chan struct{}) (CPUFeatureSet, error) {
 	classify := cpuClassifier(f.Arch())
 	if classify == nil {
 		return CPUFeatureSet{}, fmt.Errorf("CPU-feature detection is not supported for %s", f.Arch())
@@ -80,6 +88,9 @@ func ScanCPUFeatures(f *binfile.File) (CPUFeatureSet, error) {
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 	for i, tk := range tasks {
+		if scanCancelled(done) {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int, tk chunkTask) {
@@ -87,6 +98,9 @@ func ScanCPUFeatures(f *binfile.File) (CPUFeatureSet, error) {
 			defer func() { <-sem }()
 			cf := chunkFeatures{counts: map[string]int{}, first: map[string]uint64{}}
 			disasm.RangeFunc(dis, raw[tk.lo:tk.hi], tk.baseVA, func(in disasm.Inst) bool {
+				if scanCancelled(done) {
+					return false
+				}
 				if in.Addr < tk.emitVA {
 					return true // re-sync lead — already counted by the previous chunk
 				}
@@ -118,6 +132,18 @@ func ScanCPUFeatures(f *binfile.File) (CPUFeatureSet, error) {
 		set.Baseline = cpufeat.BaselineX86(set.Counts)
 	}
 	return set, nil
+}
+
+func scanCancelled(done <-chan struct{}) bool {
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
 }
 
 // SortedFeatures returns the used features in display order (then by count).

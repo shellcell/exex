@@ -76,7 +76,9 @@ type syscallState struct {
 	syscallActive  bool // results modal open
 	syscallRunning bool // background scan in flight
 	syscallSeq     int  // guards against stale async results
+	syscallCancel  chan struct{}
 	syscallResults []dump.SyscallSite
+	syscallCached  map[bool][]dump.SyscallSite // key: file.DisasmAll()
 	syscallScope   syscallScope
 	syscallShown   []syscallRow // rows for the active scope, rebuilt on scan/scope/sort/filter change
 	syscallSel     int
@@ -86,11 +88,11 @@ type syscallState struct {
 	syscallSort      syscallSortKey
 	syscallSortDesc  bool
 	syscallFilter    textinput.Model
-	syscallFiltering bool // filter input focused (typing edits it)
-	syscallTotal     int  // rows in the active scope before the text filter
-	syscallFnLo    uint64 // function-under-cursor range, to mark/pre-select its sites
-	syscallFnHi    uint64
-	syscallFnName  string
+	syscallFiltering bool   // filter input focused (typing edits it)
+	syscallTotal     int    // rows in the active scope before the text filter
+	syscallFnLo      uint64 // function-under-cursor range, to mark/pre-select its sites
+	syscallFnHi      uint64
+	syscallFnName    string
 
 	// Full scope (binary + linked libraries), scanned lazily off-thread.
 	syscallFull        []dump.SyscallSite
@@ -362,15 +364,29 @@ func (m *Model) startSyscallScan() tea.Cmd {
 		m.syscallFnLo, m.syscallFnHi = sym.Addr, sym.Addr+sym.Size
 		m.syscallFnName = sym.Display()
 	}
+	m.stopSyscallScan()
 	m.syscallSeq++
+	m.syscallRunning = false
+	all := m.file.DisasmAll()
+	if sites, ok := m.syscallCached[all]; ok {
+		if len(sites) == 0 {
+			m.setStatus("no syscalls found (cached)", true)
+			return nil
+		}
+		m.openSyscallResults(sites)
+		m.setSyscallStatus(sites)
+		return nil
+	}
 	m.syscallRunning = true
+	done := make(chan struct{})
+	m.syscallCancel = done
 	m.setStatus("scanning for syscalls … (Esc cancels)", false)
-	return m.syscallScanCmd(m.syscallSeq)
+	return m.syscallScanCmd(m.syscallSeq, done)
 }
 
 // syscallScanCmd decodes the executable image in parallel chunks (reusing the
 // decode cache) off the UI goroutine and collects syscall sites.
-func (m *Model) syscallScanCmd(seq int) tea.Cmd {
+func (m *Model) syscallScanCmd(seq int, done <-chan struct{}) tea.Cmd {
 	svc := m.disasmService()
 	img := m.file.ExecImage()
 	file := m.file
@@ -397,14 +413,23 @@ func (m *Model) syscallScanCmd(seq int) tea.Cmd {
 		sem := make(chan struct{}, workers)
 		var wg sync.WaitGroup
 		for i, start := range starts {
+			if scanCancelled(done) {
+				break
+			}
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(i, start int) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var hits []dump.SyscallSite
+				if scanCancelled(done) {
+					return
+				}
 				decoded := svc.DecodeRange(start, chunk, syscallLead)
 				for p, inst := range decoded {
+					if scanCancelled(done) {
+						return
+					}
 					ok, vdso := dump.ClassifySyscallSite(inst, symAt)
 					if !ok {
 						continue
@@ -472,18 +497,29 @@ func (m *Model) handleSyscallDone(msg syscallDoneMsg) (tea.Model, tea.Cmd) {
 		return m, nil // cancelled or superseded
 	}
 	m.syscallRunning = false
+	m.syscallCancel = nil
+	if m.syscallCached == nil {
+		m.syscallCached = map[bool][]dump.SyscallSite{}
+	}
+	m.syscallCached[m.file.DisasmAll()] = msg.sites
 	if len(msg.sites) == 0 {
 		m.setStatus("no syscalls found", true)
 		return m, nil
 	}
-	m.syscallResults = msg.sites
+	m.openSyscallResults(msg.sites)
+	m.setSyscallStatus(msg.sites)
+	return m, nil
+}
+
+func (m *Model) openSyscallResults(sites []dump.SyscallSite) {
+	m.syscallResults = sites
 	m.syscallSel = 0
 	m.syscallTop = 0
 	m.syscallFilter.SetValue("") // a fresh scan starts unfiltered
 	m.syscallFilter.Blur()
 	m.syscallFiltering = false
 	inFn := 0
-	for _, s := range msg.sites {
+	for _, s := range sites {
 		if m.inFunc(s.Addr) {
 			inFn++
 		}
@@ -497,23 +533,39 @@ func (m *Model) handleSyscallDone(msg syscallDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.rebuildSyscallRows()
 	m.syscallActive = true
+}
+
+func (m *Model) setSyscallStatus(sites []dump.SyscallSite) {
 	capped := ""
-	if len(msg.sites) >= syscallMaxHits {
+	if len(sites) >= syscallMaxHits {
 		capped = "+"
 	}
-	if inFn > 0 && m.syscallFnName != "" {
-		m.setStatus(fmt.Sprintf("%d%s syscalls · %d in %s (t: scope)", len(msg.sites), capped, inFn, m.syscallFnName), false)
-	} else {
-		m.setStatus(fmt.Sprintf("%d%s syscalls (t: scope)", len(msg.sites), capped), false)
+	inFn := 0
+	for _, s := range sites {
+		if m.inFunc(s.Addr) {
+			inFn++
+		}
 	}
-	return m, nil
+	if inFn > 0 && m.syscallFnName != "" {
+		m.setStatus(fmt.Sprintf("%d%s syscalls · %d in %s (t: scope)", len(sites), capped, inFn, m.syscallFnName), false)
+	} else {
+		m.setStatus(fmt.Sprintf("%d%s syscalls (t: scope)", len(sites), capped), false)
+	}
 }
 
 // cancelSyscall abandons an in-flight scan (its result is ignored by seq).
 func (m *Model) cancelSyscall() {
 	m.syscallSeq++
 	m.syscallRunning = false
+	m.stopSyscallScan()
 	m.setStatus("syscall scan cancelled", false)
+}
+
+func (m *Model) stopSyscallScan() {
+	if m.syscallCancel != nil {
+		close(m.syscallCancel)
+		m.syscallCancel = nil
+	}
 }
 
 // syscallFullDoneMsg delivers a finished full (binary + libs) scan.

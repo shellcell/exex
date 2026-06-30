@@ -36,6 +36,7 @@ type disasmSearchStep struct {
 	total     int
 	chunk     int
 	base      int
+	cancel    <-chan struct{}
 }
 
 type disasmSearchProgressMsg struct {
@@ -216,8 +217,11 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		return nil
 	}
 	m.searchSeq++
+	m.stopDisasmSearch()
 	m.searchRunning = true
 	m.searchCancelable = true
+	done := make(chan struct{})
+	m.searchCancel = done
 	step := disasmSearchStep{
 		seq:       m.searchSeq,
 		label:     m.searchQuery,
@@ -227,6 +231,7 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		total:     img.Len(),
 		chunk:     m.disasmSearchChunkBytes(),
 		base:      pos,
+		cancel:    done,
 	}
 	if !fromCursor {
 		if forward {
@@ -373,6 +378,9 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		hits  []disasmSearchHit
 	}
 	return func() tea.Msg {
+		if scanCancelled(step.cancel) {
+			return disasmSearchProgressMsg{seq: step.seq, forward: step.forward, done: true}
+		}
 		batch := svc.SearchBatchChunks()
 		if batch < 1 {
 			batch = 1
@@ -393,11 +401,17 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 			sem := make(chan struct{}, limit)
 			var wg sync.WaitGroup
 			for i, win := range wins {
+				if scanCancelled(step.cancel) {
+					break
+				}
 				wg.Add(1)
 				sem <- struct{}{}
 				go func(i int, win binfile.Window) {
 					defer wg.Done()
 					defer func() { <-sem }()
+					if scanCancelled(step.cancel) {
+						return
+					}
 					insts := svc.DecodeWindow(win)
 					results[i] = chunkResult{order: i, win: win, insts: insts}
 					startPos := step.logical
@@ -405,6 +419,9 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 						startPos = win.Start
 					}
 					for j, inst := range insts {
+						if scanCancelled(step.cancel) {
+							return
+						}
 						instPos, ok := img.PosForAddr(inst.Addr)
 						if !ok || instPos < startPos {
 							continue
@@ -445,11 +462,17 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		sem := make(chan struct{}, limit)
 		var wg sync.WaitGroup
 		for i, win := range wins {
+			if scanCancelled(step.cancel) {
+				break
+			}
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(i int, win binfile.Window) {
 				defer wg.Done()
 				defer func() { <-sem }()
+				if scanCancelled(step.cancel) {
+					return
+				}
 				insts := svc.DecodeWindow(win)
 				results[i] = chunkResult{order: i, win: win, insts: insts}
 				endPos := step.logical
@@ -457,6 +480,9 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 					endPos = win.End
 				}
 				for j := len(insts) - 1; j >= 0; j-- {
+					if scanCancelled(step.cancel) {
+						return
+					}
 					inst := insts[j]
 					instPos, ok := img.PosForAddr(inst.Addr)
 					if !ok || instPos >= endPos {

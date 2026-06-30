@@ -159,7 +159,15 @@ func (m *Model) cancelSearch(status string) {
 	m.searchSeq++
 	m.searchRunning = false
 	m.searchCancelable = false
+	m.stopDisasmSearch()
 	m.setStatus(status, false)
+}
+
+func (m *Model) stopDisasmSearch() {
+	if m.searchCancel != nil {
+		close(m.searchCancel)
+		m.searchCancel = nil
+	}
 }
 
 func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool) int {

@@ -508,6 +508,7 @@ type searchState struct {
 	searchActive     bool
 	searchQuery      string
 	searchSeq        int
+	searchCancel     chan struct{}
 	searchRunning    bool
 	searchCancelable bool
 	searchResults    disasmSearchCache

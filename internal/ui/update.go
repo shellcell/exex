@@ -208,6 +208,7 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 	if msg.done {
 		m.searchRunning = false
 		m.searchCancelable = false
+		m.searchCancel = nil
 		if msg.hit != nil {
 			m.setDisasmWindow(msg.hit.win, msg.hit.insts)
 			m.disasmCur = msg.hit.idx

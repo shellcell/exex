@@ -109,6 +109,8 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	if cfg.Behavior.DisasmSearchWorkers > 0 {
 		m.disasmSearchWorkers = cfg.Behavior.DisasmSearchWorkers
 	}
+	// Narrow 64-bit addresses to 8 digits when they all fit in 32 bits, if asked.
+	f.SetCompactAddr(cfg.Behavior.CompactAddresses)
 	// Relocatable object files (and archive members) usually have no executable
 	// section in the normal image; default them to disasm-all so their code shows.
 	if d != nil && !f.HasExecCode() {

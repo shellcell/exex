@@ -613,10 +613,11 @@ func (m *Model) clickByte(md mode, data byteSource, top, cur, x, bodyRow int, ad
 	if r < 0 {
 		return cur
 	}
+	bpr := m.hexBytesPerRow()
 	emitted := 0
 	prevSec := ""
-	if top >= bytesPerHexRow {
-		prevSec = m.hexSectionName(md, top-bytesPerHexRow, addrAt)
+	if top >= bpr {
+		prevSec = m.hexSectionName(md, top-bpr, addrAt)
 	}
 	for rowStart := top; rowStart < data.Len(); {
 		if sec := m.hexSectionName(md, rowStart, addrAt); sec != "" && sec != prevSec {
@@ -630,7 +631,7 @@ func (m *Model) clickByte(md mode, data byteSource, top, cur, x, bodyRow int, ad
 		}
 		if emitted == r {
 			span := m.hexRowSpan(md, data, rowStart, addrAt)
-			slot := hexColumnToByte(m.file.AddrHexWidth(), x)
+			slot := hexColumnToByte(m.file.AddrHexWidth(), bpr, x)
 			if slot < span.lead {
 				return cur
 			}

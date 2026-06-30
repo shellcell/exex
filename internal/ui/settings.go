@@ -7,6 +7,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -16,7 +17,7 @@ import (
 	"github.com/rabarbra/exex/internal/theme"
 )
 
-const settingsFieldCount = 12
+const settingsFieldCount = 16
 
 // settingsMeta describes one setting for display: which group it belongs to (so
 // the modal can draw section headers), its label and a one-line explanation. The
@@ -31,15 +32,22 @@ var settingsMetas = [settingsFieldCount]settingsMeta{
 	{"Appearance", "Panel background", "solid fill behind the view panels"},
 	{"Appearance", "Wrap long lines", "soft-wrap rows wider than the window"},
 	{"Startup", "Open in view", "the view shown when a file loads"},
+	{"Startup", "Disasm target", "where Disasm lands: entry/main/start/text/lowest"},
 	{"Lists & trees", "Symbols as tree", "group symbols by their source path"},
 	{"Lists & trees", "Sources as tree", "nest source files into folders"},
 	{"Lists & trees", "Libraries as tree", "group libraries by directory"},
 	{"Lists & trees", "Start collapsed", "open trees folded to the top level"},
-	{"Disassembly", "Abbreviate args", "shorten long demangled signatures"},
+	{"Symbols & names", "Abbreviate args", "shorten long demangled signatures"},
+	{"Symbols & names", "Demangle symbols", "show foo::bar() vs raw _ZN3foo…"},
 	{"Disassembly", "Show raw bytes", "the machine-code byte column"},
 	{"Disassembly", "Show annotations", "inline target, reloc & string notes"},
 	{"Disassembly", "Byte spacing", "space-separated vs packed bytes"},
+	{"Addresses & hex", "Address width", "narrow 64-bit addrs when the top half is 0"},
+	{"Addresses & hex", "Hex bytes / row", "bytes per row in the Hex & Raw views"},
 }
+
+// settingsDisasmTargets is the cycle for the "Disasm target" setting.
+var settingsDisasmTargets = []string{"entry", "main", "start", "text", "lowest"}
 
 // settingsGroupLead reports whether field i begins a new group (so its header
 // row is drawn before it).
@@ -125,42 +133,77 @@ func (m *Model) cycleSetting(dir int) {
 	case 3:
 		m.cfg.Behavior.DefaultView = settingsViewNames[cycleIndex(settingsViewNames, m.cfg.Behavior.DefaultView, dir)]
 	case 4:
+		t := settingsDisasmTargets[cycleIndex(settingsDisasmTargets, m.cfg.Behavior.DefaultDisasmTarget, dir)]
+		m.cfg.Behavior.DefaultDisasmTarget = t
+		m.disasmTarget = t // future default landings / redirects use the new strategy
+	case 5:
 		m.cfg.Behavior.TreeSymbols = !m.cfg.Behavior.TreeSymbols
 		m.symbolsTree = m.cfg.Behavior.TreeSymbols
 		m.recomputeSymbols()
-	case 5:
+	case 6:
 		m.cfg.Behavior.TreeSources = !m.cfg.Behavior.TreeSources
 		m.sourcesTree = m.cfg.Behavior.TreeSources
 		if m.sourcesFiles != nil {
 			m.recomputeSourceFiles()
 		}
-	case 6:
+	case 7:
 		m.cfg.Behavior.TreeLibs = !m.cfg.Behavior.TreeLibs
 		m.libsTree = m.cfg.Behavior.TreeLibs
 		m.buildLibRows()
-	case 7:
+	case 8:
 		m.cfg.Behavior.TreeCollapsed = !m.cfg.Behavior.TreeCollapsed
 		m.treeCollapseDefault = m.cfg.Behavior.TreeCollapsed
 		// Apply live to whichever trees are currently shown.
 		m.setAllSymbolsCollapsed(m.treeCollapseDefault)
 		m.setAllSourcesCollapsed(m.treeCollapseDefault)
 		m.setAllLibsCollapsed(m.treeCollapseDefault)
-	case 8:
+	case 9:
 		m.cfg.Behavior.AbbrevArgs = !m.cfg.Behavior.AbbrevArgs
 		m.symbolsAbbrev = m.cfg.Behavior.AbbrevArgs
 		m.symbolsAbbrevExcept = nil
 		m.clearSymbolCaches()
 		m.clearSymbolNameCaches()
-	case 9:
+	case 10:
+		m.toggleDemangle() // flips cfg.Behavior.NoDemangle and re-applies/clears live
+	case 11:
 		m.cfg.Behavior.HideDisasmBytes = !m.cfg.Behavior.HideDisasmBytes
 		m.clearDisasmDisplayCaches()
-	case 10:
+	case 12:
 		m.cfg.Behavior.HideAnnotations = !m.cfg.Behavior.HideAnnotations
 		m.clearDisasmDisplayCaches()
-	case 11:
+	case 13:
 		m.cfg.Behavior.SpacedDisasmBytes = !m.cfg.Behavior.SpacedDisasmBytes
 		m.clearDisasmDisplayCaches()
+	case 14:
+		m.cfg.Behavior.CompactAddresses = !m.cfg.Behavior.CompactAddresses
+		m.file.SetCompactAddr(m.cfg.Behavior.CompactAddresses)
+		// The address column width changes in every view, so drop the row/height
+		// caches (which key on the width) and force a redraw.
+		m.clearAllViewCaches()
+		m.clearDisasmDisplayCaches()
+		m.viewDirty = true
+	case 15:
+		m.cfg.Behavior.HexBytesPerRow = cycleHexBytesPerRow(m.cfg.Behavior.HexBytesPerRow, dir)
+		// Re-snap the scroll anchors to the new row width and redraw (Hex/Raw render
+		// uncached, so nothing else to invalidate).
+		bpr := m.hexBytesPerRow()
+		m.hexTop = (m.hexTop / bpr) * bpr
+		m.rawTop = (m.rawTop / bpr) * bpr
+		m.viewDirty = true
 	}
+}
+
+// cycleHexBytesPerRow steps the bytes-per-row preference through 8 → 16 → 32.
+func cycleHexBytesPerRow(cur, dir int) int {
+	steps := []int{8, 16, 32}
+	i := 1 // default 16
+	for j, v := range steps {
+		if v == cur {
+			i = j
+			break
+		}
+	}
+	return steps[(i+dir+len(steps))%len(steps)]
 }
 
 // clearDisasmDisplayCaches drops the caches whose geometry/content depends on the
@@ -227,24 +270,38 @@ func (m *Model) settingsValue(i int) string {
 		}
 		return m.cfg.Behavior.DefaultView
 	case 4:
-		return onOff(m.cfg.Behavior.TreeSymbols)
+		if m.cfg.Behavior.DefaultDisasmTarget == "" {
+			return "lowest"
+		}
+		return m.cfg.Behavior.DefaultDisasmTarget
 	case 5:
-		return onOff(m.cfg.Behavior.TreeSources)
+		return onOff(m.cfg.Behavior.TreeSymbols)
 	case 6:
-		return onOff(m.cfg.Behavior.TreeLibs)
+		return onOff(m.cfg.Behavior.TreeSources)
 	case 7:
-		return onOff(m.cfg.Behavior.TreeCollapsed)
+		return onOff(m.cfg.Behavior.TreeLibs)
 	case 8:
-		return onOff(m.cfg.Behavior.AbbrevArgs)
+		return onOff(m.cfg.Behavior.TreeCollapsed)
 	case 9:
-		return onOff(!m.cfg.Behavior.HideDisasmBytes)
+		return onOff(m.cfg.Behavior.AbbrevArgs)
 	case 10:
-		return onOff(!m.cfg.Behavior.HideAnnotations)
+		return onOff(!m.cfg.Behavior.NoDemangle)
 	case 11:
+		return onOff(!m.cfg.Behavior.HideDisasmBytes)
+	case 12:
+		return onOff(!m.cfg.Behavior.HideAnnotations)
+	case 13:
 		if m.cfg.Behavior.SpacedDisasmBytes {
 			return "spaced"
 		}
 		return "compact"
+	case 14:
+		if m.cfg.Behavior.CompactAddresses {
+			return "compact"
+		}
+		return "full"
+	case 15:
+		return strconv.Itoa(m.hexBytesPerRow())
 	}
 	return ""
 }

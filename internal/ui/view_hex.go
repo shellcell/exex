@@ -23,7 +23,19 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 )
 
+// bytesPerHexRow is the default; the Hex/Raw views honour the "bytes per row"
+// preference (8/16/32) via m.hexBytesPerRow().
 const bytesPerHexRow = 16
+
+// hexBytesPerRow is how many bytes each Hex/Raw row shows, from the preference
+// (8, 16 or 32; anything else falls back to the default).
+func (m *Model) hexBytesPerRow() int {
+	switch m.cfg.Behavior.HexBytesPerRow {
+	case 8, 16, 32:
+		return m.cfg.Behavior.HexBytesPerRow
+	}
+	return bytesPerHexRow
+}
 
 // identityAddr is the addrAt mapping for the raw file view, where a byte's
 // "address" is just its file offset.
@@ -40,36 +52,36 @@ func identityAddr(pos int) uint64 { return uint64(pos) }
 // hexBodyStart is the screen column of the first hex digit.
 func hexBodyStart(addrW int) int { return 1 + 2 + addrW + 2 }
 
-// hexGridWidth is the on-screen width of the hex-byte column: bytesPerHexRow
-// pairs (2 each), a single space between them, and one extra space at the
-// midpoint.
-const hexGridWidth = bytesPerHexRow*2 + (bytesPerHexRow - 1) + 1
+// hexGridWidth is the on-screen width of the hex-byte column: bpr pairs (2 each),
+// a single space between them, and one extra space at the midpoint.
+func hexGridWidth(bpr int) int { return bpr*2 + (bpr - 1) + 1 }
 
 // hexWrapIndent is the hanging-indent column for wrapped hex/raw rows, aligned
 // with where the trailing content begins so a wrapped annotation lines up under
 // it: the decoded-word column in pointer mode, or past the |ascii| column (where
 // the symbol annotations sit) in ascii mode.
 func (m *Model) hexWrapIndent(addrW int) int {
-	col := hexBodyStart(addrW) + hexGridWidth + 2 // start of the ascii / word column
+	bpr := m.hexBytesPerRow()
+	col := hexBodyStart(addrW) + hexGridWidth(bpr) + 2 // start of the ascii / word column
 	if !m.hexNumeric {
-		col += bytesPerHexRow + 2 // skip the |ascii| column to the symbol annotations
+		col += bpr + 2 // skip the |ascii| column to the symbol annotations
 	}
 	return col
 }
 
-// hexColumnToByte maps a screen column x to a byte index [0, bytesPerHexRow).
-func hexColumnToByte(addrW, x int) int {
+// hexColumnToByte maps a screen column x to a byte index [0, bpr).
+func hexColumnToByte(addrW, bpr, x int) int {
 	rel := x - hexBodyStart(addrW)
 	if rel < 0 {
 		return 0
 	}
 	col := rel / 3
 	// Bytes past the midpoint are shifted right by the extra separating space.
-	if rel >= (bytesPerHexRow/2)*3+1 {
+	if rel >= (bpr/2)*3+1 {
 		col = (rel - 1) / 3
 	}
-	if col > bytesPerHexRow-1 {
-		col = bytesPerHexRow - 1
+	if col > bpr-1 {
+		col = bpr - 1
 	}
 	return col
 }
@@ -98,7 +110,8 @@ func (m *Model) openHexAt(addr uint64) {
 		return
 	}
 	m.hexCur = pos
-	m.hexTop = (pos / bytesPerHexRow) * bytesPerHexRow
+	bpr := m.hexBytesPerRow()
+	m.hexTop = (pos / bpr) * bpr
 	if sec := m.file.SectionAt(addr); sec != nil && sec.Addr == addr {
 		m.hexTop = pos
 	}
@@ -117,7 +130,8 @@ func (m *Model) openRawAt(off uint64) {
 		pos = 0
 	}
 	m.rawCur = pos
-	m.rawTop = (pos / bytesPerHexRow) * bytesPerHexRow
+	bpr := m.hexBytesPerRow()
+	m.rawTop = (pos / bpr) * bpr
 	if sec := m.sectionAtOffset(off); sec != nil && sec.Offset == off {
 		m.rawTop = pos
 	}
@@ -297,7 +311,7 @@ func (m *Model) bytePageRows() int {
 
 // moveByteCursor applies a navigation key to a byte cursor over n bytes.
 func (m *Model) moveByteCursor(key string, cur, n int) int {
-	row := bytesPerHexRow
+	row := m.hexBytesPerRow()
 	switch key {
 	case "left":
 		if cur > 0 {
@@ -689,10 +703,11 @@ type hexRowSpan struct {
 }
 
 func (m *Model) hexRowSpan(md mode, data byteSource, start int, addrAt func(pos int) uint64) hexRowSpan {
+	bpr := m.hexBytesPerRow()
 	addr := addrAt(start)
-	lead := int(addr % bytesPerHexRow)
+	lead := int(addr % uint64(bpr))
 	lineAddr := addr - uint64(lead)
-	end := min(start+bytesPerHexRow-lead, data.Len())
+	end := min(start+bpr-lead, data.Len())
 	if next, ok := m.nextHexSectionStart(md, start); ok && next < end {
 		end = next
 	}
@@ -718,7 +733,7 @@ func (m *Model) hexRowTop(md mode, pos int, addrAt func(pos int) uint64) int {
 	if pos <= 0 {
 		return 0
 	}
-	start := pos - int(addrAt(pos)%bytesPerHexRow)
+	start := pos - int(addrAt(pos)%uint64(m.hexBytesPerRow()))
 	if secStart, ok := m.currentHexSectionStart(md, pos); ok && start < secStart {
 		start = secStart
 	}
@@ -890,7 +905,7 @@ func (m *Model) nextHexSectionStart(md mode, off int) (int, bool) {
 // the row are shown; partial words at a section edge are skipped.
 // pointerSize is the binary's pointer width in bytes (8 for 64-bit, 4 for 32).
 func (m *Model) pointerSize() int {
-	if size := m.file.AddrHexWidth() / 2; size >= 4 {
+	if size := m.file.PointerBytes(); size >= 4 {
 		return size
 	}
 	return 4
@@ -924,7 +939,8 @@ func (m *Model) hexWordDecode(data byteSource, span hexRowSpan, cur int) string 
 	// historical pointer column); the others are pure numeric reads.
 	ptr := in.kind == hexHex && size == m.pointerSize()
 	var words, notes []string
-	for slot := 0; slot+size <= bytesPerHexRow; slot += size {
+	bpr := m.hexBytesPerRow()
+	for slot := 0; slot+size <= bpr; slot += size {
 		i := span.start + slot - span.lead
 		if slot < span.lead || i < span.start || i+size > span.end {
 			continue
@@ -1051,12 +1067,13 @@ func (m *Model) renderHexRow(md mode, data byteSource, cur int, span hexRowSpan,
 	// The byte cells carry pre-rendered ANSI, so the columns end up a few hundred
 	// bytes wide — pre-size them to skip the doubling reallocs (this runs for every
 	// visible row, every frame).
-	hexCol.Grow(bytesPerHexRow * 24)
-	asciiCol.Grow(bytesPerHexRow * 20)
-	for slot := 0; slot < bytesPerHexRow; slot++ {
+	bpr := m.hexBytesPerRow()
+	hexCol.Grow(bpr * 24)
+	asciiCol.Grow(bpr * 20)
+	for slot := 0; slot < bpr; slot++ {
 		if slot > 0 {
 			hexCol.WriteByte(' ')
-			if slot == bytesPerHexRow/2 {
+			if slot == bpr/2 {
 				hexCol.WriteByte(' ')
 			}
 		}

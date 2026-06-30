@@ -121,17 +121,18 @@ func TestDefaultViewAndNavHelpers(t *testing.T) {
 
 func TestHexColumnToByteBounds(t *testing.T) {
 	addrW := 8
+	bpr := bytesPerHexRow
 	start := hexBodyStart(addrW)
-	if got := hexColumnToByte(addrW, start-10); got != 0 {
+	if got := hexColumnToByte(addrW, bpr, start-10); got != 0 {
 		t.Fatalf("column before hex body = %d, want 0", got)
 	}
-	if got := hexColumnToByte(addrW, start); got != 0 {
+	if got := hexColumnToByte(addrW, bpr, start); got != 0 {
 		t.Fatalf("first byte column = %d, want 0", got)
 	}
-	if got := hexColumnToByte(addrW, start+3*8+1); got != 8 {
+	if got := hexColumnToByte(addrW, bpr, start+3*8+1); got != 8 {
 		t.Fatalf("column after midpoint gap = %d, want 8", got)
 	}
-	if got := hexColumnToByte(addrW, start+1000); got != bytesPerHexRow-1 {
+	if got := hexColumnToByte(addrW, bpr, start+1000); got != bytesPerHexRow-1 {
 		t.Fatalf("column after row = %d, want last byte", got)
 	}
 }

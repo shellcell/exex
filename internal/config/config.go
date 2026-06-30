@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -78,6 +79,17 @@ type Behavior struct {
 	// SpacedDisasmBytes separates instruction bytes with spaces ("01 00 00 14")
 	// instead of the compact form ("01000014"), matching the `-o disasm` dump.
 	SpacedDisasmBytes bool `yaml:"spaced_disasm_bytes"`
+	// NoDemangle keeps symbol names in their raw mangled form (e.g. "_ZN3foo3barEv")
+	// everywhere, instead of the demangled "foo::bar()". Off by default. The raw
+	// name is always preserved, so this toggles live with no re-parse.
+	NoDemangle bool `yaml:"no_demangle"`
+	// CompactAddresses narrows a 64-bit binary's printed addresses to 8 hex digits
+	// when every address fits in 32 bits (the upper half is all zeroes), instead of
+	// the full 16. Off by default; higher-half kernels keep the full width.
+	CompactAddresses bool `yaml:"compact_addresses"`
+	// HexBytesPerRow is how many bytes the Hex/Raw views show per row: 8, 16 or 32.
+	// Empty/zero keeps the default (16).
+	HexBytesPerRow int `yaml:"hex_bytes_per_row"`
 }
 
 // Colors lists every visual element the user can re-skin. Empty strings mean
@@ -430,14 +442,20 @@ func Save(theme string, beh Behavior) (string, error) {
 	yamlBool("background", beh.Background)
 	yamlBool("default_wrap", beh.DefaultWrap)
 	yamlSetScalar(node, "default_view", beh.DefaultView, "!!str")
+	yamlSetScalar(node, "default_disasm_target", beh.DefaultDisasmTarget, "!!str")
 	yamlBool("tree_symbols", beh.TreeSymbols)
 	yamlBool("tree_sources", beh.TreeSources)
 	yamlBool("tree_libs", beh.TreeLibs)
 	yamlBool("tree_collapsed", beh.TreeCollapsed)
 	yamlBool("abbrev_args", beh.AbbrevArgs)
+	yamlBool("no_demangle", beh.NoDemangle)
 	yamlBool("hide_disasm_bytes", beh.HideDisasmBytes)
 	yamlBool("hide_annotations", beh.HideAnnotations)
 	yamlBool("spaced_disasm_bytes", beh.SpacedDisasmBytes)
+	yamlBool("compact_addresses", beh.CompactAddresses)
+	if beh.HexBytesPerRow != 0 {
+		yamlSetScalar(node, "hex_bytes_per_row", strconv.Itoa(beh.HexBytesPerRow), "!!int")
+	}
 
 	out, err := yaml.Marshal(&doc)
 	if err != nil {

@@ -58,3 +58,55 @@ func TestSettingsCycleAndPersist(t *testing.T) {
 		t.Fatalf("persisted config mismatch: %+v", c)
 	}
 }
+
+// TestSettingsNewFields exercises the four added settings: disasm target, the
+// demangle toggle, compact addresses and hex bytes-per-row — confirming each
+// updates the live model/file and round-trips through Save/Load.
+func TestSettingsNewFields(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := &Model{theme: DefaultTheme(), file: &binfile.File{}}
+
+	// Disasm target (field 4): cycling lands on a known strategy and updates the
+	// live target used for default landings.
+	m.settingsCur = 4
+	m.cycleSetting(1)
+	if m.cfg.Behavior.DefaultDisasmTarget == "" || m.disasmTarget != m.cfg.Behavior.DefaultDisasmTarget {
+		t.Fatalf("disasm target not applied live: cfg=%q live=%q",
+			m.cfg.Behavior.DefaultDisasmTarget, m.disasmTarget)
+	}
+
+	// Demangle (field 10): toggling flips the (negated) preference.
+	m.settingsCur = 10
+	m.cycleSetting(1)
+	if !m.cfg.Behavior.NoDemangle {
+		t.Fatal("demangle toggle did not set NoDemangle")
+	}
+
+	// Compact addresses (field 14): toggling sets the flag and pushes it to the file.
+	m.settingsCur = 14
+	m.cycleSetting(1)
+	if !m.cfg.Behavior.CompactAddresses {
+		t.Fatal("compact-addresses toggle did not set the flag")
+	}
+
+	// Hex bytes/row (field 15): cycles 16 → 32.
+	m.settingsCur = 15
+	m.cycleSetting(1)
+	if m.cfg.Behavior.HexBytesPerRow != 32 {
+		t.Fatalf("hex bytes/row = %d, want 32", m.cfg.Behavior.HexBytesPerRow)
+	}
+
+	// Persist and reload: every new field round-trips.
+	m.persistSettings()
+	c, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if c.Behavior.DefaultDisasmTarget != m.cfg.Behavior.DefaultDisasmTarget ||
+		!c.Behavior.NoDemangle || !c.Behavior.CompactAddresses ||
+		c.Behavior.HexBytesPerRow != 32 {
+		t.Fatalf("new settings did not persist: %+v", c.Behavior)
+	}
+}

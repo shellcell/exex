@@ -142,6 +142,7 @@ type symbolsState struct {
 	symbolsRows         []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
 	symbolsTreeInit     bool            // collapse-default applied once
 	symbolsByDisplay    []int           // all symbol indices sorted by Display(); built lazily
+	demangledNames      []string        // cached ComputeDemangled result, for the live demangle toggle
 	symbolFacets        []facetHit      // clickable toggle buttons on the status line (x ranges)
 	symbolRowCache      rowMemo[rowCacheKey, []string]
 	symbolHeightCache   rowMemo[rowCacheKey, int]

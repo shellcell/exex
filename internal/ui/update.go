@@ -11,8 +11,10 @@ import (
 func (m *Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	// Demangle the symbol table in the background so a large binary renders
-	// immediately; names switch from raw to demangled when it completes.
-	if len(m.file.Symbols) > 0 {
+	// immediately; names switch from raw to demangled when it completes. Skipped
+	// when the user disabled demangling (the pass allocates 1+ GB on large C++/
+	// Swift binaries) — toggling it on later computes lazily.
+	if len(m.file.Symbols) > 0 && !m.cfg.Behavior.NoDemangle {
 		cmds = append(cmds, m.demangleCmd())
 	}
 	// If the configured default view is Disasm, switchMode already flagged a
@@ -98,21 +100,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case demangleDoneMsg:
-		// Background demangle finished: store the names (and refresh the symbols
-		// filter, which matches on demangled text too) so the next render shows
-		// readable names everywhere.
-		m.file.ApplyDemangled(msg.names)
-		// Demangled names change both the display order and every tree path, so the
-		// pre-demangle tree (and any collapse-default applied to it) is stale: rebuild
-		// the order and re-apply the collapse-default against the new tree.
-		m.symbolsByDisplay = nil
-		m.symbolsTreeInit = false
-		m.symbolsCollapsed = nil
-		m.recomputeSymbols()
-		// Demangled names also appear in the disasm "<name>:" labels and the
-		// disasm/hex annotations, whose cached instruction heights wrap by name
-		// length — drop them so they re-measure against the readable names.
-		m.clearSymbolNameCaches()
+		// Background demangle finished: keep the computed names so the setting can
+		// be toggled later without recomputing, and apply them unless the user has
+		// turned demangling off.
+		m.demangledNames = msg.names
+		if !m.cfg.Behavior.NoDemangle {
+			m.applyDemangledNames(msg.names)
+		}
 		return m, nil
 
 	default:
@@ -245,6 +239,44 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 
 // demangleDoneMsg carries the result of the background symbol demangle.
 type demangleDoneMsg struct{ names []string }
+
+// applyDemangledNames stores the demangled names onto the symbol table, then
+// invalidates the now-stale display order, tree and name-keyed caches.
+func (m *Model) applyDemangledNames(names []string) {
+	m.file.ApplyDemangled(names)
+	m.invalidateSymbolNameState()
+}
+
+// invalidateSymbolNameState drops everything that bakes in symbol display names,
+// shared by the demangle apply and clear paths. Names change both the display
+// order and every tree path, so the pre-change tree (and any collapse-default) is
+// stale; they also appear in the disasm "<name>:" labels and disasm/hex
+// annotations, whose cached row heights wrap by name length.
+func (m *Model) invalidateSymbolNameState() {
+	m.symbolsByDisplay = nil
+	m.symbolsTreeInit = false
+	m.symbolsCollapsed = nil
+	m.recomputeSymbols()
+	m.clearSymbolNameCaches()
+}
+
+// toggleDemangle flips the demangle preference and applies it live: re-applying
+// the cached demangled names, or clearing them back to the raw mangled form
+// (in place, with no allocation).
+func (m *Model) toggleDemangle() {
+	m.cfg.Behavior.NoDemangle = !m.cfg.Behavior.NoDemangle
+	if m.cfg.Behavior.NoDemangle {
+		m.file.ClearDemangled()
+		m.invalidateSymbolNameState()
+		return
+	}
+	names := m.demangledNames
+	if names == nil { // the background pass hasn't finished (or never ran) — compute now
+		names = m.file.ComputeDemangled()
+		m.demangledNames = names
+	}
+	m.applyDemangledNames(names)
+}
 
 // demangleCmd demangles the symbol table off the UI goroutine so a large binary
 // shows up immediately (with raw names) instead of blocking on startup.

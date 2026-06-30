@@ -177,8 +177,19 @@ type File struct {
 	unmap     func() error // releases the mapping backing raw (nil-safe via Close)
 	arch      arch.Arch
 	entry     uint64
-	addrWidth int // hex digits in a printed address (8 or 16)
-	header    []string
+	addrWidth int // hex digits in a printed address (8 or 16), set from the bitness
+	// compactAddr narrows AddrHexWidth to 8 digits for a 64-bit binary whose every
+	// address fits in 32 bits (set from the "compact addresses" preference). It only
+	// affects the *printed* width — PointerBytes keeps the true word size. dispWidth
+	// caches the resulting hex-digit count so AddrHexWidth (called per row, per
+	// frame, and in hit-testing) stays a plain field read; SetCompactAddr refreshes
+	// it, and the expensive MaxAddr scan happens there at most once, only when
+	// compaction is actually requested.
+	compactAddr bool
+	dispWidth   int       // cached AddrHexWidth result (0 until SetCompactAddr/load)
+	maxAddr     uint64    // highest meaningful address (lazy; for compactAddr)
+	maxAddrOnce sync.Once // guards the maxAddr scan
+	header      []string
 	rawHeader []HeaderField // raw container-header fields (Header sub-view)
 
 	relocs        []Reloc        // relocation entries (built lazily)
@@ -349,6 +360,20 @@ func (f *File) ApplyDemangled(d []string) {
 	}
 	// Demangled names just changed; drop the lowercased filter index so it is
 	// rebuilt (with the demangled forms) on the next filter.
+	f.lowerName, f.lowerDemangled = nil, nil
+}
+
+// ClearDemangled drops every symbol's demangled form in place, so Display falls
+// back to the raw mangled name. It avoids ApplyDemangled's allocations (no names
+// slice, no name→demangled map), which matters when toggling demangling off on a
+// binary with hundreds of thousands of symbols.
+func (f *File) ClearDemangled() {
+	for i := range f.Symbols {
+		f.Symbols[i].Demangled = ""
+	}
+	for i := range f.symByAddr {
+		f.symByAddr[i].Demangled = ""
+	}
 	f.lowerName, f.lowerDemangled = nil, nil
 }
 
@@ -776,11 +801,72 @@ func (f *File) DebugPath() string { return f.debugPath }
 func (f *File) RequestedArch() string { return f.reqArch }
 
 // AddrHexWidth is the number of hex digits an address should be printed with.
+// With the compact-addresses preference set, a 64-bit binary whose addresses all
+// fit in 32 bits prints 8 digits instead of 16; the true word size is unaffected
+// (see PointerBytes). It's a plain read of the cached width — the work happens in
+// SetCompactAddr, not on this hot path.
 func (f *File) AddrHexWidth() int {
+	if f.dispWidth != 0 {
+		return f.dispWidth
+	}
 	if f.addrWidth == 0 {
 		return 16
 	}
 	return f.addrWidth
+}
+
+// SetCompactAddr enables or disables the narrowed 64-bit address display and
+// recomputes the cached print width. It is a pure display preference; the
+// disasm/hex/list views all read AddrHexWidth, so one call re-flows every address
+// column consistently. The MaxAddr scan only runs when compaction is requested
+// (the && short-circuits otherwise), so turning it off costs nothing.
+func (f *File) SetCompactAddr(on bool) {
+	f.compactAddr = on
+	full := f.addrWidth
+	if full == 0 {
+		full = 16
+	}
+	if on && full == 16 && f.MaxAddr() < (1<<32) {
+		full = 8
+	}
+	f.dispWidth = full
+}
+
+// PointerBytes is the binary's true pointer width in bytes (8 for 64-bit, 4 for
+// 32-bit) — independent of the compact-addresses display preference, so word
+// decoding stays correct even when addresses print narrow.
+func (f *File) PointerBytes() int {
+	w := f.addrWidth
+	if w == 0 {
+		w = 16
+	}
+	return w / 2
+}
+
+// MaxAddr returns the highest meaningful virtual address in the file (the end of
+// the highest section/segment, the largest symbol address, and the entry point),
+// scanned once. Used to decide whether compact addresses are safe.
+func (f *File) MaxAddr() uint64 {
+	f.maxAddrOnce.Do(func() {
+		hi := f.entry
+		for i := range f.Sections {
+			if e := f.Sections[i].Addr + f.Sections[i].Size; e > hi {
+				hi = e
+			}
+		}
+		for i := range f.Segments {
+			if e := f.Segments[i].Addr + f.Segments[i].Size; e > hi {
+				hi = e
+			}
+		}
+		for i := range f.Symbols {
+			if a := f.Symbols[i].Addr; a > hi {
+				hi = a
+			}
+		}
+		f.maxAddr = hi
+	})
+	return f.maxAddr
 }
 
 // HeaderInfo returns the container header as a list of "Label: value" lines.

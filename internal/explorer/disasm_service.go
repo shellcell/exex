@@ -256,15 +256,21 @@ func (s *DisasmService) decodeAcross(img *binfile.Image, decodeStart, end, visib
 		if len(data) == 0 {
 			break
 		}
-		for _, in := range disasm.Range(s.dis, data, img.AddrAt(p), 0) {
+		stop := false
+		disasm.RangeFunc(s.dis, data, img.AddrAt(p), func(in disasm.Inst) bool {
 			off := r.Off + int(in.Addr-r.Addr) // this instruction's image offset
 			if off < visibleStart {
-				continue // resync context before the visible window
+				return true // resync context before the visible window
 			}
 			if off >= end {
-				break
+				stop = true
+				return false
 			}
 			out = append(out, in)
+			return true
+		})
+		if stop {
+			break
 		}
 		p = regEnd
 	}

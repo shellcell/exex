@@ -96,7 +96,7 @@ func Classify(text string) InstClass {
 	if sp >= 0 {
 		op = text[:sp]
 	}
-	op = strings.ToLower(op)
+	op = lowerASCII(op)
 
 	// "blr" is ambiguous: ARM64 "blr <reg>" is an indirect call, but PowerPC "blr"
 	// (no operand) is branch-to-link-register, i.e. a return. Disambiguate by
@@ -163,6 +163,26 @@ func hasMnemonicPrefix(op string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+func lowerASCII(s string) string {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			b := []byte(s)
+			b[i] = c + ('a' - 'A')
+			for j := i + 1; j < len(b); j++ {
+				if b[j] >= 'A' && b[j] <= 'Z' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+		if c >= 0x80 {
+			return strings.ToLower(s)
+		}
+	}
+	return s
 }
 
 // Disassembler decodes a single instruction at code[0] for VM address addr.
@@ -369,7 +389,7 @@ func resolveRiscvBranch(text string, addr uint64) string {
 	if sp < 0 {
 		return text
 	}
-	op := strings.ToLower(text[:sp])
+	op := lowerASCII(text[:sp])
 	branch := op == "jal" || op == "j"
 	if !branch {
 		switch Classify(text) {
@@ -571,10 +591,12 @@ func hexImmediates(s string) string {
 		return s
 	}
 	var b strings.Builder
-	b.Grow(len(s) + 8)
+	changed := false
 	for i := 0; i < len(s); {
 		if s[i] != '#' {
-			b.WriteByte(s[i])
+			if changed {
+				b.WriteByte(s[i])
+			}
 			i++
 			continue
 		}
@@ -591,15 +613,24 @@ func hexImmediates(s string) string {
 		// Leave it alone unless this is a plain decimal: no digits, an "0x" hex
 		// prefix, or a "." float suffix all mean "not a decimal immediate".
 		if start == j || (j < len(s) && (s[j] == 'x' || s[j] == 'X' || s[j] == '.')) {
-			b.WriteByte('#')
+			if changed {
+				b.WriteByte('#')
+			}
 			i++
 			continue
 		}
 		v, err := strconv.ParseUint(s[start:j], 10, 64)
 		if err != nil {
-			b.WriteByte('#')
+			if changed {
+				b.WriteByte('#')
+			}
 			i++
 			continue
+		}
+		if !changed {
+			b.Grow(len(s) + 8)
+			b.WriteString(s[:i])
+			changed = true
 		}
 		b.WriteByte('#')
 		if neg {
@@ -607,6 +638,9 @@ func hexImmediates(s string) string {
 		}
 		appendHexTo(&b, v)
 		i = j
+	}
+	if !changed {
+		return s
 	}
 	return b.String()
 }

@@ -161,8 +161,23 @@ func DisasmTo(w io.Writer, f *binfile.File, all bool) error {
 		}
 		fmt.Fprintf(bw, "Disassembly of section %s:\n", s.Name)
 		stop := false
+		secEndAddr := s.Addr + s.FileSize
+		if secEndAddr < s.Addr {
+			secEndAddr = ^uint64(0)
+		}
+		secSyms := f.SymbolsInRange(s.Addr, secEndAddr)
+		symIdx := 0
 		disasm.RangeFunc(dis, raw[s.Offset:end], s.Addr, func(in disasm.Inst) bool {
-			if sym, ok := f.SymbolAt(in.Addr); ok && sym.Addr == in.Addr {
+			for symIdx < len(secSyms) && secSyms[symIdx].Addr < in.Addr {
+				symIdx++
+			}
+			if symIdx < len(secSyms) && secSyms[symIdx].Addr == in.Addr {
+				j := symIdx
+				for j+1 < len(secSyms) && secSyms[j+1].Addr == in.Addr {
+					j++
+				}
+				sym := secSyms[j]
+				symIdx = j + 1
 				buf = append(buf[:0], '\n')
 				buf = appendHexPad(buf, in.Addr, addrW)
 				buf = append(buf, " <"...)
@@ -398,12 +413,19 @@ func appendLeftStr(dst []byte, s string, width int) []byte {
 func Strings(f *binfile.File) string {
 	entries := f.Strings()
 	var b strings.Builder
+	addrW := f.AddrHexWidth()
 	size := 0
 	for i := range entries {
-		size += f.AddrHexWidth() + 5 + int(entries[i].Len) + 1
+		size += addrW + 5 + int(entries[i].Len) + 1
 	}
 	b.Grow(size)
-	_ = StringsTo(&b, f)
+	line := make([]byte, 0, addrW+5)
+	for _, e := range entries {
+		line = appendStringLinePrefix(line[:0], e, addrW)
+		b.Write(line)
+		b.Write(f.StringBytes(e))
+		b.WriteByte('\n')
+	}
 	return b.String()
 }
 
@@ -417,20 +439,7 @@ func StringsTo(w io.Writer, f *binfile.File) error {
 	defer bw.Flush()
 	var line []byte
 	return f.ScanStrings(func(e binfile.StringEntry) error {
-		line = line[:0]
-		if e.HasAddr {
-			line = append(line, '0', 'x')
-			line = appendHexPad(line, e.Addr, addrW)
-		} else {
-			// "@0x" + offset left-justified in addrW hex columns (matches "%-*x").
-			line = append(line, '@', '0', 'x')
-			n := len(line)
-			line = appendHexPad(line, e.Offset, 0)
-			for w := len(line) - n; w < addrW; w++ {
-				line = append(line, ' ')
-			}
-		}
-		line = append(line, ' ', ' ')
+		line = appendStringLinePrefix(line[:0], e, addrW)
 		if _, err := bw.Write(line); err != nil {
 			return io.ErrClosedPipe
 		}
@@ -442,6 +451,22 @@ func StringsTo(w io.Writer, f *binfile.File) error {
 		}
 		return nil
 	})
+}
+
+func appendStringLinePrefix(dst []byte, e binfile.StringEntry, addrW int) []byte {
+	if e.HasAddr {
+		dst = append(dst, '0', 'x')
+		dst = appendHexPad(dst, e.Addr, addrW)
+	} else {
+		// "@0x" + offset left-justified in addrW hex columns (matches "%-*x").
+		dst = append(dst, '@', '0', 'x')
+		n := len(dst)
+		dst = appendHexPad(dst, e.Offset, 0)
+		for w := len(dst) - n; w < addrW; w++ {
+			dst = append(dst, ' ')
+		}
+	}
+	return append(dst, ' ', ' ')
 }
 
 // StreamView writes a view straight to w when it has a streaming form (the large

@@ -145,11 +145,22 @@ func (f *File) extractStringsRange(data []byte, secs []*Section, lo, hi int) []S
 }
 
 // ScanStrings walks printable strings in file order and calls emit for each one,
-// without caching the full result. It is used by streaming CLI output where a
-// downstream pipe may close early and the retained StringEntry table would be
-// wasted.
+// without populating the retained Strings cache. Large inputs use the parallel
+// uncached extractor to recover full-scan throughput; small inputs stream
+// directly so `exex -o strings | head` can still stop before building a table.
 func (f *File) ScanStrings(emit func(StringEntry) error) error {
 	data := f.raw
+	if len(data) >= 1<<20 && runtime.GOMAXPROCS(0) > 1 {
+		for _, e := range f.extractStrings() {
+			if err := emit(e); err != nil {
+				if err == io.ErrClosedPipe {
+					return nil
+				}
+				return err
+			}
+		}
+		return nil
+	}
 	secs := f.fileSectionsByOffset()
 	printable := func(b byte) bool { return b >= 0x20 && b < 0x7f }
 	start := -1

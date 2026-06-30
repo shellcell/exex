@@ -698,11 +698,17 @@ func collectSyscalls(f *binfile.File, dis disasm.Disassembler) []SyscallSite {
 			defer wg.Done()
 			defer func() { <-sem }()
 			code := raw[tk.lo:tk.hi]
-			// Fixed-width arch with no vDSO heuristic: locate svc sites by their byte
-			// encoding and decode only a window at each — never the whole chunk.
-			if instLen := syscallInstLen(a); instLen > 0 && symAt == nil {
-				results[i] = scanChunkLocalized(dis, code, tk.baseVA, tk.emitVA, a, instLen, f)
-				return
+			if symAt == nil {
+				// With no vDSO call heuristic to run, locate syscall opcodes by byte
+				// signature and decode only a bounded window around each candidate.
+				if instLen := syscallInstLen(a); instLen > 0 {
+					results[i] = scanChunkLocalized(dis, code, tk.baseVA, tk.emitVA, a, instLen, f)
+					return
+				}
+				if a == disasm.ArchAMD64 || a == disasm.ArchX86 {
+					results[i] = scanChunkX86Localized(dis, code, tk.baseVA, tk.emitVA, a, f)
+					return
+				}
 			}
 			// Otherwise skip a chunk that can't contain a syscall (the opcode byte
 			// patterns are present in every real syscall/trampoline encoding), then
@@ -742,9 +748,9 @@ func collectSyscalls(f *binfile.File, dis disasm.Disassembler) []SyscallSite {
 func chunkHasSyscallCandidate(code []byte, a disasm.Arch) bool {
 	switch a {
 	case disasm.ArchAMD64, disasm.ArchX86:
-		// syscall (0f 05), sysenter (0f 34), int 0x80 (cd 80), gs-indirect call such
+		// syscall (0f 05), sysenter (0f 34), int 0x80/0x2e, gs-indirect call such
 		// as the i386 vsyscall trampoline (65 ff …).
-		for _, p := range [][]byte{{0x0f, 0x05}, {0x0f, 0x34}, {0xcd, 0x80}, {0x65, 0xff}} {
+		for _, p := range [][]byte{{0x0f, 0x05}, {0x0f, 0x34}, {0xcd, 0x80}, {0xcd, 0x2e}, {0x65, 0xff}} {
 			if bytes.Index(code, p) >= 0 {
 				return true
 			}
@@ -769,7 +775,6 @@ func chunkHasSyscallCandidate(code []byte, a disasm.Arch) bool {
 	}
 	return true
 }
-
 
 // syscallInstLen returns the fixed instruction width for arches whose syscall
 // instruction (svc) can be located by a byte test, enabling a localized scan that
@@ -835,6 +840,66 @@ func scanChunkLocalized(dis disasm.Disassembler, code []byte, baseVA, emitVA uin
 			hit.Num, hit.HasNum = n, true
 		}
 		out = append(out, hit)
+	}
+	return out
+}
+
+func scanChunkX86Localized(dis disasm.Disassembler, code []byte, baseVA, emitVA uint64, a disasm.Arch, f *binfile.File) []SyscallSite {
+	var out []SyscallSite
+	for _, off := range x86SyscallCandidateOffsets(code) {
+		va := baseVA + uint64(off)
+		if va < emitVA {
+			continue
+		}
+		lo := off - dumpScanLead
+		if lo < 0 {
+			lo = 0
+		}
+		hi := min(off+16, len(code)) // max x86 instruction length is 15 bytes
+		if hi <= off {
+			continue
+		}
+		window := disasm.Range(dis, code[lo:hi], baseVA+uint64(lo), 0)
+		idx := -1
+		var site disasm.Inst
+		vdso := false
+		for i, in := range window {
+			if in.Addr != va {
+				continue
+			}
+			if ok, v := ClassifySyscallSite(in, nil); ok {
+				idx, site, vdso = i, in, v
+				break
+			}
+		}
+		if idx < 0 {
+			continue // opcode bytes inside another instruction, or decoder did not resync
+		}
+		hit := SyscallSite{Addr: va, Text: strings.TrimSpace(site.Text), VDSO: vdso}
+		if sm, ok := f.SymbolAt(va); ok {
+			hit.Sym = sm.Display()
+		}
+		if !vdso {
+			if n, ok := ResolveSyscallNum(window[:idx], a); ok {
+				hit.Num, hit.HasNum = n, true
+			}
+		}
+		out = append(out, hit)
+	}
+	return out
+}
+
+func x86SyscallCandidateOffsets(code []byte) []int {
+	var out []int
+	for i := 0; i+1 < len(code); i++ {
+		switch {
+		case code[i] == 0x0f && (code[i+1] == 0x05 || code[i+1] == 0x34): // syscall/sysenter
+		case code[i] == 0xcd && (code[i+1] == 0x80 || code[i+1] == 0x2e): // int 0x80/0x2e
+		case code[i] == 0x65 && code[i+1] == 0xff: // i386 %gs vsyscall trampoline call
+		default:
+			continue
+		}
+		out = append(out, i)
 	}
 	return out
 }

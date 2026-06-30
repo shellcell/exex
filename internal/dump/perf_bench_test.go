@@ -63,8 +63,27 @@ func BenchmarkSyscalls(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
+	b.ResetTimer()
 	for range b.N {
 		_ = Syscalls(f, false)
+	}
+}
+
+func BenchmarkCPUFeatures(b *testing.B) {
+	path := os.Getenv("EXEX_BENCH_BIN")
+	if path == "" {
+		b.Skip("set EXEX_BENCH_BIN to a real binary")
+	}
+	f, err := binfile.Open(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := ScanCPUFeatures(f); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -79,7 +98,10 @@ func BenchmarkStringsDump(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		_ = Strings(f)
+		if err := StringsTo(io.Discard, f); err != nil {
+			b.Fatal(err)
+		}
+		f.Close()
 	}
 }
 

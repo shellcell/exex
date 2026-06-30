@@ -134,6 +134,28 @@ func TestVsyscallTrampoline(t *testing.T) {
 	}
 }
 
+func TestScanChunkX86Localized(t *testing.T) {
+	dis, err := disasm.For(disasm.ArchAMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// mov $0x3c,%eax; syscall
+	code := []byte{0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05}
+	sites := scanChunkX86Localized(dis, code, 0x1000, 0x1000, disasm.ArchAMD64, &binfile.File{})
+	if len(sites) != 1 {
+		t.Fatalf("sites = %d, want 1 (%#v)", len(sites), sites)
+	}
+	if sites[0].Addr != 0x1005 || !sites[0].HasNum || sites[0].Num != 60 || !strings.Contains(sites[0].Text, "syscall") {
+		t.Fatalf("site = %+v, want syscall at 0x1005 with #60", sites[0])
+	}
+
+	// The same opcode bytes inside a mov immediate are not an instruction boundary.
+	code = []byte{0xb8, 0x0f, 0x05, 0x00, 0x00, 0xc3}
+	if sites := scanChunkX86Localized(dis, code, 0x2000, 0x2000, disasm.ArchAMD64, &binfile.File{}); len(sites) != 0 {
+		t.Fatalf("false positive sites = %#v, want none", sites)
+	}
+}
+
 func TestResolveStopsAtWriterAndCall(t *testing.T) {
 	insts := func(texts ...string) []disasm.Inst {
 		out := make([]disasm.Inst, len(texts))

@@ -12,9 +12,29 @@ import "strings"
 func Mnemonic(text string) (op, operands string) {
 	text = strings.TrimSpace(text)
 	if i := strings.IndexAny(text, " \t"); i >= 0 {
-		return strings.ToLower(text[:i]), text[i+1:]
+		return lowerASCII(text[:i]), text[i+1:]
 	}
-	return strings.ToLower(text), ""
+	return lowerASCII(text), ""
+}
+
+func lowerASCII(s string) string {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			b := []byte(s)
+			b[i] = c + ('a' - 'A')
+			for j := i + 1; j < len(b); j++ {
+				if b[j] >= 'A' && b[j] <= 'Z' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+		if c >= 0x80 {
+			return strings.ToLower(s)
+		}
+	}
+	return s
 }
 
 // X86 reports the feature an x86/x86-64 instruction requires beyond the baseline,

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/arch/arm64/arm64asm"
+
 	"github.com/rabarbra/exex/internal/arch"
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/cpufeat"
@@ -59,29 +61,16 @@ func ScanCPUFeaturesCancel(f *binfile.File, done <-chan struct{}) (CPUFeatureSet
 	if classify == nil {
 		return CPUFeatureSet{}, fmt.Errorf("CPU-feature detection is not supported for %s", f.Arch())
 	}
+	if f.Arch() == arch.ArchARM64 {
+		return scanCPUFeaturesARM64(f, done), nil
+	}
 	dis, err := disasm.For(f.Arch())
 	if err != nil || dis == nil {
 		return CPUFeatureSet{}, fmt.Errorf("no disassembler for this architecture")
 	}
 	raw := f.Raw()
 
-	var tasks []chunkTask
-	for _, s := range f.Sections {
-		if !s.Exec || s.FileSize == 0 {
-			continue
-		}
-		secOff := int(s.Offset)
-		secEnd := min(secOff+int(s.FileSize), len(raw))
-		for p := secOff; p < secEnd; p += dumpScanChunk {
-			hi := min(p+dumpScanChunk, secEnd)
-			lo := max(secOff, p-dumpScanLead)
-			tasks = append(tasks, chunkTask{
-				lo: lo, hi: hi,
-				baseVA: s.Addr + uint64(lo-secOff),
-				emitVA: s.Addr + uint64(p-secOff),
-			})
-		}
-	}
+	tasks := cpuFeatureTasks(f, raw)
 
 	parts := make([]chunkFeatures, len(tasks))
 	workers := max(min(runtime.GOMAXPROCS(0), len(tasks)), 1)
@@ -132,6 +121,140 @@ func ScanCPUFeaturesCancel(f *binfile.File, done <-chan struct{}) (CPUFeatureSet
 		set.Baseline = cpufeat.BaselineX86(set.Counts)
 	}
 	return set, nil
+}
+
+func cpuFeatureTasks(f *binfile.File, raw []byte) []chunkTask {
+	var tasks []chunkTask
+	for _, s := range f.Sections {
+		if !s.Exec || s.FileSize == 0 {
+			continue
+		}
+		secOff := int(s.Offset)
+		secEnd := min(secOff+int(s.FileSize), len(raw))
+		for p := secOff; p < secEnd; p += dumpScanChunk {
+			hi := min(p+dumpScanChunk, secEnd)
+			lo := max(secOff, p-dumpScanLead)
+			tasks = append(tasks, chunkTask{
+				lo:     lo,
+				hi:     hi,
+				baseVA: s.Addr + uint64(lo-secOff),
+				emitVA: s.Addr + uint64(p-secOff),
+			})
+		}
+	}
+	return tasks
+}
+
+func scanCPUFeaturesARM64(f *binfile.File, done <-chan struct{}) CPUFeatureSet {
+	raw := f.Raw()
+	tasks := cpuFeatureTasks(f, raw)
+	parts := make([]chunkFeatures, len(tasks))
+	workers := max(min(runtime.GOMAXPROCS(0), len(tasks)), 1)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, tk := range tasks {
+		if scanCancelled(done) {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, tk chunkTask) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			cf := chunkFeatures{counts: map[string]int{}, first: map[string]uint64{}}
+			code := raw[tk.lo:tk.hi]
+			start := int((4 - tk.baseVA%4) % 4)
+			for off := start; off+4 <= len(code); off += 4 {
+				if scanCancelled(done) {
+					break
+				}
+				addr := tk.baseVA + uint64(off)
+				if addr < tk.emitVA {
+					continue
+				}
+				cf.total++
+				inst, err := arm64asm.Decode(code[off:])
+				if err != nil {
+					continue
+				}
+				if feat := classifyARM64Inst(inst); feat != "" {
+					if cf.counts[feat] == 0 || addr < cf.first[feat] {
+						cf.first[feat] = addr
+					}
+					cf.counts[feat]++
+				}
+			}
+			parts[i] = cf
+		}(i, tk)
+	}
+	wg.Wait()
+
+	set := CPUFeatureSet{Counts: map[string]int{}, FirstUse: map[string]uint64{}}
+	for _, cf := range parts {
+		set.Total += cf.total
+		for feat, n := range cf.counts {
+			if set.Counts[feat] == 0 || cf.first[feat] < set.FirstUse[feat] {
+				set.FirstUse[feat] = cf.first[feat]
+			}
+			set.Counts[feat] += n
+		}
+	}
+	return set
+}
+
+func classifyARM64Inst(inst arm64asm.Inst) string {
+	op := inst.Op.String()
+	switch {
+	case hasPrefixFoldASCII(op, "aes"):
+		return "AES (crypto)"
+	case hasPrefixFoldASCII(op, "sha1") || hasPrefixFoldASCII(op, "sha256") || hasPrefixFoldASCII(op, "sha512"):
+		return "SHA (crypto)"
+	case hasPrefixFoldASCII(op, "pmull"):
+		return "PMULL (crypto)"
+	case hasPrefixFoldASCII(op, "crc32"):
+		return "CRC32"
+	case hasPrefixFoldASCII(op, "cas") || hasPrefixFoldASCII(op, "ldadd") || hasPrefixFoldASCII(op, "stadd") ||
+		hasPrefixFoldASCII(op, "swp") || hasPrefixFoldASCII(op, "ldset") || hasPrefixFoldASCII(op, "stset") ||
+		hasPrefixFoldASCII(op, "ldclr") || hasPrefixFoldASCII(op, "stclr") || hasPrefixFoldASCII(op, "ldeor") ||
+		hasPrefixFoldASCII(op, "ldsmax") || hasPrefixFoldASCII(op, "ldsmin") ||
+		hasPrefixFoldASCII(op, "ldumax") || hasPrefixFoldASCII(op, "ldumin"):
+		return "LSE atomics"
+	case hasPrefixFoldASCII(op, "pac") || hasPrefixFoldASCII(op, "aut") || eqFoldASCII(op, "xpaci") || eqFoldASCII(op, "xpacd") ||
+		eqFoldASCII(op, "braa") || eqFoldASCII(op, "brab") || eqFoldASCII(op, "blraa") || eqFoldASCII(op, "blrab") ||
+		eqFoldASCII(op, "retaa") || eqFoldASCII(op, "retab"):
+		return "Pointer auth"
+	case eqFoldASCII(op, "sdot") || eqFoldASCII(op, "udot"):
+		return "DotProd"
+	case eqFoldASCII(op, "bfdot") || hasPrefixFoldASCII(op, "bfmla") || eqFoldASCII(op, "bfmmla"):
+		return "BF16"
+	}
+	for _, arg := range inst.Args {
+		switch arg.(type) {
+		case arm64asm.RegisterWithArrangement, arm64asm.RegisterWithArrangementAndIndex:
+			return "NEON/ASIMD"
+		}
+	}
+	return ""
+}
+
+func eqFoldASCII(s, lower string) bool {
+	return len(s) == len(lower) && hasPrefixFoldASCII(s, lower)
+}
+
+func hasPrefixFoldASCII(s, lower string) bool {
+	if len(s) < len(lower) {
+		return false
+	}
+	for i := 0; i < len(lower); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != lower[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func scanCancelled(done <-chan struct{}) bool {

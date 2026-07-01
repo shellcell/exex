@@ -1,6 +1,6 @@
 .\" Manpage for exex.
 .\" Contact rabarbrablad@gmail.com to correct errors or typos.
-.TH EXEX 1 "2026-06-20" "exex" "User Commands"
+.TH EXEX 1 "2026-07-01" "exex" "User Commands"
 .SH NAME
 exex \- terminal UI for exploring ELF, Mach-O and PE binaries
 .SH SYNOPSIS
@@ -63,7 +63,7 @@ For a universal (fat) Mach-O, which architecture slice to open (e.g.
 .BR arm64 ).
 Defaults to the host architecture, else the first slice. The Info view lists all
 slices; press
-.B a
+.B t
 there to switch between them. Ignored for thin Mach-O and other formats.
 .TP
 .BI \-o " VIEW"
@@ -129,8 +129,10 @@ The following keys drive the interactive UI; press
 .B ?
 for the full in-app reference.
 .TP
-.B 1\(en9
-Switch view: Info, Sections, Symbols, Disasm, Hex, Raw, Strings, Libs, Sources.
+.BR 1\(en9 / 0
+Switch view: Info, Sections, Symbols, Disasm, Hex, Raw, Strings, Libs, Sources;
+.B 0
+opens Relocations.
 .TP
 .BR \[u2191] / \[u2193] ", " j / k ", " PgUp / PgDn ", " Home / End
 Move and page (also
@@ -169,26 +171,30 @@ Sections sort by index, name, address or size; Symbols by name, address or size;
 Strings by offset, address or string; Sources by project-order or name; Libraries
 by name.
 .TP
-.BR \[u2325]t / \[u2325]s / \[u2325]b / \[u2325]f / \[u2325]a
-Cycle a column filter (Option/Alt + the column's first letter). Symbols:
-.B \[u2325]t
+.BR \(hatT / \(hatS / \(hatB / \(hatF / \(hatP
+Cycle a column filter (Ctrl + the column's first letter). Symbols:
+.B \(hatT
 type,
-.B \[u2325]s
+.B \(hatS
 scope,
-.B \[u2325]b
+.B \(hatB
 bind. Sections:
-.B \[u2325]t
+.B \(hatT
 type,
-.B \[u2325]f
+.B \(hatF
 flags. Strings:
-.B \[u2325]s
-owning section. Libraries and Sources:
-.B \[u2325]a
-availability. Requires the terminal to send Alt for Option (e.g. ghostty's
-.BR macos-option-as-alt ).
+.B \(hatS
+owning section. Relocations:
+.B \(hatT
+type and
+.B \(hatS
+section. Libraries and Sources:
+.B \(hatP
+availability.
 A search box
 .RB ( / )
-filters every list view (Sections, Symbols, Strings, Libraries, Sources), and
+filters every list view (Sections, Symbols, Strings, Libraries, Relocations,
+Sources), and
 .B Esc
 clears the search text and all column filters at once.
 .TP
@@ -257,8 +263,12 @@ Disasm); and the whole current row, every column
 .RB ( Shift-l ,
 all row-based views).
 .TP
-.B x
-Find cross-references to the address under the cursor (Disasm).
+.BR x / y
+Find cross-references to the address under the cursor, or list system calls
+(Disasm).
+.TP
+.B Shift-f
+Scan and list CPU-feature families used by the executable code.
 .TP
 .B w
 Toggle long-line wrapping.

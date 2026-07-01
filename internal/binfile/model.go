@@ -258,7 +258,7 @@ func (f *File) finalizeSymbols() {
 
 	addrIdx := make([]int, 0, len(f.Symbols))
 	for i, s := range f.Symbols {
-		if s.Addr != 0 {
+		if s.Addr != 0 || (f.synthetic && s.Section != "") {
 			addrIdx = append(addrIdx, i)
 		}
 	}

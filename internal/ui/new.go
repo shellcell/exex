@@ -32,6 +32,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	srcFilter := newPromptInput("type to filter…", "/ ")
 	strFilter := newPromptInput("type to filter…", "/ ")
 	libFilter := newPromptInput("type to filter…", "/ ")
+	relocFilter := newPromptInput("symbol · type · section", "/ ")
 	gotoInput := newPromptInput("0x401000 or symbol name", "→ ")
 	searchInput := newPromptInput("hex bytes (de ad be ef) or text", "/ ")
 	sysFilter := newPromptInput("name · #num · symbol", "/ ")
@@ -72,6 +73,9 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 		libsState: libsState{
 			libsTree:   cfg.Behavior.TreeLibs,
 			libsFilter: libFilter,
+		},
+		relocsState: relocsState{
+			relocFilter: relocFilter,
 		},
 		gotoState: gotoState{
 			gotoInput: gotoInput,

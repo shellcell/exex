@@ -56,10 +56,19 @@ func TestLibsRelocsMode(t *testing.T) {
 	for _, r := range "JUMP" {
 		h.press(string(r))
 	}
+	if h.m().relocFilter.Value() == "" {
+		t.Error("relocs filter did not capture typed text")
+	}
+	if h.m().libsFilter.Value() != "" {
+		t.Errorf("relocs filter leaked into libs filter: %q", h.m().libsFilter.Value())
+	}
 	if len(h.m().relocFiltered) > full {
 		t.Errorf("filter grew the list: %d -> %d", full, len(h.m().relocFiltered))
 	}
 	h.press("esc") // clear filter
+	if h.m().relocFilter.Value() != "" {
+		t.Errorf("esc did not clear relocs filter: %q", h.m().relocFilter.Value())
+	}
 
 	// s cycles the sort field; r reverses it.
 	srt0 := h.m().relocSort

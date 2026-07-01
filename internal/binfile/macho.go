@@ -208,6 +208,7 @@ func (f *File) loadMachO() error {
 		sec.Flags = neutralFlags(sec.Alloc, write, exec)
 		f.Sections = append(f.Sections, sec)
 	}
+	synthBase, origSecAddr := f.applySyntheticRelocatableSections(machoSectionAligns(mf.Sections))
 
 	if mf.Symtab != nil {
 		for _, s := range mf.Symtab.Syms {
@@ -229,8 +230,18 @@ func (f *File) loadMachO() error {
 				}
 			}
 			addr := s.Value
+			realOff := s.Value
 			if !defined {
 				addr = 0
+				realOff = 0
+			} else if f.synthetic {
+				idx := int(s.Sect) - 1
+				if idx >= 0 && idx < len(f.Sections) && f.Sections[idx].SynthAddr {
+					if s.Value >= origSecAddr[idx] {
+						realOff = s.Value - origSecAddr[idx]
+					}
+					addr = synthBase[idx] + realOff
+				}
 			}
 			f.Symbols = append(f.Symbols, Symbol{
 				Name:    s.Name,
@@ -238,6 +249,7 @@ func (f *File) loadMachO() error {
 				Kind:    kind,
 				Bind:    machoBind(s),
 				Section: secName,
+				RealOff: realOff,
 			})
 		}
 	}
@@ -273,6 +285,52 @@ func (f *File) loadMachO() error {
 	mf.Symtab = nil
 	f.dwarfBuild = func() *dwarf.Data { return f.machoDWARF(mf) }
 	return nil
+}
+
+func machoSectionAligns(sections []*macho.Section) []uint64 {
+	aligns := make([]uint64, len(sections))
+	for i, s := range sections {
+		aligns[i] = uint64(1)
+		if s.Align > 0 && s.Align < 63 {
+			aligns[i] = uint64(1) << s.Align
+		}
+	}
+	return aligns
+}
+
+func (f *File) applySyntheticRelocatableSections(aligns []uint64) (synthBase []uint64, origAddr []uint64) {
+	synthBase = make([]uint64, len(f.Sections))
+	origAddr = make([]uint64, len(f.Sections))
+	if !f.relocatable {
+		return synthBase, origAddr
+	}
+	var base uint64
+	for i := range f.Sections {
+		s := &f.Sections[i]
+		origAddr[i] = s.Addr
+		if s.Size == 0 {
+			continue
+		}
+		align := uint64(1)
+		if i < len(aligns) && aligns[i] > 1 {
+			align = aligns[i]
+		}
+		base = alignUpPow2(base, align)
+		synthBase[i] = base
+		s.Addr = base
+		s.SynthAddr = true
+		s.Alloc = true
+		base += s.Size
+	}
+	f.synthetic = base > 0
+	return synthBase, origAddr
+}
+
+func alignUpPow2(v, align uint64) uint64 {
+	if align <= 1 {
+		return v
+	}
+	return (v + align - 1) &^ (align - 1)
 }
 
 type machoLayoutHeader struct {
@@ -356,6 +414,9 @@ func (f *File) loadMachOLayout() error {
 				break
 			}
 		}
+	}
+	if h.typ == macho.TypeObj {
+		f.applySyntheticRelocatableSections(nil)
 	}
 	f.header = []string{
 		fmt.Sprintf("Path:        %s", f.Path),

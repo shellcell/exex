@@ -46,3 +46,4 @@ func benchView(b *testing.B, md mode) {
 func BenchmarkViewDisasm(b *testing.B)  { benchView(b, modeDisasm) }
 func BenchmarkViewHex(b *testing.B)     { benchView(b, modeHex) }
 func BenchmarkViewSymbols(b *testing.B) { benchView(b, modeSymbols) }
+func BenchmarkViewRelocs(b *testing.B)  { benchView(b, modeRelocs) }

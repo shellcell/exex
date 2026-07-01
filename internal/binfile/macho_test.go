@@ -137,6 +137,127 @@ func TestMachODylibInfo(t *testing.T) {
 	}
 }
 
+func TestMachORelocatableObjectUsesSyntheticSectionAddresses(t *testing.T) {
+	f, err := OpenBytes("tiny.o", tinyMachOObject64())
+	if err != nil {
+		t.Fatalf("OpenBytes Mach-O object: %v", err)
+	}
+	if !f.IsRelocatable() {
+		t.Fatal("Mach-O object was not marked relocatable")
+	}
+	if !f.SyntheticAddrs() {
+		t.Fatal("Mach-O object did not get synthetic addresses")
+	}
+	if len(f.Sections) != 2 {
+		t.Fatalf("sections = %d, want 2", len(f.Sections))
+	}
+	text, data := f.Sections[0], f.Sections[1]
+	if !text.SynthAddr || !data.SynthAddr || !text.Alloc || !data.Alloc {
+		t.Fatalf("synthetic/alloc flags not set: text=%#v data=%#v", text, data)
+	}
+	if text.Addr == data.Addr {
+		t.Fatalf("section addresses still collide at 0x%x", text.Addr)
+	}
+	if len(f.Symbols) != 2 {
+		t.Fatalf("symbols = %d, want 2", len(f.Symbols))
+	}
+	var textSym, dataSym Symbol
+	for _, sym := range f.Symbols {
+		switch sym.Name {
+		case "_textSym":
+			textSym = sym
+		case "_dataSym":
+			dataSym = sym
+		}
+	}
+	if textSym.Section != "__text" || dataSym.Section != "__data" {
+		t.Fatalf("symbol sections: text=%#v data=%#v", textSym, dataSym)
+	}
+	if textSym.Addr != text.Addr || dataSym.Addr != data.Addr {
+		t.Fatalf("symbol addrs = 0x%x/0x%x, want section addrs 0x%x/0x%x", textSym.Addr, dataSym.Addr, text.Addr, data.Addr)
+	}
+	if sym, ok := f.SymbolAt(textSym.Addr); !ok || sym.Name != "_textSym" {
+		t.Fatalf("SymbolAt(text) = %#v, %v; want _textSym", sym, ok)
+	}
+	if sym, ok := f.SymbolAt(dataSym.Addr); !ok || sym.Name != "_dataSym" {
+		t.Fatalf("SymbolAt(data) = %#v, %v; want _dataSym", sym, ok)
+	}
+	if _, ok := f.ExecImage().PosForAddr(text.Addr); !ok {
+		t.Fatalf("exec image cannot locate synthetic text address 0x%x", text.Addr)
+	}
+}
+
+func tinyMachOObject64() []byte {
+	const (
+		headerSize = 32
+		segSize    = 72 + 2*80
+		symCmdSize = 24
+		cmdSize    = segSize + symCmdSize
+		dataOff    = headerSize + cmdSize
+		symOff     = dataOff + 8
+		strOff     = symOff + 2*16
+		lcSymtab   = 0x2
+		cpuAMD64   = 0x01000007
+	)
+	strs := []byte{0}
+	textName := uint32(len(strs))
+	strs = append(strs, []byte("_textSym\x00")...)
+	dataName := uint32(len(strs))
+	strs = append(strs, []byte("_dataSym\x00")...)
+	raw := make([]byte, strOff+len(strs))
+	bo := binary.LittleEndian
+
+	bo.PutUint32(raw[0:], machoMagic64)
+	bo.PutUint32(raw[4:], cpuAMD64)
+	bo.PutUint32(raw[8:], 3)  // CPU_SUBTYPE_X86_64_ALL
+	bo.PutUint32(raw[12:], 1) // MH_OBJECT
+	bo.PutUint32(raw[16:], 2) // ncmds
+	bo.PutUint32(raw[20:], cmdSize)
+
+	off := headerSize
+	bo.PutUint32(raw[off:], lcSegment64)
+	bo.PutUint32(raw[off+4:], segSize)
+	bo.PutUint64(raw[off+32:], 8) // vmsize
+	bo.PutUint64(raw[off+40:], dataOff)
+	bo.PutUint64(raw[off+48:], 8) // filesize
+	bo.PutUint32(raw[off+56:], vmProtRead|vmProtExecute)
+	bo.PutUint32(raw[off+60:], vmProtRead|vmProtExecute)
+	bo.PutUint32(raw[off+64:], 2) // nsects
+
+	sec := off + 72
+	copy(raw[sec:], "__text")
+	copy(raw[sec+16:], "__TEXT")
+	bo.PutUint64(raw[sec+40:], 4)
+	bo.PutUint32(raw[sec+48:], dataOff)
+	bo.PutUint32(raw[sec+52:], 2)
+	bo.PutUint32(raw[sec+64:], machoAttrPureInstr|machoAttrSomeInstr)
+
+	sec += 80
+	copy(raw[sec:], "__data")
+	copy(raw[sec+16:], "__DATA")
+	bo.PutUint64(raw[sec+40:], 4)
+	bo.PutUint32(raw[sec+48:], dataOff+4)
+	bo.PutUint32(raw[sec+52:], 2)
+
+	off += segSize
+	bo.PutUint32(raw[off:], lcSymtab)
+	bo.PutUint32(raw[off+4:], symCmdSize)
+	bo.PutUint32(raw[off+8:], symOff)
+	bo.PutUint32(raw[off+12:], 2)
+	bo.PutUint32(raw[off+16:], strOff)
+	bo.PutUint32(raw[off+20:], uint32(len(strs)))
+
+	copy(raw[dataOff:], []byte{0x90, 0x90, 0x90, 0xc3, 1, 2, 3, 4})
+	bo.PutUint32(raw[symOff:], textName)
+	raw[symOff+4] = nSect | nExt
+	raw[symOff+5] = 1
+	bo.PutUint32(raw[symOff+16:], dataName)
+	raw[symOff+20] = nSect | nExt
+	raw[symOff+21] = 2
+	copy(raw[strOff:], strs)
+	return raw
+}
+
 // TestFatMagicVsJavaClass guards the 0xCAFEBABE ambiguity: a fat Mach-O has a
 // small architecture count, while a Java .class has minor/major version (major
 // >= 45) where the count would be, so it must not be detected as Mach-O.

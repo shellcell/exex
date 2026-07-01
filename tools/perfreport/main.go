@@ -47,61 +47,64 @@ func main() {
 	}
 
 	// Parse/startup: re-open each run so the timing covers a cold load, then keep
-	// the last file for the view measurements.
-	var f *binfile.File
+	// the last file only for retained-heap and warm interactive render measurements.
+	var loaded *binfile.File
 	parse := measure(*runs, func() {
-		if f != nil {
-			f.Close()
+		if loaded != nil {
+			loaded.Close()
 		}
 		var e error
-		f, e = binfile.Open(path)
+		loaded, e = binfile.Open(path)
 		if e != nil {
 			fmt.Fprintf(os.Stderr, "perfreport: open %s: %v\n", path, e)
 			os.Exit(1)
 		}
 	})
+	defer loaded.Close()
 	// Memory retained by a loaded binary — the interactive footprint floor.
 	runtime.GC()
 	var held runtime.MemStats
 	runtime.ReadMemStats(&held)
 
-	// Demangling is the prep every buffered view shares (main.go runs it before
-	// dump.View), so account for it as its own stage rather than blaming a view.
-	demangle := measure(*runs, func() { f.ApplyDemangled(f.ComputeDemangled()) })
+	// Demangling is measured on a fresh loaded file each run, excluding the open
+	// itself, so repeated ApplyDemangled calls do not warm/mutate one shared File.
+	demangle := measurePrepared(*runs,
+		func() any { return mustOpen(path) },
+		func(v any) { v.(*binfile.File).ApplyDemangled(v.(*binfile.File).ComputeDemangled()) },
+		func(v any) { v.(*binfile.File).Close() },
+	)
 
 	type row struct {
 		stage string
 		stat  stat
 	}
 	rows := []row{
-		{"parse (startup)", parse},
-		{"demangle", demangle},
+		{"parse (cold open)", parse},
+		{"demangle (fresh file)", demangle},
 	}
 	for _, v := range nonDisasmViews {
-		rows = append(rows, row{"view: " + v, measure(*runs, func() {
-			if streamed, err := dump.StreamView(io.Discard, f, v); streamed {
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", v, err)
-					os.Exit(1)
-				}
-				return
-			}
-			if _, err := dump.View(f, v); err != nil {
-				fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", v, err)
-				os.Exit(1)
-			}
-		})})
+		view := v
+		rows = append(rows, row{"CLI view cold-cache: " + view, measurePrepared(*runs,
+			func() any { return mustOpenForView(path, view) },
+			func(v any) { runView(v.(*binfile.File), view) },
+			func(v any) { v.(*binfile.File).Close() },
+		)})
 	}
 	for _, d := range []struct {
 		name string
 		all  bool
 	}{{"disasm", false}, {"disasm-all", true}} {
-		rows = append(rows, row{"view: " + d.name, measure(*runs, func() {
-			if err := dump.DisasmTo(io.Discard, f, d.all); err != nil {
-				fmt.Fprintf(os.Stderr, "perfreport: %s: %v\n", d.name, err)
-				os.Exit(1)
-			}
-		})})
+		dis := d
+		rows = append(rows, row{"CLI view cold-cache: " + dis.name, measurePrepared(*runs,
+			func() any { return mustOpen(path) },
+			func(v any) {
+				if err := dump.DisasmTo(io.Discard, v.(*binfile.File), dis.all); err != nil {
+					fmt.Fprintf(os.Stderr, "perfreport: %s: %v\n", dis.name, err)
+					os.Exit(1)
+				}
+			},
+			func(v any) { v.(*binfile.File).Close() },
+		)})
 	}
 
 	// TUI startup: building the model is the interactive launch cost (the event
@@ -110,24 +113,28 @@ func main() {
 	if err != nil {
 		cfg = &config.Config{}
 	}
-	tui := measure(*runs, func() {
-		if _, err := ui.New(f, ui.Options{Config: cfg}); err != nil {
-			fmt.Fprintf(os.Stderr, "perfreport: ui.New: %v\n", err)
-			os.Exit(1)
-		}
-	})
-	rows = append(rows, row{"TUI startup (ui.New)", tui})
+	tui := measurePrepared(*runs,
+		func() any { return mustOpen(path) },
+		func(v any) {
+			if _, err := ui.New(v.(*binfile.File), ui.Options{Config: cfg}); err != nil {
+				fmt.Fprintf(os.Stderr, "perfreport: ui.New: %v\n", err)
+				os.Exit(1)
+			}
+		},
+		func(v any) { v.(*binfile.File).Close() },
+	)
+	rows = append(rows, row{"TUI startup cold-model (ui.New)", tui})
 
 	// Per-view interactive render cost (a full 160×48 frame, decode completed).
-	for _, v := range ui.RenderViewStats(f, 160, 48, *runs) {
-		rows = append(rows, row{"TUI view: " + v.View, stat{dur: v.Dur, alloc: v.Alloc}})
+	for _, v := range ui.RenderViewStats(loaded, 160, 48, *runs) {
+		rows = append(rows, row{"TUI view warm-cache: " + v.View, stat{dur: v.Dur, alloc: v.Alloc}})
 	}
 
 	peak := peakRSS()
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Performance (sample: %s, %s)\n\n", path, humanBytes(uint64(info.Size())))
-	fmt.Fprintf(&b, "Best of %d runs. Alloc is bytes allocated to do the stage; retained-after-load heap is %s.\n\n",
+	fmt.Fprintf(&b, "Best of %d runs. CLI views use a fresh prepared File per run (open/demangle setup excluded); TUI views are warm-cache repeated renders. Alloc is bytes allocated to do the stage; retained-after-load heap is %s.\n\n",
 		*runs, humanBytes(held.HeapAlloc))
 	b.WriteString("| stage | time | alloc |\n| --- | ---: | ---: |\n")
 	for _, r := range rows {
@@ -156,6 +163,9 @@ type stat struct {
 // scheduler/GC noise) and separately records the bytes it allocates on one clean
 // run.
 func measure(runs int, fn func()) stat {
+	if runs < 1 {
+		runs = 1
+	}
 	best := time.Duration(1<<63 - 1)
 	for range runs {
 		t := time.Now()
@@ -170,6 +180,65 @@ func measure(runs int, fn func()) stat {
 	fn()
 	runtime.ReadMemStats(&m1)
 	return stat{dur: best, alloc: m1.TotalAlloc - m0.TotalAlloc}
+}
+
+func measurePrepared(runs int, setup func() any, fn func(any), cleanup func(any)) stat {
+	if runs < 1 {
+		runs = 1
+	}
+	best := time.Duration(1<<63 - 1)
+	for range runs {
+		v := setup()
+		t := time.Now()
+		fn(v)
+		if d := time.Since(t); d < best {
+			best = d
+		}
+		cleanup(v)
+	}
+	v := setup()
+	var m0, m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m0)
+	fn(v)
+	runtime.ReadMemStats(&m1)
+	cleanup(v)
+	return stat{dur: best, alloc: m1.TotalAlloc - m0.TotalAlloc}
+}
+
+func mustOpen(path string, opts ...binfile.Option) *binfile.File {
+	f, err := binfile.Open(path, opts...)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "perfreport: open %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	return f
+}
+
+func mustOpenForView(path, view string) *binfile.File {
+	var opts []binfile.Option
+	if dump.ViewNeedsLayoutOnly(view) {
+		opts = append(opts, binfile.WithLayoutOnly())
+	}
+	f := mustOpen(path, opts...)
+	if dump.ViewNeedsDemangle(view) {
+		f.ApplyDemangled(f.ComputeDemangled())
+	}
+	return f
+}
+
+func runView(f *binfile.File, view string) {
+	if streamed, err := dump.StreamView(io.Discard, f, view); streamed {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", view, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if _, err := dump.View(f, view); err != nil {
+		fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", view, err)
+		os.Exit(1)
+	}
 }
 
 // peakRSS returns the process's peak resident set size. On Linux it reads VmHWM

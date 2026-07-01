@@ -57,7 +57,7 @@ func (m *Model) cycleLibsMode() string {
 // section) and the text filter (matching symbol, type or section).
 func (m *Model) recomputeRelocs() {
 	rels := m.file.Relocations()
-	needle := strings.ToLower(m.libsFilter.Value())
+	needle := strings.ToLower(m.relocFilter.Value())
 	m.relocFiltered = m.relocFiltered[:0]
 	for i := range rels {
 		if m.relocTypeOn && rels[i].Type != m.relocType {
@@ -178,12 +178,12 @@ func (m *Model) updateRelocs(key string) (tea.Model, tea.Cmd) {
 			m.setStatus("reloc section filter: all", false)
 		}
 	case "/":
-		m.libsFilter.Focus()
+		m.relocFilter.Focus()
 	case "esc":
-		dirty := m.libsFilter.Value() != "" || m.libsFilter.Focused() || m.relocTypeOn || m.relocSecOn
+		dirty := m.relocFilter.Value() != "" || m.relocFilter.Focused() || m.relocTypeOn || m.relocSecOn
 		if dirty {
-			m.libsFilter.SetValue("")
-			m.libsFilter.Blur()
+			m.relocFilter.SetValue("")
+			m.relocFilter.Blur()
 			m.relocTypeOn, m.relocSecOn = false, false
 			m.relocCur, m.relocTop = 0, 0
 			m.recomputeRelocs()
@@ -233,8 +233,8 @@ func (m *Model) renderRelocs() string {
 	addrW := m.file.AddrHexWidth()
 
 	var filterRow string
-	if m.libsFilter.Focused() {
-		filterRow = m.libsFilter.View()
+	if m.relocFilter.Focused() {
+		filterRow = m.relocFilter.View()
 	} else {
 		tf, sf := "all", "all"
 		if m.relocTypeOn {
@@ -245,7 +245,7 @@ func (m *Model) renderRelocs() string {
 		}
 		filterRow = m.theme.footerStyle.Render(fmt.Sprintf(
 			"/ %s   relocations (%d / %d)   s: sort:%s   %s type:%s   %s sec:%s",
-			m.libsFilter.Value(), len(m.relocFiltered), len(rels), m.relocSort.String(),
+			m.relocFilter.Value(), len(m.relocFiltered), len(rels), m.relocSort.String(),
 			ctrlKeys("t"), tf, ctrlKeys("s"), sf))
 	}
 	desc := m.relocSortDesc

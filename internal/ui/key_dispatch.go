@@ -426,23 +426,7 @@ func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) 
 	// A focused filter input captures typing keys (esc/enter blur it); navigation
 	// keys fall through so they still drive the list. Shared across the three
 	// filterable views via filterCapture.
-	switch m.mode {
-	case modeSymbols:
-		return filterCapture(&m.symbolsFilter, key, msg, m.recomputeSymbols)
-	case modeSections:
-		return filterCapture(&m.sectionsFilter, key, msg, m.recomputeSections)
-	case modeStrings:
-		return filterCapture(&m.stringsFilter, key, msg, m.recomputeStrings)
-	case modeLibs:
-		return filterCapture(&m.libsFilter, key, msg, m.buildLibRows)
-	case modeRelocs:
-		return filterCapture(&m.relocFilter, key, msg, m.recomputeRelocs)
-	case modeSources:
-		if m.srcFile == "" {
-			return filterCapture(&m.sourcesFilter, key, msg, m.recomputeSourceFiles)
-		}
-	}
-	return nil, false
+	return m.current().captureFilter(key, msg)
 }
 
 func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
@@ -591,27 +575,5 @@ func (m *Model) normalizeNavKey(key string) string {
 }
 
 func (m *Model) dispatchViewKey(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	switch m.mode {
-	case modeSections:
-		return m.updateSections(key)
-	case modeSymbols:
-		return m.updateSymbols(key)
-	case modeDisasm:
-		return m.updateDisasm(key)
-	case modeHex:
-		return m.updateHex(key)
-	case modeRaw:
-		return m.updateRaw(key)
-	case modeStrings:
-		return m.updateStrings(key)
-	case modeSources:
-		return m.updateSources(key)
-	case modeLibs:
-		return m.updateLibs(key)
-	case modeRelocs:
-		return m.updateRelocs(key)
-	case modeInfo:
-		return m.updateInfo(msg, key)
-	}
-	return m, nil
+	return m.current().handleKey(msg, key)
 }

@@ -5,7 +5,6 @@ package ui
 // own row renderer and strips styling so the clipboard gets clean text.
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -29,57 +28,13 @@ func (m *Model) copyCurrentLine() bool {
 
 // currentLineText returns the plain text of the current row in the active view.
 func (m *Model) currentLineText() (string, bool) {
-	addrW := m.file.AddrHexWidth()
-	clean := func(s string) string {
-		return strings.TrimSpace(collapseSpaces(ansi.Strip(s)))
-	}
-	switch m.mode {
-	case modeSections:
-		if m.sectionsCur < 0 || m.sectionsCur >= len(m.sectionsFiltered) {
-			return "", true
-		}
-		return clean(m.sectionRow(m.sectionsCur, addrW)), true
-	case modeSymbols:
-		if m.symbolsCur < 0 || m.symbolsCur >= len(m.symbolsRows) {
-			return "", true
-		}
-		return clean(strings.Join(m.symbolRows(m.symbolsCur, addrW), " ")), true
-	case modeStrings:
-		m.ensureStrings()
-		if m.stringsCur < 0 || m.stringsCur >= len(m.stringsFiltered) {
-			return "", true
-		}
-		return clean(m.stringRow(m.stringsCur, addrW)), true
-	case modeLibs:
-		if m.libsCur < 0 || m.libsCur >= len(m.libsRows) {
-			return "", true
-		}
-		return clean(m.libRow(m.libsCur, false)), true
-	case modeSources:
-		if m.srcFile != "" {
-			return m.srcFile, true // open file: copy its path
-		}
-		if f, ok := m.sourceFileAt(m.sourcesCur); ok {
-			return f, true
-		}
-		if m.sourcesCur >= 0 && m.sourcesCur < len(m.sourcesRows) {
-			return m.sourcesRows[m.sourcesCur].node.label, true
-		}
-		return "", true
-	case modeDisasm:
-		if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
-			return "", true
-		}
-		in := m.disasmInst[m.disasmCur]
-		return clean(fmt.Sprintf("0x%0*x  %s  %s", addrW, in.Addr, ansi.Strip(bytesHex(in.Bytes, len(in.Bytes))), in.Text)), true
-	case modeHex:
-		m.ensureHex()
-		return clean(m.byteRowText(modeHex, m.hexImg, m.hexCur, m.hexImg.AddrAt)), true
-	case modeRaw:
-		m.ensureRaw()
-		return clean(m.byteRowText(modeRaw, rawBytes(m.rawData), m.rawCur, identityAddr)), true
-	}
-	return "", false
+	return m.current().lineText()
+}
+
+// cleanCopyLine strips styling and squeezes column padding so a table row copies
+// as a single readable, space-separated line.
+func cleanCopyLine(s string) string {
+	return strings.TrimSpace(collapseSpaces(ansi.Strip(s)))
 }
 
 // byteRowText renders the hex/raw row containing the cursor and strips styling.

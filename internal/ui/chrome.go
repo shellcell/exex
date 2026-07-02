@@ -24,30 +24,7 @@ func (m *Model) View() tea.View {
 		return m.screenView(m.viewCache)
 	}
 	parts := []string{m.renderTabs()}
-	body := ""
-	switch m.mode {
-	case modeInfo:
-		body = m.renderInfo()
-	case modeSections:
-		body = m.renderSections()
-	case modeSymbols:
-		body = m.renderSymbols()
-	case modeDisasm:
-		body = m.renderDisasm()
-	case modeHex:
-		body = m.renderHex()
-	case modeRaw:
-		body = m.renderRaw()
-	case modeStrings:
-		body = m.renderStrings()
-	case modeSources:
-		body = m.renderSources()
-	case modeLibs:
-		body = m.renderLibs()
-	case modeRelocs:
-		body = m.renderRelocs()
-	}
-	body = m.theme.renderViewBackground(body, m.width)
+	body := m.theme.renderViewBackground(m.current().body(), m.width)
 	parts = append(parts, body, m.renderFooter())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	switch {
@@ -417,19 +394,7 @@ func (m *Model) gotoEmptyHint() string {
 }
 
 func (m *Model) renderSearchModal() string {
-	hint := "Search this view"
-	switch m.mode {
-	case modeDisasm:
-		hint = "Search instruction text / symbol"
-	case modeHex, modeRaw:
-		hint = "Search hex bytes (de ad be ef), \"text\", or 0x…"
-	case modeSources:
-		if m.srcSearchAll {
-			hint = "Search across all source files"
-		} else {
-			hint = "Search in this source file"
-		}
-	}
+	hint := m.current().searchHint()
 	// Switch strip (content row searchSwitchLine) — clickable; geometry shared
 	// with handleSearchPopupClick via searchSwitches(). Each switch is a dim name
 	// plus the current value in an accent pill.
@@ -565,45 +530,20 @@ func (m *Model) tabHitTest(x int) (mode, bool) {
 // before it can render. Shared by the keyboard dispatch and tab clicks. It may
 // return a Cmd (the background disasm decode).
 func (m *Model) switchMode(md mode) tea.Cmd {
-	switch md {
-	case modeDisasm:
+	// Disasm is special: it needs the disassembler and sets the mode before its
+	// (possibly background) decode. Every other view prepares its lazy state, then
+	// the mode flips.
+	if md == modeDisasm {
 		if m.dis == nil {
 			m.setStatus("no disassembler for this architecture", true)
 			return nil
 		}
 		m.setMode(modeDisasm)
-		if !m.disasmBuilt {
-			// Decode the initial window in the background; later jumps decode a
-			// fresh bounded span synchronously so targeted navigation lands
-			// immediately.
-			if !m.disasmDecoding {
-				m.disasmDecoding = true
-				m.disasmPendingAddr = m.disasmInitAddr
-				return m.decodeDisasmCmd(m.disasmInitAddr)
-			}
-			return nil
-		}
-		// Already decoded: land on the entry the first time in.
-		if !m.disasmPositioned && m.disasmInitAddr != 0 {
-			m.loadDisasmAt(m.disasmInitAddr)
-		}
-		return nil
-	case modeHex:
-		m.ensureHex()
-	case modeRaw:
-		m.ensureRaw()
-	case modeSymbols:
-		m.ensureSymbols()
-	case modeStrings:
-		m.ensureStrings()
-	case modeSources:
-		m.ensureSources()
-	case modeRelocs:
-		m.buildRelocFacets()
-		m.recomputeRelocs()
+		return disasmView{baseView{m}}.ensure()
 	}
+	cmd := m.viewFor(md).ensure()
 	m.setMode(md)
-	return nil
+	return cmd
 }
 
 // footerHint is one "key action" pair shown in the footer.
@@ -619,63 +559,7 @@ var globalHints = []footerHint{
 // globals are appended by renderFooter). Kept curated — the complete list is in
 // the '?' overlay.
 func (m *Model) viewHints() []footerHint {
-	switch m.mode {
-	case modeInfo:
-		if m.isArchive() && m.infoMembers {
-			return []footerHint{{"↑/↓", "select"}, {"↵/t", "open member"}, {"esc", "back"}}
-		}
-		hints := []footerHint{{"↵", "disasm entry"}}
-		switch {
-		case m.isArchive():
-			hints = append(hints, footerHint{"t", "members"})
-		case len(m.file.FatArches) > 1:
-			hints = append(hints, footerHint{"t", "switch arch"})
-		}
-		return hints
-	case modeSections:
-		return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {ctrlKeys("t", "f"), "type/flags"}, {"⇧H", "header"}}
-	case modeSymbols:
-		if m.symbolTreeActive() {
-			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "flat"}}
-		}
-		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {ctrlKeys("t", "s", "b"), "type/scope/bind"}, {"⇧a/⇧s", "copy"}}
-	case modeDisasm:
-		dwarf := m.file.HasDWARF()
-		switch {
-		case m.searchRunning:
-			return []footerHint{{"esc", "cancel"}, {"[ ]", "sym"}, {"←/→", "history"}, {"/", "search"}}
-		case m.sourceFirst && m.srcFile != "":
-			// Source navigation leads: no disasm history, and [ ] steps mapped lines.
-			return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
-		case m.showSource && dwarf:
-			// Disasm-first with the source pane open.
-			return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"a", m.disasmAllHint()}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
-		default:
-			// Disasm-first, no pane. Offer tab to open the pane only when there is
-			// debug info to show.
-			hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"a", m.disasmAllHint()}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
-			if dwarf {
-				hints = append(hints, footerHint{"tab", "pane"})
-			}
-			return hints
-		}
-	case modeHex:
-		return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
-	case modeRaw:
-		return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
-	case modeStrings:
-		return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {ctrlKeys("s"), "section"}, {ctrlKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
-	case modeSources:
-		if m.sourcesTree {
-			return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {ctrlKeys("p"), "present"}, {"t", "flat"}}
-		}
-		return []footerHint{{"↵", "open"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {ctrlKeys("p"), "present"}, {"⇧s", "copy"}}
-	case modeLibs:
-		return []footerHint{{"↵", "imports"}, {"o", "open"}, {"r", "rev"}, {"t", "tree"}, {"/", "filter"}, {ctrlKeys("p"), "avail"}, {"⇧s", "copy"}}
-	case modeRelocs:
-		return []footerHint{{"↵", "go to patched addr"}, {"s/r", "sort/rev"}, {ctrlKeys("t", "s"), "type/section"}, {"/", "filter"}}
-	}
-	return nil
+	return m.current().hints()
 }
 
 func (m *Model) renderFooter() string {

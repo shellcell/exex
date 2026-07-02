@@ -98,19 +98,7 @@ func (m *Model) runSearchWithOrigin(forward, inclusive bool, fromCursor bool) te
 		m.setStatus("no search query", true)
 		return nil
 	}
-	switch m.mode {
-	case modeDisasm:
-		return m.runDisasmSearch(forward, inclusive, fromCursor)
-	case modeHex:
-		m.runHexSearch(forward, inclusive, fromCursor)
-	case modeRaw:
-		m.runRawSearch(forward, inclusive, fromCursor)
-	case modeSources:
-		m.runSourcesSearch(forward, inclusive)
-	default:
-		m.setStatus("search isn't available in this view", true)
-	}
-	return nil
+	return m.current().runSearch(forward, inclusive, fromCursor)
 }
 
 func (m *Model) runDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {

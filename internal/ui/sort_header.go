@@ -72,34 +72,11 @@ func sortDirectionLabel(desc bool) string {
 }
 
 func (m *Model) handleSortableHeaderClick(x, bodyRow int) bool {
-	switch m.mode {
-	case modeSections:
-		return bodyRow == 1 && m.clickSectionsHeader(x)
-	case modeSymbols:
-		return bodyRow == 1 && m.clickSymbolsHeader(x)
-	case modeStrings:
-		return bodyRow == 1 && m.clickStringsHeader(x)
-	case modeRelocs:
-		return bodyRow == 1 && m.clickRelocsHeader(x)
-	case modeLibs:
-		return bodyRow == m.libsTitleRow() && m.clickLibsHeader(x)
-	}
-	return false
+	return m.current().sortHeaderClick(x, bodyRow)
 }
 
 func (m *Model) isTableHeaderRow(bodyRow int) bool {
-	switch m.mode {
-	case modeSections, modeSymbols:
-		return bodyRow == 1
-	case modeStrings:
-		m.ensureStrings()
-		return len(m.stringsList) > 0 && bodyRow == 1
-	case modeRelocs:
-		return bodyRow == 1
-	case modeLibs:
-		return bodyRow == m.libsTitleRow()
-	}
-	return false
+	return m.current().headerRow(bodyRow)
 }
 
 func (m *Model) clickSectionsHeader(x int) bool {

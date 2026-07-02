@@ -822,19 +822,15 @@ func (it *SymbolRangeIter) Next() (Symbol, bool) {
 	if it.f == nil {
 		return Symbol{}, false
 	}
-	for ; it.i < len(it.f.symByAddr); it.i++ {
-		s := it.f.Symbols[it.f.symByAddr[it.i]]
-		if s.Addr >= it.to {
-			return Symbol{}, false
-		}
-		if s.Size == 0 {
-			it.i++
-			return s, true
-		}
-		it.i++
-		return s, true
+	if it.i >= len(it.f.symByAddr) {
+		return Symbol{}, false
 	}
-	return Symbol{}, false
+	s := it.f.Symbols[it.f.symByAddr[it.i]]
+	if s.Addr >= it.to {
+		return Symbol{}, false
+	}
+	it.i++
+	return s, true
 }
 
 func (f *File) symbolRangeStart(from uint64) int {

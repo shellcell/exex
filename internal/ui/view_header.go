@@ -8,6 +8,8 @@ package ui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // headerFieldKeyWidth is the aligned width of the field-name column.
@@ -32,14 +34,14 @@ func (m *Model) renderHeaderModal() string {
 	// Build every row, then window vertically to the terminal height.
 	rows := make([]string, 0, len(fields))
 	for _, f := range fields {
-		row := " " + m.theme.headerKey.Render(padVisual(f.Name, headerFieldKeyWidth)) + " " +
+		row := " " + m.theme.headerKey.Render(layout.PadVisual(f.Name, headerFieldKeyWidth)) + " " +
 			m.theme.tableRowStyle.Render(f.Value)
-		rows = append(rows, fitANSIWidth(row, rowW))
+		rows = append(rows, layout.FitANSIWidth(row, rowW))
 	}
 	maxRows := max(1, m.height-8)
 	hint := "↑/↓ scroll · Esc/⇧H close"
 	if len(rows) > maxRows {
-		m.headerScroll = clamp(m.headerScroll, 0, len(rows)-maxRows)
+		m.headerScroll = layout.Clamp(m.headerScroll, 0, len(rows)-maxRows)
 		hint = fmt.Sprintf("↑/↓ scroll · %d–%d of %d · Esc closes",
 			m.headerScroll+1, m.headerScroll+maxRows, len(rows))
 		rows = rows[m.headerScroll : m.headerScroll+maxRows]

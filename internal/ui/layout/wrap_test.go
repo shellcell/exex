@@ -1,4 +1,4 @@
-package ui
+package layout
 
 import (
 	"strings"
@@ -13,7 +13,7 @@ import (
 func TestWrappedRowsKeepColour(t *testing.T) {
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
 	line := "head " + style.Render("a-long-coloured-token-that-must-wrap-across-several-lines-xyz")
-	rows := renderLineRowsIndented(line, 24, true, 6)
+	rows := RenderLineRowsIndented(line, 24, true, 6)
 	if len(rows) < 2 {
 		t.Fatalf("expected the line to wrap, got %d row(s)", len(rows))
 	}
@@ -29,13 +29,13 @@ func TestWrappedRowsKeepColour(t *testing.T) {
 }
 
 func TestLastOpenSGR(t *testing.T) {
-	if got := lastOpenSGR("", "\x1b[38;5;51mhi"); got != "\x1b[38;5;51m" {
+	if got := LastOpenSGR("", "\x1b[38;5;51mhi"); got != "\x1b[38;5;51m" {
 		t.Fatalf("open after colour = %q", got)
 	}
-	if got := lastOpenSGR("\x1b[38;5;51m", "done\x1b[0m"); got != "" {
+	if got := LastOpenSGR("\x1b[38;5;51m", "done\x1b[0m"); got != "" {
 		t.Fatalf("reset should clear open, got %q", got)
 	}
-	if got := lastOpenSGR("\x1b[1m", "plain text no codes"); got != "\x1b[1m" {
+	if got := LastOpenSGR("\x1b[1m", "plain text no codes"); got != "\x1b[1m" {
 		t.Fatalf("carry should persist with no SGR in row, got %q", got)
 	}
 }

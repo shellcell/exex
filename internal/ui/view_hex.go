@@ -21,6 +21,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // bytesPerHexRow is the default; the Hex/Raw views honour the "bytes per row"
@@ -623,7 +624,7 @@ func (m *Model) renderHex() string {
 func (m *Model) renderRaw() string {
 	m.ensureRaw()
 	if len(m.rawData) == 0 {
-		return padBody("empty file\n", m.width, m.bodyHeight())
+		return layout.PadBody("empty file\n", m.width, m.bodyHeight())
 	}
 	banner := fmt.Sprintf(" raw file · %d bytes · file offsets", len(m.rawData))
 	if sec := m.sectionAtOffset(uint64(m.rawCur)); sec != nil {
@@ -671,7 +672,7 @@ func (m *Model) renderHexDump(md mode, data byteSource, cur int, topPtr *int, ad
 	rows := []string{m.theme.stickyTitleLine(banner, m.width)}
 	for off := top; off < data.Len() && len(rows) < bodyH; {
 		if sec := m.hexSectionStartName(md, off); sec != "" {
-			appendRenderedRows(
+			layout.AppendRenderedRows(
 				&rows,
 				m.theme.sectionStyle.Render(lipgloss.PlaceHorizontal(
 					addrW+73,
@@ -683,7 +684,7 @@ func (m *Model) renderHexDump(md mode, data byteSource, cur int, topPtr *int, ad
 			)
 		}
 		row := m.hexRowSpan(md, data, off, addrAt)
-		if !appendRenderedRowsIndented(
+		if !layout.AppendRenderedRowsIndented(
 			&rows,
 			m.renderHexRow(md, data, cur, row, addrW, addrAt),
 			m.width, m.wrap, rowIndent, bodyH,
@@ -692,7 +693,7 @@ func (m *Model) renderHexDump(md mode, data byteSource, cur int, topPtr *int, ad
 		}
 		off = row.end
 	}
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 type hexRowSpan struct {

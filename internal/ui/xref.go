@@ -22,6 +22,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // xrefMaxHits caps how many references are collected (the modal scrolls).
@@ -483,19 +484,19 @@ func (m *Model) renderXrefModal() string {
 	addrW := m.file.AddrHexWidth()
 	rowW := modalListWidth(m.width)
 	rows := m.xrefShown
-	visible := clamp(m.height-10, 3, 40) // 2 extra header lines (filter + legend)
+	visible := layout.Clamp(m.height-10, 3, 40) // 2 extra header lines (filter + legend)
 
 	// Column budget: " 0x<addr>  <sym>  <text>". The instruction text in an xref
 	// is short (call/lea/branch), so cap it and give the rest to the symbol.
 	avail := rowW - len(" ") - (2 + addrW) - len("  ") - len("  ")
-	textW := clamp(avail/3, 12, 40)
+	textW := layout.Clamp(avail/3, 12, 40)
 	symW := max(8, avail-textW)
 
 	// Title + target name (a possibly long demangled symbol), then a filter box and
 	// a colour/sort legend before the rows.
 	sb.WriteString(m.theme.modalTitle("Cross-references"))
 	sb.WriteString("\n")
-	targetRows := renderLineRowsIndented(m.theme.symbolNameStyle.Render(m.xrefLabel), rowW, true, 0)
+	targetRows := layout.RenderLineRowsIndented(m.theme.symbolNameStyle.Render(m.xrefLabel), rowW, true, 0)
 	for _, r := range targetRows {
 		sb.WriteString(r)
 		sb.WriteString("\n")
@@ -504,8 +505,8 @@ func (m *Model) renderXrefModal() string {
 	if m.xrefTotal != len(rows) {
 		countStr = fmt.Sprintf("  %d of %d", len(rows), m.xrefTotal)
 	}
-	m.xrefFilter.SetWidth(clamp(rowW-len(countStr)-4, 12, 60))
-	sb.WriteString(fitANSIWidth(m.xrefFilter.View()+m.theme.modalHint(countStr), rowW))
+	m.xrefFilter.SetWidth(layout.Clamp(rowW-len(countStr)-4, 12, 60))
+	sb.WriteString(layout.FitANSIWidth(m.xrefFilter.View()+m.theme.modalHint(countStr), rowW))
 	sb.WriteString("\n")
 	dir := "↑"
 	if m.xrefSortDesc {
@@ -514,10 +515,10 @@ func (m *Model) renderXrefModal() string {
 	legend := m.theme.infoStyle.Render("call") + m.theme.modalHint(" · ") +
 		m.theme.warnStyle.Render("jump") + m.theme.modalHint(" · ") +
 		m.theme.headerKey.Render("load") + m.theme.modalHint("    sort: "+m.xrefSort.String()+dir)
-	sb.WriteString(fitANSIWidth(legend, rowW))
+	sb.WriteString(layout.FitANSIWidth(legend, rowW))
 	sb.WriteString("\n\n")
 	m.modalListRow = 1 + len(targetRows) + 2 + 1 // title + target line(s) + filter + legend + blank
-	top := visualTop(m.xrefSel, m.xrefTop, len(rows), visible, func(int) int { return 1 })
+	top := layout.VisualTop(m.xrefSel, m.xrefTop, len(rows), visible, func(int) int { return 1 })
 	m.xrefTop = top
 	end := min(top+visible, len(rows))
 	for i := top; i < end; i++ {
@@ -528,9 +529,9 @@ func (m *Model) renderXrefModal() string {
 		}
 		line := fmt.Sprintf(" 0x%0*x  %s  %s",
 			addrW, h.addr,
-			padVisual(truncateMiddle(loc, symW), symW),
-			m.xrefKindStyle(h.text).Render(truncateMiddle(h.text, textW)))
-		line = padRight(line, rowW)
+			layout.PadVisual(layout.TruncateMiddle(loc, symW), symW),
+			m.xrefKindStyle(h.text).Render(layout.TruncateMiddle(h.text, textW)))
+		line = layout.PadRight(line, rowW)
 		if i == m.xrefSel {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
@@ -545,6 +546,6 @@ func (m *Model) renderXrefModal() string {
 		footer = fmt.Sprintf("type to filter · ↵ jump · Tab done · Esc clear   (%d/%d)",
 			min(m.xrefSel+1, len(rows)), len(rows))
 	}
-	sb.WriteString(m.theme.modalHint(fitANSIWidth(footer, rowW)))
+	sb.WriteString(m.theme.modalHint(layout.FitANSIWidth(footer, rowW)))
 	return m.theme.modalStyle.Render(sb.String())
 }

@@ -103,6 +103,12 @@ type rowCacheKey struct {
 // (nil map) is ready to use.
 type rowMemo[K comparable, V any] map[K]V
 
+// rowMemoCap bounds each memo so a long scroll through a huge table (millions of
+// symbol/string rows) can't grow the cache for the whole session. When full the
+// memo is flushed wholesale — cheaper than per-entry eviction, and the visible
+// window repopulates in one render pass.
+const rowMemoCap = 4096
+
 // get returns the cached value for key, building and caching it on a miss.
 func (m *rowMemo[K, V]) get(key K, build func() V) V {
 	if *m == nil {
@@ -110,13 +116,13 @@ func (m *rowMemo[K, V]) get(key K, build func() V) V {
 	} else if v, ok := (*m)[key]; ok {
 		return v
 	}
+	if len(*m) >= rowMemoCap {
+		clear(*m)
+	}
 	v := build()
 	(*m)[key] = v
 	return v
 }
-
-// clear drops all cached entries (next get rebuilds).
-func (m *rowMemo[K, V]) clear() { *m = nil }
 
 // symbolsState stores list/filter state for the Symbols view.
 type symbolsState struct {
@@ -211,6 +217,7 @@ func (m *Model) clearColorCaches() {
 	m.clearAllViewCaches()
 	m.disasmAsmCache = nil
 	m.disasmTokenStyles = nil
+	m.disasmStyledMode = 0
 	m.sourceAsmRowCache = nil
 	m.relocRowCache = nil
 	m.infoBody = "" // restyle the Info page on the next render
@@ -245,6 +252,10 @@ type disasmState struct {
 	// disasmTokenStyles caches Chroma token-type → style (default build only); it
 	// is keyed by int(chroma.TokenType) so the model stays chroma-free for `lite`.
 	disasmTokenStyles map[int]lipgloss.Style
+	// disasmStyledMode caches whether the current theme has a bundled Chroma
+	// style (default build only): 0 = unknown, 1 = yes, -1 = no. It keeps the
+	// per-instruction render from re-resolving the theme name on every row.
+	disasmStyledMode int8
 	// disasmHeightCache memoizes per-instruction rendered height (it otherwise
 	// re-renders each instruction to count rows, which the scroll math calls
 	// dozens of times per wheel tick). Reset whenever disasmInst is replaced.

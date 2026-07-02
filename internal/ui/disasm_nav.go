@@ -8,6 +8,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // historyCap caps the depth of the back/forward stack in the disasm view.
@@ -218,7 +219,7 @@ func (m *Model) jumpDisasmBoundary(forward bool) {
 func (m *Model) scrollDisasmToBottom() {
 	w := m.disasmRenderWidth()
 	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
-	m.disasmTop = maxViewportTop(len(m.disasmInst), m.disasmViewportHeight(), rowHeight)
+	m.disasmTop = layout.MaxViewportTop(len(m.disasmInst), m.disasmViewportHeight(), rowHeight)
 }
 
 // snapshotCursorToHistory updates the current history entry to the precise

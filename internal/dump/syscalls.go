@@ -787,7 +787,7 @@ func chunkHasSyscallCandidate(code []byte, a disasm.Arch, done <-chan struct{}) 
 		// syscall (0f 05), sysenter (0f 34), int 0x80/0x2e, gs-indirect call such
 		// as the i386 vsyscall trampoline (65 ff …).
 		for _, p := range [][]byte{{0x0f, 0x05}, {0x0f, 0x34}, {0xcd, 0x80}, {0xcd, 0x2e}, {0x65, 0xff}} {
-			if bytes.Index(code, p) >= 0 {
+			if bytes.Contains(code, p) {
 				return true
 			}
 		}

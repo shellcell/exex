@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // sectionSort is the display order of the (filtered) section/segment list.
@@ -437,11 +438,11 @@ func (m *Model) renderSections() string {
 		if i == m.sectionsCur {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
-		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, 6, bodyH) {
+		if !layout.AppendRenderedRowsIndented(&rows, line, m.width, m.wrap, 6, bodyH) {
 			break
 		}
 	}
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 func (m *Model) sectionRowHeight(i int) int {
@@ -450,7 +451,7 @@ func (m *Model) sectionRowHeight(i int) int {
 	}
 	addrW := m.file.AddrHexWidth()
 	return m.sectionHeightCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() int {
-		return len(renderLineRowsIndented(m.sectionRow(i, addrW), m.width, m.wrap, 6))
+		return len(layout.RenderLineRowsIndented(m.sectionRow(i, addrW), m.width, m.wrap, 6))
 	})
 }
 
@@ -486,7 +487,7 @@ func (m *Model) segmentsHavePhys() bool {
 // physCell renders a load/physical address column, or a dim "-" when unset.
 func (m *Model) physCell(phys uint64, addrW int) string {
 	if phys == 0 {
-		return m.theme.srcShadowStyle.Render(padVisual("-", 2+addrW))
+		return m.theme.srcShadowStyle.Render(layout.PadVisual("-", 2+addrW))
 	}
 	return m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, phys))
 }
@@ -497,8 +498,8 @@ func (m *Model) sectionRowText(i, addrW int) string {
 	name := s.Name
 	typeName := s.TypeName
 	if !m.wrap {
-		name = truncateMiddle(name, 22)
-		typeName = truncateMiddle(typeName, 14)
+		name = layout.TruncateMiddle(name, 22)
+		typeName = layout.TruncateMiddle(typeName, 14)
 	}
 	rowStyle := m.theme.styleForSection(&s)
 	lma := ""
@@ -507,8 +508,8 @@ func (m *Model) sectionRowText(i, addrW int) string {
 	}
 	return fmt.Sprintf(" %s  %s %s %s%s %s  %s",
 		m.theme.addrStyle.Render(fmt.Sprintf("%3d", idx)),
-		rowStyle.Render(padVisual(name, 22)),
-		rowStyle.Render(padVisual(typeName, 14)),
+		rowStyle.Render(layout.PadVisual(name, 22)),
+		rowStyle.Render(layout.PadVisual(typeName, 14)),
 		m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)),
 		lma,
 		rowStyle.Render(fmt.Sprintf("%-12d", s.Size)),
@@ -523,7 +524,7 @@ func (m *Model) segmentRow(i, addrW int) string {
 	s := m.segments[idx]
 	name := s.Name
 	if !m.wrap {
-		name = truncateMiddle(name, 16)
+		name = layout.TruncateMiddle(name, 16)
 	}
 	rowStyle := m.theme.secRodataStyle
 	switch {
@@ -542,8 +543,8 @@ func (m *Model) segmentRow(i, addrW int) string {
 	}
 	return fmt.Sprintf(" %s  %s %s %s%s %s %s  %s",
 		m.theme.addrStyle.Render(fmt.Sprintf("%3d", idx)),
-		rowStyle.Render(padVisual(name, 16)),
-		rowStyle.Render(padVisual(s.Perms(), 5)),
+		rowStyle.Render(layout.PadVisual(name, 16)),
+		rowStyle.Render(layout.PadVisual(s.Perms(), 5)),
 		m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, s.Addr)),
 		paddr,
 		rowStyle.Render(fmt.Sprintf("%-12d", s.Size)),

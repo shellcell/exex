@@ -9,6 +9,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/theme"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 func TestPresetColorsLookup(t *testing.T) {
@@ -226,7 +227,7 @@ func TestModalOverlayUsesThemedForegroundAndBackground(t *testing.T) {
 			TableRowFG: "#040506",
 		}}),
 	}
-	out := m.overlayCenter(padBody("", m.width, m.height), m.theme.modalStyle.Render("popup text"))
+	out := m.overlayCenter(layout.PadBody("", m.width, m.height), m.theme.modalStyle.Render("popup text"))
 
 	bgPrefix := stylePrefix(lipgloss.NewStyle().Background(lipgloss.Color("#010203")))
 	if !strings.Contains(out, bgPrefix) {

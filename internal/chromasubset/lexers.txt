@@ -17,7 +17,6 @@ cmake.xml
 cobol.xml
 clojure.xml
 crystal.xml
-css.xml
 cython.xml
 d.xml
 dart.xml
@@ -34,7 +33,6 @@ groovy.xml
 hare.xml
 haskell.xml
 hlsl.xml
-html.xml
 idris.xml
 ini.xml
 java.xml
@@ -66,7 +64,6 @@ reasonml.xml
 ruby.xml
 rust.xml
 scala.xml
-scss.xml
 sql.xml
 standard_ml.xml
 swift.xml

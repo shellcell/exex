@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // treeNodeRow renders a collapsible group row: indent + arrow + coloured label +
@@ -31,7 +33,7 @@ func (m *Model) treeNodeRow(depth int, label string, count int, collapsed, selec
 	if avail < 1 {
 		avail = 1
 	}
-	return leftPad + indent + style.Render(arrow+truncateMiddle(label, avail)) + m.theme.srcShadowStyle.Render(cnt)
+	return leftPad + indent + style.Render(arrow+layout.TruncateMiddle(label, avail)) + m.theme.srcShadowStyle.Render(cnt)
 }
 
 // A small, reusable collapsible "name tree" shared by the list views (symbols,

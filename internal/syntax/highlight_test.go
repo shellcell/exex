@@ -43,7 +43,7 @@ func TestHighlightLines(t *testing.T) {
 // register that extension at the same priority, so a plain lexers.Match can pick
 // R and highlight assembly as the R language. lexerFor must force GAS.
 func TestAssemblySourceUsesGAS(t *testing.T) {
-	src := []string{"	.globl main", "main:", "	ret"}
+	src := "	.globl main\nmain:\n	ret"
 	for _, name := range []string{"foo.s", "foo.S", "crt0.S"} {
 		l := lexerFor(name, src)
 		if l == nil {
@@ -56,7 +56,7 @@ func TestAssemblySourceUsesGAS(t *testing.T) {
 }
 
 func TestGoSourceUsesCuratedLexer(t *testing.T) {
-	l := lexerFor("main.go", []string{"package main", "func main() {}"})
+	l := lexerFor("main.go", "package main\nfunc main() {}")
 	if l == nil {
 		t.Fatal("main.go: no lexer")
 	}
@@ -67,7 +67,7 @@ func TestGoSourceUsesCuratedLexer(t *testing.T) {
 
 func TestUnsupportedLanguageFallsBackToMinimal(t *testing.T) {
 	src := []string{`defmodule Demo do`}
-	if l := lexerFor("main.exs", src); l != nil {
+	if l := lexerFor("main.exs", strings.Join(src, "\n")); l != nil {
 		t.Fatalf("main.exs: lexer = %q, want nil", l.Config().Name)
 	}
 	hl := HighlightLines("main.exs", src, defaultTheme)

@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // clickSymbolFacet toggles the facet button at screen column x on the status row,
@@ -950,7 +951,7 @@ func (m *Model) renderSymbols() string {
 			break
 		}
 	}
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 func (m *Model) symbolRowHeight(i int) int {
@@ -999,7 +1000,7 @@ func (m *Model) symbolRowsText(i, addrW int) []string {
 				parts[k] = rowStyle.Render(parts[k])
 			}
 		} else {
-			parts = []string{rowStyle.Render(truncateMiddle(label, nameW))}
+			parts = []string{rowStyle.Render(layout.TruncateMiddle(label, nameW))}
 		}
 		rows = make([]string, 0, len(parts))
 		for j, part := range parts {

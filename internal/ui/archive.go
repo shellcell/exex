@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // archiveState holds the archive's members and the Info view's members-list mode.
@@ -117,13 +118,13 @@ func (m *Model) renderMembersList() string {
 	rowW := max(1, m.width-2)
 
 	hdr := fmt.Sprintf("  %s — %d members", filepath.Base(m.archivePath), len(mems))
-	rows := []string{m.tableHeader(fitANSIWidth(hdr, rowW)), ""}
+	rows := []string{m.tableHeader(layout.FitANSIWidth(hdr, rowW)), ""}
 
 	visible := max(1, bodyH-2) // header + blank
 	top := m.visualTopForView(m.memberSel, m.memberTop, len(mems), visible, oneRow)
 	m.memberTop = top
 	end := min(top+visible, len(mems))
-	nameW := clamp(rowW-26, 16, 90)
+	nameW := layout.Clamp(rowW-26, 16, 90)
 	for i := top; i < end; i++ {
 		mem := mems[i]
 		mark := " "
@@ -131,14 +132,14 @@ func (m *Model) renderMembersList() string {
 			mark = "●"
 		}
 		line := fmt.Sprintf("%s %s  %9d  %-6s",
-			mark, padVisual(truncateMiddle(mem.Name, nameW), nameW), len(mem.Data), memberFormatTag(mem.Data))
-		line = padVisual(line, rowW)
+			mark, layout.PadVisual(layout.TruncateMiddle(mem.Name, nameW), nameW), len(mem.Data), memberFormatTag(mem.Data))
+		line = layout.PadVisual(line, rowW)
 		if i == m.memberSel {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
 		rows = append(rows, line)
 	}
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 // memberFormatTag names a member's container format from its magic bytes — cheap

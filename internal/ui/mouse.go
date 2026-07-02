@@ -10,6 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // doubleClickWindow is how close two clicks must be (in time, on the same row)
@@ -143,7 +145,7 @@ func (m *Model) modalScrollSel(d int) {
 	if wrap {
 		*sel = (*sel + d%n + n) % n
 	} else {
-		*sel = clamp(*sel+d, 0, n-1)
+		*sel = layout.Clamp(*sel+d, 0, n-1)
 	}
 }
 
@@ -347,7 +349,7 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 
 func (m *Model) captureViewportTop() {
 	if g, ok := m.listGeometryFor(); ok {
-		*g.top = viewportTop(g.renderedTop, g.n, g.visible(m.bodyHeight()), g.rowHeight)
+		*g.top = layout.ViewportTop(g.renderedTop, g.n, g.visible(m.bodyHeight()), g.rowHeight)
 		return
 	}
 	switch m.mode {
@@ -369,7 +371,7 @@ func (m *Model) captureDisasmViewportTop() {
 			return
 		}
 		contentH := max(1, m.bodyHeight()-1)
-		top := viewportTop(m.renderedSrcTop, len(src), contentH, m.sourceRowHeight(m.sourcePaneWidth()))
+		top := layout.ViewportTop(m.renderedSrcTop, len(src), contentH, m.sourceRowHeight(m.sourcePaneWidth()))
 		m.srcTop = top + 1
 		return
 	}
@@ -377,7 +379,7 @@ func (m *Model) captureDisasmViewportTop() {
 		return
 	}
 	visible := m.disasmViewportHeight()
-	m.disasmTop = viewportTop(m.renderedDisasmTop, len(m.disasmInst), visible, m.disasmRowHeight(m.disasmRenderWidth()))
+	m.disasmTop = layout.ViewportTop(m.renderedDisasmTop, len(m.disasmInst), visible, m.disasmRowHeight(m.disasmRenderWidth()))
 }
 
 func (m *Model) scrollDisasmViewport(delta int) {
@@ -426,7 +428,7 @@ func (m *Model) loadDisasmWindowAboveForScroll(delta, visible int) bool {
 	}
 	w := m.disasmRenderWidth()
 	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
-	m.disasmTop = viewportTop(top, len(m.disasmInst), visible, rowHeight)
+	m.disasmTop = layout.ViewportTop(top, len(m.disasmInst), visible, rowHeight)
 	return true
 }
 
@@ -434,7 +436,7 @@ func scrollViewportTop(top, n, visible, delta int, rowHeight func(int) int) int 
 	if n <= 0 {
 		return 0
 	}
-	return viewportTop(top+delta, n, visible, rowHeight)
+	return layout.ViewportTop(top+delta, n, visible, rowHeight)
 }
 
 // scrollByteViewportTop scrolls a byte view's top by delta rows, stepping along
@@ -535,7 +537,7 @@ func (m *Model) handleClick(x, y int) bool {
 	// same way: find the rendered top, then the item at (bodyRow - headerRows).
 	if g, ok := m.listGeometryFor(); ok {
 		top := m.visualTopForView(*g.cur, *g.top, g.n, g.visible(m.bodyHeight()), g.rowHeight)
-		if idx, ok := visualItemAtRow(top, g.n, bodyRow-g.headerRows, g.rowHeight); ok {
+		if idx, ok := layout.VisualItemAtRow(top, g.n, bodyRow-g.headerRows, g.rowHeight); ok {
 			*g.cur = idx
 			// Clicking a tree group toggles it (collapse/expand the lines below).
 			switch {
@@ -600,7 +602,7 @@ func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
 	}
 	src := m.file.SourceLines(m.srcFile)
 	contentH := max(1, m.bodyHeight()-1)
-	idx, ok := visualItemAtRow(m.sourceTextTop(paneW, contentH), len(src), r, m.sourceRowHeight(paneW))
+	idx, ok := layout.VisualItemAtRow(m.sourceTextTop(paneW, contentH), len(src), r, m.sourceRowHeight(paneW))
 	return idx + 1, ok
 }
 
@@ -661,5 +663,5 @@ func (m *Model) instAtBodyRow(bodyRow int) (int, bool) {
 	visible := max(1, m.bodyHeight()-1)
 	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
 	top := m.visualTopForView(m.disasmCur, m.disasmTop, len(m.disasmInst), visible, rowHeight)
-	return visualItemAtRow(top, len(m.disasmInst), r, rowHeight)
+	return layout.VisualItemAtRow(top, len(m.disasmInst), r, rowHeight)
 }

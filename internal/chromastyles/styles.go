@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/chroma/v2"
 )
@@ -14,9 +15,10 @@ import (
 //go:embed embedded/*.xml
 var embedded embed.FS
 
-// Registry is the curated style registry used at runtime.
-var Registry = func() map[string]*chroma.Style {
-	registry := map[string]*chroma.Style{}
+// registry parses the curated styles on first use. Lazy so that runs that never
+// highlight (most `-o` dumps) skip parsing the embedded XML at startup.
+var registry = sync.OnceValue(func() map[string]*chroma.Style {
+	reg := map[string]*chroma.Style{}
 	files, err := fs.ReadDir(embedded, "embedded")
 	if err != nil {
 		panic(err)
@@ -34,18 +36,21 @@ var Registry = func() map[string]*chroma.Style {
 		if err != nil {
 			panic(err)
 		}
-		registry[strings.ToLower(style.Name)] = style
+		reg[strings.ToLower(style.Name)] = style
 	}
-	return registry
-}()
+	return reg
+})
 
-// Fallback is the curated fallback style.
-var Fallback = Registry["swapoff"]
+// Fallback returns the curated fallback style.
+func Fallback() *chroma.Style {
+	return registry()["swapoff"]
+}
 
 // Names returns the sorted list of curated style names.
 func Names() []string {
-	out := make([]string, 0, len(Registry))
-	for name := range Registry {
+	reg := registry()
+	out := make([]string, 0, len(reg))
+	for name := range reg {
 		out = append(out, name)
 	}
 	sort.Strings(out)
@@ -54,7 +59,7 @@ func Names() []string {
 
 // Lookup returns the named curated style and whether it is bundled.
 func Lookup(name string) (*chroma.Style, bool) {
-	style, ok := Registry[strings.ToLower(strings.TrimSpace(name))]
+	style, ok := registry()[strings.ToLower(strings.TrimSpace(name))]
 	return style, ok
 }
 
@@ -63,5 +68,5 @@ func Get(name string) *chroma.Style {
 	if style, ok := Lookup(name); ok {
 		return style
 	}
-	return Fallback
+	return Fallback()
 }

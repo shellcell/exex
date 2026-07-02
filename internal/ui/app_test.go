@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // TestRenderAllViews drives the model through every view (and some navigation)
@@ -222,7 +223,7 @@ func TestCtrlENavigatesDisasmToEnd(t *testing.T) {
 	}
 	_ = m.View()
 	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, m.disasmRenderWidth()) }
-	if got, want := m.disasmTop, maxViewportTop(len(m.disasmInst), m.disasmViewportHeight(), rowHeight); got != want {
+	if got, want := m.disasmTop, layout.MaxViewportTop(len(m.disasmInst), m.disasmViewportHeight(), rowHeight); got != want {
 		t.Fatalf("ctrl+e disasm top = %d, want bottom-aligned %d", got, want)
 	}
 

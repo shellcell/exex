@@ -18,6 +18,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/dump"
 	sourceutil "github.com/rabarbra/exex/internal/sourcefiles"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // srcMatch is one hit from a cross-source grep.
@@ -682,12 +683,12 @@ func (m *Model) renderSourceList(bodyH int) string {
 		}
 		full := m.sourcesFiles[n.leaf]
 		indent := strings.Repeat(" ", row.depth*treeIndent)
-		trunc := truncateMiddle(n.label, max(8, m.width-len(indent)-2))
+		trunc := layout.TruncateMiddle(n.label, max(8, m.width-len(indent)-2))
 		name := m.theme.colorPathByPrefix(full, trunc)
 		if !m.file.SourceExists(full) { // not on disk: dim it (can't be opened)
 			name = m.theme.srcShadowStyle.Render(trunc)
 		}
-		line := padRight(" "+indent+name, m.width)
+		line := layout.PadRight(" "+indent+name, m.width)
 		if selected {
 			b.WriteString(m.theme.tableSelStyle.Render(ansi.Strip(line)))
 		} else {
@@ -695,7 +696,7 @@ func (m *Model) renderSourceList(bodyH int) string {
 		}
 		b.WriteString("\n")
 	}
-	return padBody(b.String(), m.width, bodyH)
+	return layout.PadBody(b.String(), m.width, bodyH)
 }
 
 // gutterWidth is the visible width of the source line-number gutter
@@ -705,7 +706,7 @@ const gutterWidth = 8
 func (m *Model) renderSourceText(w, h int) string {
 	src := m.file.SourceLines(m.srcFile)
 	if len(src) == 0 {
-		return padBody("(source file not found on disk)\n", w, h)
+		return layout.PadBody("(source file not found on disk)\n", w, h)
 	}
 	hl := m.highlightedSource(m.srcFile, src)
 
@@ -721,7 +722,7 @@ func (m *Model) renderSourceText(w, h int) string {
 
 	var b strings.Builder
 	suffix := fmt.Sprintf(":%d", m.srcCur)
-	b.WriteString(m.theme.viewTitleLine(truncateMiddle(m.srcFile, max(1, w-lipgloss.Width(suffix)))+suffix, w))
+	b.WriteString(m.theme.viewTitleLine(layout.TruncateMiddle(m.srcFile, max(1, w-lipgloss.Width(suffix)))+suffix, w))
 	b.WriteString("\n")
 
 	rows := 0
@@ -735,11 +736,11 @@ func (m *Model) renderSourceText(w, h int) string {
 
 		prefix := m.srcGutter(ln, m.srcCur, m.srcCodeLines, 5)
 		avail := w - lipgloss.Width(prefix)
-		line := prefix + fitANSIWidth(content, avail)
+		line := prefix + layout.FitANSIWidth(content, avail)
 		if m.wrap {
 			line = prefix + content
 		}
-		for _, row := range renderLineRowsIndented(line, w, m.wrap, gutterWidth) {
+		for _, row := range layout.RenderLineRowsIndented(line, w, m.wrap, gutterWidth) {
 			if rows >= contentH {
 				break
 			}
@@ -758,7 +759,7 @@ func (m *Model) renderSourceText(w, h int) string {
 			}
 		}
 	}
-	return padBody(b.String(), w, h)
+	return layout.PadBody(b.String(), w, h)
 }
 
 // sourceRowHeight returns the per-line rendered-height function for the source
@@ -793,7 +794,7 @@ func (m *Model) sourceLineHeight(line, w int) int {
 		return h
 	}
 	plainPrefix := fmt.Sprintf("%5d   ", line)
-	h := len(renderLineRowsIndented(plainPrefix+src[line-1], w, true, gutterWidth))
+	h := len(layout.RenderLineRowsIndented(plainPrefix+src[line-1], w, true, gutterWidth))
 	if m.srcLineHeightCache == nil {
 		m.srcLineHeightCache = make(map[sourceLineHeightKey]int)
 	}
@@ -818,7 +819,7 @@ func (t *Theme) coloredCaretRow(cols []int, gutterW, w int) string {
 		}
 	}
 	row := strings.Repeat(" ", gutterW) + strings.Join(cells, "")
-	return fitANSIWidth(row, w)
+	return layout.FitANSIWidth(row, w)
 }
 
 // renderSourceAsm renders the disassembly beside the source. Instructions that
@@ -827,10 +828,10 @@ func (t *Theme) coloredCaretRow(cols []int, gutterW, w int) string {
 // non-contiguous instructions and they're all shown.
 func (m *Model) renderSourceAsm(w, h int) string {
 	if m.dis == nil {
-		return padBody("no disassembler for this architecture\n", w, h)
+		return layout.PadBody("no disassembler for this architecture\n", w, h)
 	}
 	if !m.ensureDisasm() || len(m.disasmInst) == 0 {
-		return padBody("no executable code\n", w, h)
+		return layout.PadBody("no executable code\n", w, h)
 	}
 
 	anchor := m.sourceAsmAnchorIndex()
@@ -855,7 +856,7 @@ func (m *Model) renderSourceAsm(w, h int) string {
 		b.WriteString(m.sourceAsmRow(i, addrW, w))
 		b.WriteString("\n")
 	}
-	return padBody(b.String(), w, h)
+	return layout.PadBody(b.String(), w, h)
 }
 
 func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
@@ -882,7 +883,7 @@ func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
 	lineW := lipgloss.Width(linePlain)
 	if name != "" && colsPlain != "" {
 		colsBudget := w - lineW - sepW - sepW - minSymbolHeaderWidth
-		colsPlain = truncateMiddle(colsPlain, max(1, colsBudget))
+		colsPlain = layout.TruncateMiddle(colsPlain, max(1, colsBudget))
 	}
 	fixedW := lineW
 	if colsPlain != "" {
@@ -891,7 +892,7 @@ func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
 
 	var parts []string
 	if name != "" {
-		name = truncateMiddle(name, max(1, w-fixedW-sepW))
+		name = layout.TruncateMiddle(name, max(1, w-fixedW-sepW))
 		parts = append(parts, m.theme.symbolNameStyle.Render(name))
 	}
 	parts = append(parts, linePlain)
@@ -947,7 +948,7 @@ func (m *Model) sourceAsmRow(i, addrW, w int) string {
 		} else {
 			line = fmt.Sprintf(" %s  %s", addr, asm)
 		}
-		return fitANSIWidth(line, w)
+		return layout.FitANSIWidth(line, w)
 	})
 }
 

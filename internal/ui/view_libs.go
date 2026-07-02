@@ -15,6 +15,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // sortedLibIdxs returns the needed-library indices sorted alphabetically by
@@ -299,11 +300,11 @@ func (m *Model) renderLibs() string {
 	m.renderedLibsTop = top
 	if len(m.libsRows) == 0 {
 		b.WriteString(m.placeCentred("no matching libraries  ·  Esc clears filters", bodyH-headerH))
-		return padBody(b.String(), m.width, bodyH)
+		return layout.PadBody(b.String(), m.width, bodyH)
 	}
 	for i := top; i < len(m.libsRows); i++ {
 		line := m.libRow(i, i == m.libsCur)
-		for _, row := range renderLineRowsIndented(line, m.width, m.wrap, 6) {
+		for _, row := range layout.RenderLineRowsIndented(line, m.width, m.wrap, 6) {
 			if renderedLineCount(b.String()) >= bodyH {
 				break
 			}
@@ -311,7 +312,7 @@ func (m *Model) renderLibs() string {
 			b.WriteString("\n")
 		}
 	}
-	return padBody(b.String(), m.width, bodyH)
+	return layout.PadBody(b.String(), m.width, bodyH)
 }
 
 func (m *Model) renderLibsHeader() string {
@@ -400,7 +401,7 @@ func (m *Model) libRowHeight(i int) int {
 	if i < 0 || i >= len(m.libsRows) {
 		return 1
 	}
-	return len(renderLineRowsIndented(m.libRow(i, false), m.width, m.wrap, 6))
+	return len(layout.RenderLineRowsIndented(m.libRow(i, false), m.width, m.wrap, 6))
 }
 
 func (m *Model) libRow(i int, selected bool) string {
@@ -422,7 +423,7 @@ func (m *Model) libRow(i int, selected bool) string {
 		tag = "  ·missing"
 	}
 	if !m.wrap {
-		display = truncateMiddle(display, max(1, m.width-len(indent)-2-len(tag)))
+		display = layout.TruncateMiddle(display, max(1, m.width-len(indent)-2-len(tag)))
 	}
 	var line string
 	if tag != "" {

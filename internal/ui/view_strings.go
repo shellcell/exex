@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // stringSort is the display order of the (filtered) strings list.
@@ -468,11 +469,11 @@ func (m *Model) renderStrings() string {
 		if i == m.stringsCur {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
-		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, addrW+33, bodyH) {
+		if !layout.AppendRenderedRowsIndented(&rows, line, m.width, m.wrap, addrW+33, bodyH) {
 			break
 		}
 	}
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 // renderStringsFlow draws the compact strings view: every string laid out inline,
@@ -535,7 +536,7 @@ func (m *Model) renderStringsFlow(bodyH int, filterRow string) string {
 	// When the wheel has detached the viewport, render from the scrolled top as-is
 	// (the caret may be off-screen); otherwise keep the caret visible.
 	if m.viewportDetached {
-		m.stringsTop = clamp(m.stringsTop, 0, max(0, n-1))
+		m.stringsTop = layout.Clamp(m.stringsTop, 0, max(0, n-1))
 	} else if m.stringsCur < m.stringsTop {
 		m.stringsTop = m.stringsCur
 	}
@@ -546,7 +547,7 @@ func (m *Model) renderStringsFlow(bodyH int, filterRow string) string {
 	}
 	m.renderedStringsTop = m.stringsTop
 	rows := append([]string{filterRow}, lines...)
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 // flowSepW is the visible width of the " · " separator; flowMaxLen bounds a single
@@ -743,7 +744,7 @@ func (m *Model) stringRowHeight(i int) int {
 	}
 	addrW := m.file.AddrHexWidth()
 	return m.stringHeightCache.get(rowCacheKey{i, m.width, addrW, m.wrap}, func() int {
-		return len(renderLineRowsIndented(m.stringRow(i, addrW), m.width, m.wrap, addrW+33))
+		return len(layout.RenderLineRowsIndented(m.stringRow(i, addrW), m.width, m.wrap, addrW+33))
 	})
 }
 
@@ -766,8 +767,8 @@ func (m *Model) stringRowText(i, addrW int) string {
 	}
 	line := fmt.Sprintf(" %s %s %s  %s",
 		m.theme.addrStyle.Render(fmt.Sprintf("0x%-8x", s.Offset)),
-		m.theme.addrStyle.Render(padVisual(addr, 2+addrW)),
-		m.theme.footerStyle.Render(padVisual(truncateMiddle(s.Section, 16), 16)),
+		m.theme.addrStyle.Render(layout.PadVisual(addr, 2+addrW)),
+		m.theme.footerStyle.Render(layout.PadVisual(layout.TruncateMiddle(s.Section, 16), 16)),
 		m.theme.tableRowStyle.Render(text))
 	return m.stringRowStyle(s).Render(line)
 }

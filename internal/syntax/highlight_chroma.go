@@ -19,29 +19,50 @@ func HighlightLines(filename string, src []string, themeName string) []string {
 	if strings.TrimSpace(themeName) == "" {
 		themeName = defaultTheme
 	}
-	lexer := lexerFor(filename, src)
+	// Style lookup is cheap; do it before the (joined-source) lexer work so a
+	// non-bundled theme skips tokenising entirely.
+	st, ok := chromastyles.Lookup(themeName)
+	if !ok || st == nil {
+		return minimalHighlight(filename, src, themeName)
+	}
+
+	joined := strings.Join(src, "\n")
+	lexer := lexerFor(filename, joined)
 	if lexer == nil {
 		// Unknown file type: fall back to the tiny built-in highlighter rather
 		// than rendering plain text.
 		return minimalHighlight(filename, src, themeName)
 	}
 	lexer = chroma.Coalesce(lexer)
-
-	st, ok := chromastyles.Lookup(themeName)
-	if !ok || st == nil {
-		return minimalHighlight(filename, src, themeName)
-	}
 	fallbackFG := chromaFallbackForeground(themeName)
 
-	it, err := lexer.Tokenise(nil, strings.Join(src, "\n"))
+	if lines, ok := chromaHighlight(lexer, joined, st, fallbackFG, len(src)); ok {
+		return lines
+	}
+	return minimalHighlight(filename, src, themeName)
+}
+
+// chromaHighlight tokenises joined and renders one ANSI-styled string per line.
+// ok is false (caller falls back to the minimal highlighter) on a tokenise error
+// or a panic. A lexer that delegates via <using lexer="X"> panics if X is not in
+// the curated registry, so the recover keeps a single unsupported embed (e.g. a
+// stray language reference) from crashing the whole app on one file.
+func chromaHighlight(lexer chroma.Lexer, joined string, st *chroma.Style, fallbackFG string, nSrc int) (lines []string, ok bool) {
+	defer func() {
+		if recover() != nil {
+			lines, ok = nil, false
+		}
+	}()
+
+	it, err := lexer.Tokenise(nil, joined)
 	if err != nil {
-		return minimalHighlight(filename, src, themeName)
+		return nil, false
 	}
 
 	// Memoise the lipgloss style per token type: a source file has thousands of
 	// tokens but only a handful of distinct types.
 	styleFor := map[chroma.TokenType]lipgloss.Style{}
-	lines := make([]string, 0, len(src))
+	lines = make([]string, 0, nSrc)
 	var cur strings.Builder
 	for _, tok := range it.Tokens() {
 		ls, ok := styleFor[tok.Type]
@@ -49,26 +70,34 @@ func HighlightLines(filename string, src []string, themeName string) []string {
 			ls = chromaToLipgloss(st.Get(tok.Type), fallbackFG)
 			styleFor[tok.Type] = ls
 		}
-		parts := strings.Split(tok.Value, "\n")
-		for i, p := range parts {
-			if i > 0 {
-				lines = append(lines, cur.String())
-				cur.Reset()
+		// Most tokens have no newline: render straight into the current line
+		// without the per-token strings.Split allocation.
+		val := tok.Value
+		for {
+			nl := strings.IndexByte(val, '\n')
+			if nl < 0 {
+				break
 			}
-			if p != "" {
+			if p := val[:nl]; p != "" {
 				cur.WriteString(ls.Render(p))
 			}
+			lines = append(lines, cur.String())
+			cur.Reset()
+			val = val[nl+1:]
+		}
+		if val != "" {
+			cur.WriteString(ls.Render(val))
 		}
 	}
 	lines = append(lines, cur.String())
-	return lines
+	return lines, true
 }
 
 // lexerFor picks the Chroma lexer for a file. Assembly sources (.s/.S) are
 // special-cased to GAS because ArmAsm and GAS both register that extension, and
 // GAS (GNU assembler) is the usual format for those files. Everything else uses
 // the normal curated filename match, then content analysis.
-func lexerFor(filename string, src []string) chroma.Lexer {
+func lexerFor(filename, src string) chroma.Lexer {
 	if lowerExt(filename) == ".s" {
 		if l := chromalexers.Get("gas"); l != nil {
 			return l
@@ -77,7 +106,7 @@ func lexerFor(filename string, src []string) chroma.Lexer {
 	if l := chromalexers.Match(filename); l != nil {
 		return l
 	}
-	return chromalexers.Analyse(strings.Join(src, "\n"))
+	return chromalexers.Analyse(src)
 }
 
 // chromaToLipgloss converts the subset of Chroma style attributes used here.

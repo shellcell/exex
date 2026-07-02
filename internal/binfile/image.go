@@ -97,7 +97,10 @@ func (im *Image) At(pos int) byte {
 // lies within a single region (the common case); a range straddling a region
 // boundary is copied into a fresh bounded buffer.
 func (im *Image) Bytes(start, end int) []byte {
-	if im == nil || start < 0 {
+	if im == nil {
+		return nil
+	}
+	if start < 0 {
 		start = 0
 	}
 	if end > im.size {

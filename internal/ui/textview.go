@@ -25,6 +25,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/syntax"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // maxTextFileBytes bounds how much of a text file the viewer loads.
@@ -201,7 +202,7 @@ func (m *textModel) handleKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m *textModel) scroll(delta int) {
-	m.top = clamp(m.top+delta, 0, m.maxTop())
+	m.top = layout.Clamp(m.top+delta, 0, m.maxTop())
 }
 
 // back returns to the previously-viewed text file, or quits at the root.
@@ -215,7 +216,7 @@ func (m *textModel) back() (tea.Model, tea.Cmd) {
 		m.status = "back: " + err.Error()
 		return m, nil
 	}
-	m.top = clamp(prev.top, 0, m.maxTop())
+	m.top = layout.Clamp(prev.top, 0, m.maxTop())
 	return m, nil
 }
 
@@ -255,20 +256,20 @@ func (m *textModel) View() tea.View {
 	}
 	bodyH := m.bodyHeight()
 	suffix := fmt.Sprintf("   (%d lines, %d paths)", len(m.lines), len(m.picks))
-	header := m.theme.viewTitleLine(truncateMiddle(m.path, max(1, m.width-lipgloss.Width(suffix)))+suffix, m.width)
+	header := m.theme.viewTitleLine(layout.TruncateMiddle(m.path, max(1, m.width-lipgloss.Width(suffix)))+suffix, m.width)
 
 	var b strings.Builder
 	for i := m.top; i < len(m.lines) && i < m.top+bodyH; i++ {
 		b.WriteString(m.renderLine(i))
 		b.WriteByte('\n')
 	}
-	body := padBody(b.String(), m.width, bodyH)
+	body := layout.PadBody(b.String(), m.width, bodyH)
 
 	footer := m.theme.footerStyle.Render("↑/↓ scroll · Enter/o open path menu · Esc back · q quit")
 	if m.status != "" {
 		footer = m.theme.infoStyle.Render(m.status)
 	}
-	out := header + "\n" + body + "\n" + padRight(footer, m.width)
+	out := header + "\n" + body + "\n" + layout.PadRight(footer, m.width)
 
 	if m.pickerActive {
 		out = m.overlayCenterText(out, m.renderPicker())
@@ -289,7 +290,7 @@ func (m *textModel) renderLine(i int) string {
 		line = m.hlLines[i]
 	}
 	line = underlineRanges(line, m.spans[i])
-	return padRight(fitANSIWidth(line, m.width), m.width)
+	return layout.PadRight(layout.FitANSIWidth(line, m.width), m.width)
 }
 
 // underlineRanges adds an underline over the given byte ranges of an
@@ -351,7 +352,7 @@ func (m *textModel) renderPicker() string {
 	var sb strings.Builder
 	sb.WriteString(m.theme.modalTitle("Open path"))
 	sb.WriteString("\n\n")
-	top := visualTop(m.pickerSel, m.pickerTop, len(m.picks), visible, func(int) int { return 1 })
+	top := layout.VisualTop(m.pickerSel, m.pickerTop, len(m.picks), visible, func(int) int { return 1 })
 	m.pickerTop = top
 	end := min(top+visible, len(m.picks))
 	for i := top; i < end; i++ {
@@ -359,7 +360,7 @@ func (m *textModel) renderPicker() string {
 		if rel, err := filepath.Rel(m.dir, label); err == nil && !strings.HasPrefix(rel, "..") {
 			label = rel
 		}
-		line := padRight(" "+truncateMiddle(label, rowW-2), rowW)
+		line := layout.PadRight(" "+layout.TruncateMiddle(label, rowW-2), rowW)
 		if i == m.pickerSel {
 			line = m.theme.tableSelStyle.Render(line)
 		}
@@ -377,7 +378,7 @@ func (m *textModel) renderPicker() string {
 func (m *textModel) overlayCenterText(bg, modal string) string {
 	mw := lipgloss.Width(modal)
 	mh := lipgloss.Height(modal)
-	return overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
+	return layout.Overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
 }
 
 // extractPaths finds, per line, the byte spans that are filesystem paths

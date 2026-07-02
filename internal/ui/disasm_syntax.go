@@ -54,7 +54,14 @@ func newDisasmAsmLexer(arch arch.Arch) chroma.Lexer {
 // renderInstTextStyled uses Chroma for assembly syntax, overlaying semantic link
 // styles on followable address literals.
 func (m *Model) renderInstTextStyled(text string, class disasm.InstClass, instAddr uint64) string {
-	if _, ok := chromastyles.Lookup(sourceSyntaxTheme(m.cfg)); !ok {
+	if m.disasmStyledMode == 0 {
+		if _, ok := chromastyles.Lookup(sourceSyntaxTheme(m.cfg)); ok {
+			m.disasmStyledMode = 1
+		} else {
+			m.disasmStyledMode = -1
+		}
+	}
+	if m.disasmStyledMode < 0 {
 		return m.renderInstTextFallback(text, class, instAddr)
 	}
 	lexer := disasmAsmLexerFor(m.file.Arch())
@@ -136,7 +143,7 @@ func (m *Model) disasmTokenStyle(tt chroma.TokenType) lipgloss.Style {
 	themeName := sourceSyntaxTheme(m.cfg)
 	chromaStyle, ok := chromastyles.Lookup(themeName)
 	if !ok || chromaStyle == nil {
-		chromaStyle = chromastyles.Fallback
+		chromaStyle = chromastyles.Fallback()
 	}
 	st := chromaStyleEntryToLipgloss(chromaStyle.Get(tt), sourceSyntaxForeground(m.cfg))
 	m.disasmTokenStyles[int(tt)] = st

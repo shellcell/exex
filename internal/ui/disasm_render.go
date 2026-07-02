@@ -14,6 +14,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // renderInstText colours an instruction's assembly text, caching the result.
@@ -198,7 +199,7 @@ func (m *Model) renderDisasm() string {
 // disasm cursor is currently parked on. Stays pinned regardless of scroll.
 func (m *Model) renderStickySymbol(w int) string {
 	if len(m.disasmInst) == 0 {
-		return padRight("", w)
+		return layout.PadRight("", w)
 	}
 	addr := m.disasmInst[m.disasmCur].Addr
 	var text string
@@ -289,7 +290,7 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 			rows = append(rows, row)
 		}
 	}
-	return padBodyRows(rows, w, h)
+	return layout.PadBodyRows(rows, w, h)
 }
 
 func (m *Model) disasmRenderWidth() int {
@@ -373,7 +374,7 @@ func (m *Model) disasmAnnotationColumn(w int) int {
 func (m *Model) disasmLabelRows(name string, w int) []string {
 	label := "<" + name + ">:"
 	if !m.wrap {
-		return []string{padRight(" "+m.theme.symbolNameStyle.Render(truncateANSI(label, max(1, w-1))), w)}
+		return []string{layout.PadRight(" "+m.theme.symbolNameStyle.Render(layout.TruncateANSI(label, max(1, w-1))), w)}
 	}
 	parts := strings.Split(strings.TrimRight(ansi.Wrap(label, max(1, w-1), " \t/.-_:$@<>"), "\n"), "\n")
 	if len(parts) == 0 {
@@ -381,7 +382,7 @@ func (m *Model) disasmLabelRows(name string, w int) []string {
 	}
 	rows := make([]string, 0, len(parts))
 	for _, part := range parts {
-		rows = append(rows, padRight(" "+m.theme.symbolNameStyle.Render(part), w))
+		rows = append(rows, layout.PadRight(" "+m.theme.symbolNameStyle.Render(part), w))
 	}
 	return rows
 }
@@ -409,7 +410,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 		}
 	}
 
-	asmFit := fitANSIWidth(asm, max(1, w-asmCol))
+	asmFit := layout.FitANSIWidth(asm, max(1, w-asmCol))
 	asmEnd := asmCol + lipgloss.Width(asmFit)
 
 	var asmRow string
@@ -425,7 +426,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	}
 
 	if note == "" {
-		return []string{padRight(asmRow, w)}
+		return []string{layout.PadRight(asmRow, w)}
 	}
 
 	inlineStart := max(annCol, asmEnd+2)
@@ -434,7 +435,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 		first, rest := splitPlainWidth(note, inlineAvail)
 		if first != "" {
 			line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + m.theme.addrStyle.Render(first)
-			rows := []string{padRight(line, w)}
+			rows := []string{layout.PadRight(line, w)}
 			if rest == "" || !m.wrap {
 				return rows
 			}
@@ -443,7 +444,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	}
 
 	// No usable room remains beside the assembly; fall back to continuation rows.
-	rows := []string{padRight(asmRow, w)}
+	rows := []string{layout.PadRight(asmRow, w)}
 	return append(rows, m.disasmAnnotationContinuationRows(note, annCol, w)...)
 }
 
@@ -453,12 +454,12 @@ func (m *Model) disasmAnnotationContinuationRows(note string, annCol, w int) []s
 	if m.wrap {
 		parts = strings.Split(strings.TrimRight(ansi.Wrap(strings.TrimLeft(note, " "), belowW, " \t/.-_:$@<>,"), "\n"), "\n")
 	} else {
-		parts = []string{truncateANSI(note, belowW)}
+		parts = []string{layout.TruncateANSI(note, belowW)}
 	}
 	indent := strings.Repeat(" ", annCol)
 	rows := make([]string, 0, len(parts))
 	for _, p := range parts {
-		rows = append(rows, padRight(indent+m.theme.addrStyle.Render(p), w))
+		rows = append(rows, layout.PadRight(indent+m.theme.addrStyle.Render(p), w))
 	}
 	return rows
 }
@@ -594,7 +595,7 @@ func (m *Model) lmaNote(phys uint64) string {
 func (m *Model) disasmSectionBanner(name string, w int) string {
 	banner := lipgloss.PlaceHorizontal(max(1, w-1), lipgloss.Center, " "+name+" ",
 		lipgloss.WithWhitespaceChars("="))
-	return padRight(m.theme.sectionStyle.Render(banner), w)
+	return layout.PadRight(m.theme.sectionStyle.Render(banner), w)
 }
 
 func (m *Model) renderSourcePane(w, h int) string {
@@ -605,19 +606,19 @@ func (m *Model) renderSourcePane(w, h int) string {
 	}
 
 	if len(m.disasmInst) == 0 {
-		return border.Render(padBody("", inner, h))
+		return border.Render(layout.PadBody("", inner, h))
 	}
 	addr := m.disasmInst[m.disasmCur].Addr
 	file, line, col := m.file.LookupAddrCol(addr)
 	if file == "" {
 		body := "no source mapping for 0x" + fmt.Sprintf("%x", addr)
-		return border.Render(padBody(body+"\n", inner, h))
+		return border.Render(layout.PadBody(body+"\n", inner, h))
 	}
 	src := m.file.SourceLines(file)
 	if src == nil {
 		suffix := fmt.Sprintf(":%d (source file not found)", line)
-		body := m.theme.viewTitleLine(truncateMiddle(file, max(1, inner-lipgloss.Width(suffix)))+suffix, inner) + "\n"
-		return border.Render(padBody(body, inner, h))
+		body := m.theme.viewTitleLine(layout.TruncateMiddle(file, max(1, inner-lipgloss.Width(suffix)))+suffix, inner) + "\n"
+		return border.Render(layout.PadBody(body, inner, h))
 	}
 
 	hl := m.highlightedSource(file, src)
@@ -627,7 +628,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 	if col > 0 {
 		suffix = fmt.Sprintf(":%d:%d", line, col)
 	}
-	loc := truncateMiddle(file, max(1, inner-lipgloss.Width(suffix))) + suffix
+	loc := layout.TruncateMiddle(file, max(1, inner-lipgloss.Width(suffix))) + suffix
 	half := (h - 1) / 2
 	base := line - half
 	from := base + m.rightScroll
@@ -643,7 +644,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 		}
 	}
 	// Build the lines directly (vs accumulating into one Builder then splitting it
-	// back apart in padBody) — fewer per-frame allocations on this hot path.
+	// back apart in layout.PadBody) — fewer per-frame allocations on this hot path.
 	rows := make([]string, 0, h)
 	rows = append(rows, m.theme.viewTitleLine(loc, inner))
 	for i := from; i <= to; i++ {
@@ -659,7 +660,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 		}
 		prefix := m.srcGutter(i, line, mapped, 5)
 		gutterW := lipgloss.Width(prefix)
-		rows = append(rows, prefix+fitANSIWidth(content, inner-gutterW))
+		rows = append(rows, prefix+layout.FitANSIWidth(content, inner-gutterW))
 		// Point carets at every column this source line maps to (a line can map
 		// at several positions), each in its column colour — same as the
 		// source-first pane.
@@ -669,5 +670,5 @@ func (m *Model) renderSourcePane(w, h int) string {
 			}
 		}
 	}
-	return border.Render(padBodyRows(rows, inner, h))
+	return border.Render(layout.PadBodyRows(rows, inner, h))
 }

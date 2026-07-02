@@ -242,9 +242,10 @@ func (s *DisasmService) decodeInstWindow(win binfile.Window, decodeStart int) []
 // jump. Only instructions at offset >= visibleStart are returned; the bytes
 // before it are decode-resync context that is dropped.
 func (s *DisasmService) decodeAcross(img *binfile.Image, decodeStart, end, visibleStart int) []disasm.Inst {
-	if img == nil || s.dis == nil || decodeStart < 0 || end > img.Len() {
-		end = min(end, img.Len())
+	if img == nil || s.dis == nil || decodeStart < 0 {
+		return nil
 	}
+	end = min(end, img.Len())
 	var out []disasm.Inst
 	for p := decodeStart; p < end; {
 		r := img.RegionAt(p)

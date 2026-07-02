@@ -1,4 +1,4 @@
-package ui
+package layout
 
 import (
 	"strings"
@@ -19,7 +19,7 @@ func TestOverlayPreservesBackground(t *testing.T) {
 	bg := strings.Join([]string{bgLine, bgLine, bgLine}, "\n")
 
 	modal := "ABCDE\nFGHIJ" // 2 lines, width 5, no styling
-	out := overlay(bg, modal, 10, 1)
+	out := Overlay(bg, modal, 10, 1)
 	lines := strings.Split(out, "\n")
 
 	// Row 0 is untouched.

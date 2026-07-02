@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
@@ -259,8 +260,8 @@ func (m *Model) buildInfoContent(innerW int) string {
 				marker = m.theme.symbolNameStyle.Render("▸ ")
 			}
 			row := "    " + marker +
-				m.theme.tableRowStyle.Render(padRight(a.Name, nameW)) + "   " +
-				dim(padRight(a.Type, typeW)) + "   " +
+				m.theme.tableRowStyle.Render(layout.PadRight(a.Name, nameW)) + "   " +
+				dim(layout.PadRight(a.Type, typeW)) + "   " +
 				dim(fmt.Sprintf("%d-bit", a.Bits)) + "   " +
 				addrc(fmt.Sprintf("@ 0x%08x", a.Offset)) + "   " +
 				num(humanBytes(a.Size))
@@ -422,7 +423,7 @@ func (m *Model) buildInfoContent(innerW int) string {
 	// bodyH-2 rows of content. Pad every line so the panel's right edge is flush.
 	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
 	for i := range lines {
-		lines[i] = padRight(lines[i], innerW)
+		lines[i] = layout.PadRight(lines[i], innerW)
 	}
 	return strings.Join(lines, "\n")
 }

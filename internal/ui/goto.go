@@ -75,8 +75,6 @@ type gotoTarget struct {
 	hasAddr bool
 }
 
-func (t gotoTarget) isSym() bool { return t.kind == gkSymbol }
-
 // gotoMaxResults bounds how many matches we keep (the list scrolls; the visible
 // window is sized to the terminal height in renderGotoModal).
 const gotoMaxResults = 500
@@ -266,18 +264,6 @@ func (m *Model) openLibsFiltered(lib string) {
 	m.libsFilter.SetValue(lib)
 	m.setMode(modeLibs)
 	m.setStatus("library: "+lib+"  (press o to open it)", false)
-}
-
-// gotoSelectionAddr returns the address of the highlighted result, falling back
-// to a bare address typed into the prompt.
-func (m *Model) gotoSelectionAddr() (uint64, bool) {
-	if m.gotoSel >= 0 && m.gotoSel < len(m.gotoResults) {
-		return m.gotoResults[m.gotoSel].addr, true
-	}
-	if a, err := parseAddr(strings.TrimSpace(m.gotoInput.Value())); err == nil {
-		return a, true
-	}
-	return 0, false
 }
 
 // openSourceForAddr opens the Sources view at the source location that addr

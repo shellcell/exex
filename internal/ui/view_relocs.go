@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // relocSortField is the relocation table's sort key.
@@ -275,11 +276,11 @@ func (m *Model) renderRelocs() string {
 		if i == m.relocCur {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
-		if !appendRenderedRowsIndented(&rows, line, m.width, m.wrap, 6, bodyH) {
+		if !layout.AppendRenderedRowsIndented(&rows, line, m.width, m.wrap, 6, bodyH) {
 			break
 		}
 	}
-	return padBodyRows(rows, m.width, bodyH)
+	return layout.PadBodyRows(rows, m.width, bodyH)
 }
 
 // relocRow renders one relocation row: offset (address colour), type, section,
@@ -304,14 +305,14 @@ func (m *Model) relocRowText(ri, addrW int) string {
 	typ := r.Type
 	sec := r.Section
 	if !m.wrap {
-		typ = truncateMiddle(typ, 24)
-		sec = truncateMiddle(sec, 12)
-		target = truncateMiddle(target, max(8, m.width-addrW-2-24-12-8))
+		typ = layout.TruncateMiddle(typ, 24)
+		sec = layout.TruncateMiddle(sec, 12)
+		target = layout.TruncateMiddle(target, max(8, m.width-addrW-2-24-12-8))
 	}
 	row := fmt.Sprintf(" %s  %s %s %s",
 		m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, r.Offset)),
-		m.theme.tableRowStyle.Render(padVisual(typ, 24)),
-		m.theme.srcShadowStyle.Render(padVisual(sec, 12)),
+		m.theme.tableRowStyle.Render(layout.PadVisual(typ, 24)),
+		m.theme.srcShadowStyle.Render(layout.PadVisual(sec, 12)),
 		m.theme.symbolNameStyle.Render(target))
 	return row
 }

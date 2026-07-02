@@ -13,6 +13,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
@@ -180,7 +181,7 @@ func TestHexMiddleRowsNeverGap(t *testing.T) {
 		theme:       DefaultTheme(),
 		file:        &binfile.File{},
 		layoutState: layoutState{width: 120, height: 12},
-		hexState: hexState{hexImg: binfile.NewImage(data, []binfile.Region{{Addr: 0x1029052b8, Size: uint64(len(data)), Off: 0, Name: "__objc_data"}})},
+		hexState:    hexState{hexImg: binfile.NewImage(data, []binfile.Region{{Addr: 0x1029052b8, Size: uint64(len(data)), Off: 0, Name: "__objc_data"}})},
 	}
 	for range 40 { // scroll well past the section start
 		m.updateHex("down")
@@ -496,7 +497,7 @@ func assertSectionBytesBelowSeparator(t *testing.T, out, section, bytes, lineAdd
 }
 
 func TestPadBodyRowsClampsAndPads(t *testing.T) {
-	got := padBodyRows([]string{"abc", "abcdef"}, 4, 3)
+	got := layout.PadBodyRows([]string{"abc", "abcdef"}, 4, 3)
 	lines := strings.Split(got, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("padded line count = %d, want 3", len(lines))
@@ -509,18 +510,18 @@ func TestPadBodyRowsClampsAndPads(t *testing.T) {
 }
 
 func TestTruncateMiddleKeepsEnds(t *testing.T) {
-	got := truncateMiddle("/very/long/source/path/main.go", 16)
+	got := layout.TruncateMiddle("/very/long/source/path/main.go", 16)
 	if got == "/very/long/source/path/main.go" || lipgloss.Width(got) > 16 {
-		t.Fatalf("truncateMiddle returned %q", got)
+		t.Fatalf("layout.TruncateMiddle returned %q", got)
 	}
 	if got[:1] != "/" || got[len(got)-5:] != "in.go" {
-		t.Fatalf("truncateMiddle did not keep useful ends: %q", got)
+		t.Fatalf("layout.TruncateMiddle did not keep useful ends: %q", got)
 	}
 }
 
 func TestRenderLineRowsActuallyWraps(t *testing.T) {
 	line := "0123456789 abcdefghij klmnopqrst"
-	rows := renderLineRowsIndented(line, 12, true, 0)
+	rows := layout.RenderLineRowsIndented(line, 12, true, 0)
 	if len(rows) < 3 {
 		t.Fatalf("wrapped rows = %d, want at least 3: %q", len(rows), rows)
 	}
@@ -529,13 +530,13 @@ func TestRenderLineRowsActuallyWraps(t *testing.T) {
 			t.Fatalf("row width = %d, want <= 12: %q", w, row)
 		}
 	}
-	if got := renderLineRowsIndented(line, 12, false, 0); len(got) != 1 {
+	if got := layout.RenderLineRowsIndented(line, 12, false, 0); len(got) != 1 {
 		t.Fatalf("non-wrapped rows = %d, want 1", len(got))
 	}
 }
 
 func TestRenderLineRowsIndentedContinuation(t *testing.T) {
-	rows := renderLineRowsIndented("addr type very-long-content-that-wraps", 18, true, 6)
+	rows := layout.RenderLineRowsIndented("addr type very-long-content-that-wraps", 18, true, 6)
 	if len(rows) < 2 {
 		t.Fatalf("rows = %q, want wrapped continuation", rows)
 	}
@@ -647,10 +648,10 @@ func TestVisualItemAtRowUsesWrappedHeights(t *testing.T) {
 		}
 		return 1
 	}
-	if got, ok := visualItemAtRow(0, 3, 2, heights); !ok || got != 0 {
+	if got, ok := layout.VisualItemAtRow(0, 3, 2, heights); !ok || got != 0 {
 		t.Fatalf("row 2 maps to %d,%v; want first wrapped item", got, ok)
 	}
-	if got, ok := visualItemAtRow(0, 3, 3, heights); !ok || got != 1 {
+	if got, ok := layout.VisualItemAtRow(0, 3, 3, heights); !ok || got != 1 {
 		t.Fatalf("row 3 maps to %d,%v; want second item", got, ok)
 	}
 }

@@ -11,13 +11,13 @@ func TestCuratedStyles(t *testing.T) {
 }
 
 func TestCuratedStyleFallback(t *testing.T) {
-	if Fallback == nil {
+	if Fallback() == nil {
 		t.Fatal("Fallback is nil")
 	}
 	if _, ok := Lookup("definitely-not-a-style"); ok {
 		t.Fatalf("unknown style unexpectedly bundled")
 	}
-	if got := Get("definitely-not-a-style"); got != Fallback {
+	if got := Get("definitely-not-a-style"); got != Fallback() {
 		t.Fatalf("unknown style did not return Fallback")
 	}
 }

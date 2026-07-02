@@ -23,6 +23,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // syscallMaxHits caps how many syscall sites are collected (the modal scrolls).
@@ -754,7 +755,7 @@ func (m *Model) renderSyscallModal() string {
 	var sb strings.Builder
 	addrW := m.file.AddrHexWidth()
 	rowW := modalListWidth(m.width)
-	visible := clamp(m.height-10, 3, 40) // 2 extra header lines (scope bar + legend)
+	visible := layout.Clamp(m.height-10, 3, 40) // 2 extra header lines (scope bar + legend)
 	rows := m.syscallShown
 	if m.syscallSel >= len(rows) {
 		m.syscallSel = max(0, len(rows)-1)
@@ -765,26 +766,26 @@ func (m *Model) renderSyscallModal() string {
 	// Column budget: "● <addr|count>  <name|#num>  <sym|origin>  <text>".
 	const sysNameW = 16
 	avail := rowW - len("● ") - (2 + addrW) - len("  ") - sysNameW - len("  ") - len("  ") - 6
-	textW := clamp(avail/3, 10, 32)
+	textW := layout.Clamp(avail/3, 10, 32)
 	symW := max(8, avail-textW)
 
 	// Header: title, scope segmented control, filter box (with shown/total count),
 	// and the colour/sort legend — then a blank line before the rows.
 	sb.WriteString(m.theme.modalTitle("System calls"))
 	sb.WriteString("\n")
-	sb.WriteString(fitANSIWidth(m.syscallScopeBar(), rowW))
+	sb.WriteString(layout.FitANSIWidth(m.syscallScopeBar(), rowW))
 	sb.WriteString("\n")
 	countStr := fmt.Sprintf("  %d", len(rows))
 	if m.syscallTotal != len(rows) {
 		countStr = fmt.Sprintf("  %d of %d", len(rows), m.syscallTotal)
 	}
-	m.syscallFilter.SetWidth(clamp(rowW-len(countStr)-4, 12, 60))
-	sb.WriteString(fitANSIWidth(m.syscallFilter.View()+m.theme.modalHint(countStr), rowW))
+	m.syscallFilter.SetWidth(layout.Clamp(rowW-len(countStr)-4, 12, 60))
+	sb.WriteString(layout.FitANSIWidth(m.syscallFilter.View()+m.theme.modalHint(countStr), rowW))
 	sb.WriteString("\n")
-	sb.WriteString(fitANSIWidth(m.syscallLegend(), rowW))
+	sb.WriteString(layout.FitANSIWidth(m.syscallLegend(), rowW))
 	sb.WriteString("\n\n")
 	m.modalListRow = 5 // title + scope + filter + legend + blank
-	top := visualTop(m.syscallSel, m.syscallTop, len(rows), visible, func(int) int { return 1 })
+	top := layout.VisualTop(m.syscallSel, m.syscallTop, len(rows), visible, func(int) int { return 1 })
 	m.syscallTop = top
 	end := min(top+visible, len(rows))
 	for i := top; i < end; i++ {
@@ -800,7 +801,7 @@ func (m *Model) renderSyscallModal() string {
 		if !aggregated && m.inFunc(h.Addr) {
 			mark = "●"
 		}
-		text := truncateMiddle(h.Text, textW)
+		text := layout.TruncateMiddle(h.Text, textW)
 		if h.VDSO {
 			text += " ·vdso"
 		}
@@ -817,17 +818,17 @@ func (m *Model) renderSyscallModal() string {
 		}
 		// Colour the syscall label by resolution category (named / num-only / vdso /
 		// unresolved) so the eye can pick out which numbers actually mapped to a name.
-		num := m.syscallCatStyle(syscallCategoryOf(h)).Render(padVisual(truncateMiddle(label, sysNameW), sysNameW))
+		num := m.syscallCatStyle(syscallCategoryOf(h)).Render(layout.PadVisual(layout.TruncateMiddle(label, sysNameW), sysNameW))
 		// In aggregated scopes (unique / full) show a use count instead of an address.
 		first := fmt.Sprintf("0x%0*x", addrW, h.Addr)
 		if aggregated {
-			first = padVisual(fmt.Sprintf("%d×", rows[i].count), 2+addrW)
+			first = layout.PadVisual(fmt.Sprintf("%d×", rows[i].count), 2+addrW)
 		}
 		line := fmt.Sprintf("%s %s  %s  %s  %s",
 			mark, first, num,
-			padVisual(truncateMiddle(loc, symW), symW),
+			layout.PadVisual(layout.TruncateMiddle(loc, symW), symW),
 			text)
-		line = padVisual(line, rowW)
+		line = layout.PadVisual(line, rowW)
 		if i == m.syscallSel { // strip the category colour so the selection bar reads cleanly
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}
@@ -851,7 +852,7 @@ func (m *Model) renderSyscallModal() string {
 			shown = shown[:4]
 		}
 		for _, n := range shown {
-			sb.WriteString(" " + m.theme.srcShadowStyle.Render(fitANSIWidth(n, rowW)) + "\n")
+			sb.WriteString(" " + m.theme.srcShadowStyle.Render(layout.FitANSIWidth(n, rowW)) + "\n")
 		}
 		if len(m.syscallFullNotes) > 4 {
 			sb.WriteString(" " + m.theme.srcShadowStyle.Render(fmt.Sprintf("  … and %d more", len(m.syscallFullNotes)-4)) + "\n")
@@ -865,6 +866,6 @@ func (m *Model) renderSyscallModal() string {
 		footer = fmt.Sprintf("type to filter · ↵ jump · Tab done · Esc clear   (%d/%d)",
 			min(m.syscallSel+1, len(rows)), len(rows))
 	}
-	sb.WriteString(m.theme.modalHint(fitANSIWidth(footer, rowW)))
+	sb.WriteString(m.theme.modalHint(layout.FitANSIWidth(footer, rowW)))
 	return m.theme.modalStyle.Render(sb.String())
 }

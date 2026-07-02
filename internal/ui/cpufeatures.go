@@ -15,6 +15,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // cpufeatState holds the CPU-feature scan + modal state.
@@ -140,7 +141,7 @@ func (m *Model) renderCPUFeatModal() string {
 	var sb strings.Builder
 	rowW := modalListWidth(m.width)
 	addrW := m.file.AddrHexWidth()
-	visible := clamp(m.height-9, 3, 40)
+	visible := layout.Clamp(m.height-9, 3, 40)
 
 	sb.WriteString(m.theme.modalTitle("CPU features"))
 	sb.WriteString("\n")
@@ -150,7 +151,7 @@ func (m *Model) renderCPUFeatModal() string {
 	} else {
 		sub = m.theme.modalHint(sub)
 	}
-	sb.WriteString(fitANSIWidth(sub, rowW))
+	sb.WriteString(layout.FitANSIWidth(sub, rowW))
 	sb.WriteString("\n\n")
 	m.modalListRow = 3
 
@@ -161,17 +162,17 @@ func (m *Model) renderCPUFeatModal() string {
 	for _, f := range m.cpufeatFeats {
 		nameW = max(nameW, len(f))
 	}
-	nameW = clamp(nameW, 8, 28)
-	top := visualTop(m.cpufeatSel, m.cpufeatTop, len(m.cpufeatFeats), visible, func(int) int { return 1 })
+	nameW = layout.Clamp(nameW, 8, 28)
+	top := layout.VisualTop(m.cpufeatSel, m.cpufeatTop, len(m.cpufeatFeats), visible, func(int) int { return 1 })
 	m.cpufeatTop = top
 	end := min(top+visible, len(m.cpufeatFeats))
 	for i := top; i < end; i++ {
 		f := m.cpufeatFeats[i]
 		line := fmt.Sprintf(" %s  %s ×   %s",
-			m.theme.infoStyle.Render(padVisual(f, nameW)),
-			padVisual(fmt.Sprintf("%d", m.cpufeatSet.Counts[f]), 8),
+			m.theme.infoStyle.Render(layout.PadVisual(f, nameW)),
+			layout.PadVisual(fmt.Sprintf("%d", m.cpufeatSet.Counts[f]), 8),
 			m.theme.srcShadowStyle.Render(fmt.Sprintf("first at 0x%0*x", addrW, m.cpufeatSet.FirstUse[f])))
-		line = padRight(line, rowW)
+		line = layout.PadRight(line, rowW)
 		if i == m.cpufeatSel {
 			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/syntax"
 	"github.com/rabarbra/exex/internal/theme"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 const settingsFieldCount = 16
@@ -319,8 +320,8 @@ func (m *Model) renderSettingsModal() string {
 	for i := range settingsFieldCount {
 		total += settingsRowHeight(i)
 	}
-	visible := clamp(m.height-8, 5, total)
-	top := visualTop(m.settingsCur, m.settingsTop, settingsFieldCount, visible, settingsRowHeight)
+	visible := layout.Clamp(m.height-8, 5, total)
+	top := layout.VisualTop(m.settingsCur, m.settingsTop, settingsFieldCount, visible, settingsRowHeight)
 	m.settingsTop = top
 	m.modalListRow = 2 // title(0) + blank(1) → list starts at content row 2
 
@@ -354,7 +355,7 @@ func (m *Model) renderSettingsModal() string {
 			emit("  "+group(settingsMetas[i].group), -1)
 		}
 		left := fmt.Sprintf(" %-*s ‹ %-*s ›", labelW, settingsMetas[i].label, valW, m.settingsValue(i))
-		left = padRight(left, leftW)
+		left = layout.PadRight(left, leftW)
 		if i == m.settingsCur {
 			left = m.theme.tableSelStyle.Render(left)
 		}

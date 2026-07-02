@@ -260,7 +260,7 @@ func (f *File) loadMachO() error {
 	}
 	f.Symbols = append(f.Symbols, machoImportSymbols(mf, f.raw, base, libs)...)
 
-	f.entry = machoEntry(mf, textSeg, base)
+	f.entry = machoEntry(mf, textSeg)
 	f.loadMachOInfo(mf) // reads mf.Symtab (Stripped), so before it is dropped below
 	f.dwarfAvail = f.machoHasDWARF(mf)
 	f.header = f.machoHeaderInfo(mf)
@@ -953,7 +953,7 @@ func neutralFlags(alloc, write, exec bool) string {
 
 // machoEntry resolves the entry point. LC_MAIN records an offset from the start
 // of __TEXT; we add the segment's virtual base to recover the address.
-func machoEntry(mf *macho.File, textSeg *macho.Segment, base uint64) uint64 {
+func machoEntry(mf *macho.File, textSeg *macho.Segment) uint64 {
 	for _, l := range mf.Loads {
 		lb, ok := l.(macho.LoadBytes)
 		if !ok {

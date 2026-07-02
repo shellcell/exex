@@ -8,6 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // View renders the screen.
@@ -93,7 +95,7 @@ type helpEntry struct {
 func (m *Model) renderHelpModal() string {
 	const keyW = 16
 	row := func(keys, desc string) helpEntry {
-		return helpEntry{text: m.theme.helpKeyStyle.Render(padVisual(keys, keyW)) + " " + m.theme.helpDescStyle.Render(desc)}
+		return helpEntry{text: m.theme.helpKeyStyle.Render(layout.PadVisual(keys, keyW)) + " " + m.theme.helpDescStyle.Render(desc)}
 	}
 	head := func(s string) helpEntry { return helpEntry{head: s} }
 	blank := helpEntry{}
@@ -194,7 +196,7 @@ func (m *Model) renderHelpModal() string {
 		div := m.theme.srcShadowStyle.Render("│")
 		n := max(len(leftLines), len(rightLines))
 		for i := range n {
-			l, r := padVisual("", lw), padVisual("", rw)
+			l, r := layout.PadVisual("", lw), layout.PadVisual("", rw)
 			if i < len(leftLines) {
 				l = leftLines[i]
 			}
@@ -205,7 +207,7 @@ func (m *Model) renderHelpModal() string {
 		}
 	} else {
 		bodyRows = append(bodyRows, leftLines...)
-		bodyRows = append(bodyRows, padVisual("", lw))
+		bodyRows = append(bodyRows, layout.PadVisual("", lw))
 		bodyRows = append(bodyRows, rightLines...)
 	}
 
@@ -215,7 +217,7 @@ func (m *Model) renderHelpModal() string {
 	total := len(bodyRows)
 	maxRows := max(1, m.height-8)
 	if total > maxRows {
-		m.helpScroll = clamp(m.helpScroll, 0, total-maxRows)
+		m.helpScroll = layout.Clamp(m.helpScroll, 0, total-maxRows)
 		bodyRows = bodyRows[m.helpScroll : m.helpScroll+maxRows]
 		hint = fmt.Sprintf("↑/↓ scroll · %d–%d of %d · Esc/any key closes",
 			m.helpScroll+1, m.helpScroll+maxRows, total)
@@ -230,7 +232,7 @@ func (m *Model) renderHelpModal() string {
 	b.WriteString(m.theme.modalTitle("Keybindings"))
 	b.WriteString("\n\n")
 	for _, r := range bodyRows {
-		b.WriteString(fitANSIWidth(r, rowCap))
+		b.WriteString(layout.FitANSIWidth(r, rowCap))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
@@ -262,9 +264,9 @@ func (m *Model) helpColumn(entries []helpEntry) []string {
 			if fill := w - lipgloss.Width(label); fill > 0 {
 				line += m.theme.srcShadowStyle.Render(strings.Repeat("─", fill))
 			}
-			out[i] = padVisual(line, w)
+			out[i] = layout.PadVisual(line, w)
 		default:
-			out[i] = padVisual(e.text, w)
+			out[i] = layout.PadVisual(e.text, w)
 		}
 	}
 	return out
@@ -275,7 +277,7 @@ func (m *Model) helpColumn(entries []helpEntry) []string {
 // common list width.
 func (t Theme) modalTitle(s string) string { return t.titleStyle.Render(" " + s + " ") }
 func (t Theme) modalHint(s string) string  { return t.footerStyle.Padding(0).Render(s) }
-func modalListWidth(termW int) int         { return clamp(termW-8, 40, 120) }
+func modalListWidth(termW int) int         { return layout.Clamp(termW-8, 40, 120) }
 
 // overlayCenter draws a pre-rendered modal centred over bg.
 func (m *Model) overlayCenter(bg, modal string) string {
@@ -283,7 +285,7 @@ func (m *Model) overlayCenter(bg, modal string) string {
 	modal = renderStyle(modal, mw, m.theme.tableRowStyle)
 	modal = m.theme.renderViewBackground(modal, mw)
 	mh := lipgloss.Height(modal)
-	return overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
+	return layout.Overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
 }
 
 func (m *Model) renderGotoModal() string {
@@ -291,7 +293,7 @@ func (m *Model) renderGotoModal() string {
 	rowW := modalListWidth(m.width)
 	sb.WriteString(m.theme.modalTitle("Jump to"))
 	sb.WriteString("\n")
-	sb.WriteString(fitANSIWidth(m.gotoScopeBar(), rowW))
+	sb.WriteString(layout.FitANSIWidth(m.gotoScopeBar(), rowW))
 	sb.WriteString("\n")
 	sb.WriteString(m.gotoInput.View())
 	sb.WriteString("\n")
@@ -303,8 +305,8 @@ func (m *Model) renderGotoModal() string {
 	} else {
 		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
-		visible := clamp(m.height-11, 3, 40)
-		gotoTop := visualTop(m.gotoSel, m.gotoTop, len(m.gotoResults), visible, func(int) int { return 1 })
+		visible := layout.Clamp(m.height-11, 3, 40)
+		gotoTop := layout.VisualTop(m.gotoSel, m.gotoTop, len(m.gotoResults), visible, func(int) int { return 1 })
 		m.gotoTop = gotoTop
 		end := min(gotoTop+visible, len(m.gotoResults))
 		labelW := rowW - addrW - 9
@@ -314,14 +316,14 @@ func (m *Model) renderGotoModal() string {
 			if t.hasAddr || t.kind == gkAddr {
 				loc = m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, t.addr))
 			} else if t.kind == gkLib {
-				loc = padVisual("", 2+addrW)
+				loc = layout.PadVisual("", 2+addrW)
 			}
 			// Colour the kind tag and label by kind so mixed results (the All scope)
 			// are distinguishable at a glance.
-			label := m.gotoKindStyle(t).Render(truncateMiddle(t.label, labelW))
+			label := m.gotoKindStyle(t).Render(layout.TruncateMiddle(t.label, labelW))
 			line := fmt.Sprintf(" %s  %s %s",
 				m.gotoTagStyle(t.kind).Render(t.kind.tag()), loc, label)
-			line = padRight(line, rowW)
+			line = layout.PadRight(line, rowW)
 			if i == m.gotoSel {
 				line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 			}
@@ -524,7 +526,7 @@ func (m *Model) renderTabs() string {
 	}
 	// Clamp to width: a too-wide tab strip would wrap and push the whole body
 	// down a row (and the status line off-screen).
-	return padRight(row, m.width)
+	return layout.PadRight(row, m.width)
 }
 
 // truncLeftWidth trims s from the left to fit w columns, keeping the tail (the
@@ -692,7 +694,7 @@ func (m *Model) renderFooter() string {
 
 	if m.status == "" {
 		// No message: hints fill the line, shrinking with an ellipsis if too wide.
-		return padRight(" "+fitJoin(parts, sep, m.width-1), m.width)
+		return layout.PadRight(" "+fitJoin(parts, sep, m.width-1), m.width)
 	}
 
 	// A status message dominates: it keeps its full width on the right as a badge
@@ -707,10 +709,10 @@ func (m *Model) renderFooter() string {
 	badge := lipgloss.NewStyle().Bold(true).Background(bg).Foreground(contrastOn(bg))
 	msg := badge.Render(" " + m.status + " ")
 	if lipgloss.Width(msg) > m.width {
-		msg = fitANSIWidth(msg, m.width)
+		msg = layout.FitANSIWidth(msg, m.width)
 	}
 	msgW := lipgloss.Width(msg)
-	left := padRight(" "+fitJoin(parts, sep, m.width-msgW-1), m.width-msgW)
+	left := layout.PadRight(" "+fitJoin(parts, sep, m.width-msgW-1), m.width-msgW)
 	return left + msg
 }
 

@@ -2,19 +2,19 @@
 
 package ui
 
-// Default build: Chroma-based assembly syntax highlighting. The `lite` build
-// (disasm_syntax_lite.go) swaps in a small theme-driven token highlighter and
-// drops Chroma's ~3 MB of embedded lexer/style data.
+// Default build: Chroma-based assembly syntax highlighting from the curated
+// lexer/style set. The `lite` build (disasm_syntax_lite.go) swaps in a small
+// theme-driven token highlighter and drops Chroma entirely.
 
 import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/alecthomas/chroma/v2/styles"
 
 	"github.com/rabarbra/exex/internal/arch"
+	"github.com/rabarbra/exex/internal/chromalexers"
+	"github.com/rabarbra/exex/internal/chromastyles"
 	"github.com/rabarbra/exex/internal/disasm"
 )
 
@@ -44,7 +44,7 @@ func newDisasmAsmLexer(arch arch.Arch) chroma.Lexer {
 		lexer_names = append([]string{"ArmAsm"}, lexer_names...)
 	}
 	for _, name := range lexer_names {
-		if lexer := lexers.Get(name); lexer != nil {
+		if lexer := chromalexers.Get(name); lexer != nil {
 			return chroma.Coalesce(lexer)
 		}
 	}
@@ -54,6 +54,9 @@ func newDisasmAsmLexer(arch arch.Arch) chroma.Lexer {
 // renderInstTextStyled uses Chroma for assembly syntax, overlaying semantic link
 // styles on followable address literals.
 func (m *Model) renderInstTextStyled(text string, class disasm.InstClass, instAddr uint64) string {
+	if _, ok := chromastyles.Lookup(sourceSyntaxTheme(m.cfg)); !ok {
+		return m.renderInstTextFallback(text, class, instAddr)
+	}
 	lexer := disasmAsmLexerFor(m.file.Arch())
 	if lexer == nil {
 		return m.renderInstTextFallback(text, class, instAddr)
@@ -131,9 +134,9 @@ func (m *Model) disasmTokenStyle(tt chroma.TokenType) lipgloss.Style {
 		return st
 	}
 	themeName := sourceSyntaxTheme(m.cfg)
-	chromaStyle := styles.Get(themeName)
-	if chromaStyle == nil {
-		chromaStyle = styles.Fallback
+	chromaStyle, ok := chromastyles.Lookup(themeName)
+	if !ok || chromaStyle == nil {
+		chromaStyle = chromastyles.Fallback
 	}
 	st := chromaStyleEntryToLipgloss(chromaStyle.Get(tt), sourceSyntaxForeground(m.cfg))
 	m.disasmTokenStyles[int(tt)] = st

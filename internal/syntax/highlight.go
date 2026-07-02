@@ -1,8 +1,8 @@
 // Package syntax highlights source files for display in the TUI source pane.
 //
-// The tokeniser (Chroma) is compiled in only for the default build. The `lite`
-// build tag swaps in a small built-in highlighter (highlight_lite.go), dropping
-// Chroma and its embedded lexer/style data while keeping basic source colours.
+// A curated Chroma tokeniser is compiled in only for the default build. The
+// `lite` build tag swaps in a small built-in highlighter (highlight_lite.go),
+// dropping Chroma while keeping basic source colours.
 package syntax
 
 import "sync"

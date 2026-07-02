@@ -29,10 +29,10 @@ shasum -a 256 -c checksums.txt
 
 | Build | Size | Syntax highlighting |
 |-------|------|---------------------|
-| **full** (`exex-…-<os>-<arch>.tar.gz`) | larger | Chroma — full multi-language source + asm highlighting |
+| **full** (`exex-…-<os>-<arch>.tar.gz`) | larger | Chroma — curated native/common source lexers + asm highlighting |
 | **lite** (`exex-…-<os>-<arch>-lite.tar.gz`) | smaller | built-in minimal highlighter |
 
-Everything else is identical, and both honour the same themes/colours. Exact archive sizes vary by platform and Go/dependency versions. Pick **lite** for the smaller binary, **full** for the richest colouring.
+Everything else is identical, and both honour the same themes/colours. Source languages outside the curated Chroma set fall back to the built-in highlighter. Exact archive sizes vary by platform and Go/dependency versions. Pick **lite** for the smaller binary, **full** for the richest colouring.
 
 ### Usage
 

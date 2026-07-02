@@ -1,0 +1,21 @@
+# Chroma style XML files copied into internal/chromastyles/embedded.
+# swapoff must stay present because it is the runtime fallback style.
+swapoff.xml
+nord.xml
+catppuccin-mocha.xml
+catppuccin-latte.xml
+catppuccin-frappe.xml
+catppuccin-macchiato.xml
+dracula.xml
+github.xml
+github-dark.xml
+monokai.xml
+solarized-dark.xml
+solarized-light.xml
+xcode.xml
+xcode-dark.xml
+native.xml
+vim.xml
+onedark.xml
+gruvbox.xml
+tokyonight-night.xml

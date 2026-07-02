@@ -7,15 +7,18 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/alecthomas/chroma/v2/styles"
 
+	"github.com/rabarbra/exex/internal/chromalexers"
+	"github.com/rabarbra/exex/internal/chromastyles"
 	"github.com/rabarbra/exex/internal/theme"
 )
 
 // HighlightLines returns ANSI-styled source lines without using a cache. It uses
 // the minimal highlighter when Chroma cannot identify or tokenise the file.
 func HighlightLines(filename string, src []string, themeName string) []string {
+	if strings.TrimSpace(themeName) == "" {
+		themeName = defaultTheme
+	}
 	lexer := lexerFor(filename, src)
 	if lexer == nil {
 		// Unknown file type: fall back to the tiny built-in highlighter rather
@@ -24,9 +27,9 @@ func HighlightLines(filename string, src []string, themeName string) []string {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	st := styles.Get(themeName)
-	if st == nil {
-		st = styles.Fallback
+	st, ok := chromastyles.Lookup(themeName)
+	if !ok || st == nil {
+		return minimalHighlight(filename, src, themeName)
 	}
 	fallbackFG := chromaFallbackForeground(themeName)
 
@@ -62,20 +65,19 @@ func HighlightLines(filename string, src []string, themeName string) []string {
 }
 
 // lexerFor picks the Chroma lexer for a file. Assembly sources (.s/.S) are
-// special-cased to GAS: three lexers (ArmAsm, GAS, R) all register that
-// extension at the same priority, so lexers.Match can pick R and highlight
-// assembly as the R language. GAS (GNU assembler) is what these files actually
-// are. Everything else uses the normal filename match, then content analysis.
+// special-cased to GAS because ArmAsm and GAS both register that extension, and
+// GAS (GNU assembler) is the usual format for those files. Everything else uses
+// the normal curated filename match, then content analysis.
 func lexerFor(filename string, src []string) chroma.Lexer {
 	if lowerExt(filename) == ".s" {
-		if l := lexers.Get("gas"); l != nil {
+		if l := chromalexers.Get("gas"); l != nil {
 			return l
 		}
 	}
-	if l := lexers.Match(filename); l != nil {
+	if l := chromalexers.Match(filename); l != nil {
 		return l
 	}
-	return lexers.Analyse(strings.Join(src, "\n"))
+	return chromalexers.Analyse(strings.Join(src, "\n"))
 }
 
 // chromaToLipgloss converts the subset of Chroma style attributes used here.

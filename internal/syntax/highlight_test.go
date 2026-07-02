@@ -3,11 +3,14 @@
 package syntax
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
+
+	"github.com/rabarbra/exex/internal/chromastyles"
 )
 
 func TestHighlightLines(t *testing.T) {
@@ -49,6 +52,46 @@ func TestAssemblySourceUsesGAS(t *testing.T) {
 		if got := l.Config().Name; got != "GAS" {
 			t.Fatalf("%s: lexer = %q, want GAS", name, got)
 		}
+	}
+}
+
+func TestGoSourceUsesCuratedLexer(t *testing.T) {
+	l := lexerFor("main.go", []string{"package main", "func main() {}"})
+	if l == nil {
+		t.Fatal("main.go: no lexer")
+	}
+	if got := l.Config().Name; got != "Go" {
+		t.Fatalf("main.go: lexer = %q, want Go", got)
+	}
+}
+
+func TestUnsupportedLanguageFallsBackToMinimal(t *testing.T) {
+	src := []string{`defmodule Demo do`}
+	if l := lexerFor("main.exs", src); l != nil {
+		t.Fatalf("main.exs: lexer = %q, want nil", l.Config().Name)
+	}
+	hl := HighlightLines("main.exs", src, defaultTheme)
+	if len(hl) != len(src) {
+		t.Fatalf("highlighted line count = %d, want %d", len(hl), len(src))
+	}
+	if got := stripANSI(hl[0]); got != src[0] {
+		t.Fatalf("plain text = %q, want %q", got, src[0])
+	}
+	if !strings.Contains(hl[0], "\x1b[") {
+		t.Fatal("expected minimal highlighter ANSI colour codes")
+	}
+}
+
+func TestUnsupportedChromaStyleFallsBackToMinimal(t *testing.T) {
+	const style = "rose-pine"
+	if _, ok := chromastyles.Lookup(style); ok {
+		t.Fatalf("%s is bundled; pick an unbundled style for this test", style)
+	}
+	src := []string{"package main", "func main() {}"}
+	got := HighlightLines("main.go", src, style)
+	want := minimalHighlight("main.go", src, style)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unsupported style did not use minimal fallback\ngot:  %q\nwant: %q", got, want)
 	}
 }
 

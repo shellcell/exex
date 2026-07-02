@@ -103,13 +103,14 @@ There are two builds. They are identical except for syntax highlighting:
 
 | Build | Size | Syntax highlighting |
 |-------|------|---------------------|
-| **full** | larger | [Chroma](https://github.com/alecthomas/chroma) — full multi-language source highlighting and assembly highlighting |
+| **full** | larger | [Chroma](https://github.com/alecthomas/chroma) — curated native/common source lexers and assembly highlighting |
 | **lite** | smaller | a small built-in highlighter (categorized source keywords/function names; categorized asm mnemonics plus registers / immediates / links) |
 
-The lite build drops Chroma and its embedded lexer/style data. Exact binary and
-archive sizes vary by platform and Go/dependency versions, but lite is the
-smaller download. Both builds honour the same themes and `colors:` config; the
-built-in highlighter follows your theme too.
+The full build bundles a curated Chroma lexer/style set; source languages outside
+that set fall back to the built-in highlighter. The lite build drops Chroma
+entirely. Exact binary and archive sizes vary by platform and Go/dependency
+versions, but lite is the smaller download. Both builds honour the same themes
+and `colors:` config; the built-in highlighter follows your theme too.
 
 Pick **lite** if you want the smaller binary, **full** for the richest colouring.
 

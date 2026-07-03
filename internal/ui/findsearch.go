@@ -18,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/bytesearch"
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/views/strs"
@@ -75,6 +76,63 @@ type findHit struct {
 	sym     string
 }
 
+// openFindQuery opens the free-text global-search prompt (the `l` key): type any
+// value — a symbol name, a string, or a hex/decimal address — and it runs the
+// same content scan `f` does, seeded by the typed query instead of the caret.
+func (m *Model) openFindQuery() {
+	if m.findQueryInput.Prompt == "" {
+		m.findQueryInput = newPromptInput("symbol · string · 0xaddr", "search ")
+	}
+	m.findQueryInput.SetValue("")
+	m.findQueryActive = true
+	m.findQueryInput.Focus()
+}
+
+// updateFindQuery drives the free-text prompt: Enter runs the search, Esc closes.
+func (m *Model) updateFindQuery(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "esc":
+		m.findQueryActive = false
+		m.findQueryInput.Blur()
+		return m, nil
+	case "enter":
+		q := m.queryForText(strings.TrimSpace(m.findQueryInput.Value()))
+		m.findQueryActive = false
+		m.findQueryInput.Blur()
+		if !q.hasAddr && q.text == "" {
+			m.setStatus("type something to search for", true)
+			return m, nil
+		}
+		return m, m.startFindSearchQuery(q)
+	}
+	var cmd tea.Cmd
+	m.findQueryInput, cmd = m.findQueryInput.Update(msg)
+	return m, cmd
+}
+
+// queryForText interprets a free-text query: a 0x-prefixed literal is an address
+// (searched as an address across disasm/data/relocs + the string at it); anything
+// else is a literal text/byte search across disasm text, string content, and the
+// raw file bytes. Text is not resolved to a symbol — an address is only ever a
+// 0x… value, so plain words search content, not the symbol table.
+func (m *Model) queryForText(s string) findQuery {
+	if s == "" {
+		return findQuery{}
+	}
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		if a, err := parseAddr(s); err == nil {
+			return findQuery{label: s, addr: a, hasAddr: true}
+		}
+	}
+	return findQuery{label: s, text: s}
+}
+
+// startFindSearchQuery runs the global search for an already-built query (the
+// free-text path); startFindSearch builds one from a seed first.
+func (m *Model) startFindSearchQuery(q findQuery) tea.Cmd {
+	return m.launchFindSearch(q)
+}
+
 // queryForSeed resolves a chosen seed into a search query.
 func (m *Model) queryForSeed(s findSeed) findQuery {
 	q := findQuery{label: s.preview}
@@ -105,6 +163,13 @@ func (m *Model) startFindSearch(s findSeed) tea.Cmd {
 		m.setStatus("nothing searchable in that seed", true)
 		return nil
 	}
+	return m.launchFindSearch(q)
+}
+
+// launchFindSearch opens the results modal and launches the concurrent per-source
+// scans for a resolved query — the shared core of the caret-seeded (`f`) and
+// free-text (`l`) searches.
+func (m *Model) launchFindSearch(q findQuery) tea.Cmd {
 	m.stopFindSearch()
 	m.findSeq++
 	seq := m.findSeq
@@ -123,18 +188,23 @@ func (m *Model) startFindSearch(s findSeed) tea.Cmd {
 	done := make(chan struct{})
 	m.findCancel = done
 
+	// disasm/data/relocs each match by address (operand refs / pointer words /
+	// target) and by text (instruction text / raw bytes / bound symbol); strings by
+	// text content plus the string at an address. So every source runs whenever the
+	// query carries either an address or text.
+	any := q.hasAddr || q.text != ""
 	m.findFacetPending = [5]bool{}
 	var cmds []tea.Cmd
-	if q.hasAddr {
-		cmds = append(cmds, m.findDisasmCmd(q, seq, done), m.findDataCmd(q, seq, done))
-		m.findFacetPending[ffDisasm], m.findFacetPending[ffData] = true, true
-	}
-	if q.text != "" {
-		cmds = append(cmds, m.findStringsCmd(q, seq, done))
+	if any {
+		cmds = append(cmds,
+			m.findDisasmCmd(q, seq, done),
+			m.findDataCmd(q, seq, done),
+			m.findStringsCmd(q, seq, done),
+			m.findRelocsCmd(q, seq, done),
+		)
+		m.findFacetPending[ffDisasm] = true
+		m.findFacetPending[ffData] = true
 		m.findFacetPending[ffStrings] = true
-	}
-	if q.hasAddr || q.text != "" {
-		cmds = append(cmds, m.findRelocsCmd(q, seq, done))
 		m.findFacetPending[ffRelocs] = true
 	}
 	m.findPending = len(cmds)
@@ -151,72 +221,113 @@ type findPartialMsg struct {
 	hits  []findHit
 }
 
-// findDisasmCmd scans the executable image for operand references to the address
-// (the parallel xref scanner) — the slowest source, streamed in when ready.
+// findDisasmCmd scans the executable image for instructions matching the query:
+// operand references to the address (an address query) and/or instruction text
+// containing the search text (a free-text query). The slowest source.
 func (m *Model) findDisasmCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd {
-	scanRefs := m.scanDisasmRefs
+	scan := m.scanDisasmMatching
+	needle := strings.ToLower(q.text)
 	return func() tea.Msg {
+		match := func(text string) bool {
+			if q.hasAddr && instReferences(text, q.addr) {
+				return true
+			}
+			return needle != "" && layout.ContainsFold(text, needle)
+		}
 		var hits []findHit
-		for _, h := range scanRefs(q.addr, done) {
+		for _, h := range scan(match, done) {
 			hits = append(hits, findHit{facet: ffDisasm, addr: h.addr, hasAddr: true, text: h.text, sym: h.sym})
 		}
 		return findPartialMsg{seq: seq, facet: ffDisasm, hits: hits}
 	}
 }
 
-// findDataCmd finds every file offset holding the address as a pointer-width
-// little-endian word.
+// findDataCmd finds byte occurrences in the file image: the address as a
+// pointer-width little-endian word (an address query) and/or the search text as
+// raw ASCII bytes (a free-text query) — the hex/raw facet.
 func (m *Model) findDataCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd {
 	file := m.file
 	ptrBytes := m.file.PointerBytes()
 	sectionAt := m.sectionAtOffset
 	addrForOff := m.addrForOffset
 	return func() tea.Msg {
-		pat := make([]byte, ptrBytes)
-		v := q.addr
-		for i := range pat {
-			pat[i] = byte(v)
-			v >>= 8
-		}
 		raw := file.Raw()
 		var hits []findHit
-		for pos, n := 0, 0; n < findMaxPerFacet; n++ {
-			if scanCancelled(done) {
-				break
+		// Each pattern to look for, with the note shown for a hit.
+		type pat struct {
+			bytes []byte
+			note  string
+		}
+		var pats []pat
+		if q.hasAddr {
+			pb := make([]byte, ptrBytes)
+			v := q.addr
+			for i := range pb {
+				pb[i] = byte(v)
+				v >>= 8
 			}
-			idx := bytesearch.FindBytes(raw, pat, pos, true)
-			if idx < 0 {
-				break
+			pats = append(pats, pat{pb, "pointer word"})
+		}
+		if q.text != "" {
+			pats = append(pats, pat{[]byte(q.text), "bytes"})
+		}
+		for _, p := range pats {
+			if len(p.bytes) == 0 {
+				continue
 			}
-			off := uint64(idx)
-			h := findHit{facet: ffData, off: off, text: "pointer word"}
-			if a, ok := addrForOff(off); ok {
-				h.addr, h.hasAddr = a, true
+			for pos, n := 0, 0; n < findMaxPerFacet; n++ {
+				if scanCancelled(done) {
+					break
+				}
+				idx := bytesearch.FindBytes(raw, p.bytes, pos, true)
+				if idx < 0 {
+					break
+				}
+				off := uint64(idx)
+				h := findHit{facet: ffData, off: off, text: p.note}
+				if a, ok := addrForOff(off); ok {
+					h.addr, h.hasAddr = a, true
+				}
+				if sec := sectionAt(off); sec != nil {
+					h.sym = sec.Name
+				}
+				hits = append(hits, h)
+				pos = idx + 1
 			}
-			if sec := sectionAt(off); sec != nil {
-				h.sym = sec.Name
-			}
-			hits = append(hits, h)
-			pos = idx + 1
 		}
 		return findPartialMsg{seq: seq, facet: ffData, hits: hits}
 	}
 }
 
-// findStringsCmd finds strings whose bytes contain the seed text.
+// findStringsCmd finds strings whose bytes contain the seed text, plus — for an
+// address query — the string that lives at the target address (so searching an
+// address surfaces the string it is, when it is one).
 func (m *Model) findStringsCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd {
 	file := m.file
 	return func() tea.Msg {
-		needle := strings.ToLower(q.text)
 		var hits []findHit
-		for _, e := range file.Strings() {
-			if len(hits) >= findMaxPerFacet || scanCancelled(done) {
-				break
+		mk := func(e binfile.StringEntry, sym string) findHit {
+			return findHit{facet: ffStrings, addr: e.Addr, off: e.Offset, hasAddr: e.HasAddr, text: strs.Sanitize(file.StringText(e)), sym: sym}
+		}
+		if q.hasAddr {
+			for _, e := range file.Strings() {
+				if e.HasAddr && q.addr >= e.Addr && q.addr < e.Addr+uint64(e.Len) {
+					hits = append(hits, mk(e, "at target"))
+					break
+				}
 			}
-			if !layout.ContainsFoldBytes(file.StringBytes(e), needle) {
-				continue
+		}
+		if q.text != "" {
+			needle := strings.ToLower(q.text)
+			for _, e := range file.Strings() {
+				if len(hits) >= findMaxPerFacet || scanCancelled(done) {
+					break
+				}
+				if !layout.ContainsFoldBytes(file.StringBytes(e), needle) {
+					continue
+				}
+				hits = append(hits, mk(e, e.Section))
 			}
-			hits = append(hits, findHit{facet: ffStrings, addr: e.Addr, off: e.Offset, hasAddr: e.HasAddr, text: strs.Sanitize(file.StringText(e)), sym: e.Section})
 		}
 		return findPartialMsg{seq: seq, facet: ffStrings, hits: hits}
 	}
@@ -459,6 +570,20 @@ func (m *Model) facetStillScanning() bool {
 		return m.findRunning
 	}
 	return int(m.findFacet) < len(m.findFacetPending) && m.findFacetPending[m.findFacet]
+}
+
+// renderFindQueryModal draws the free-text search prompt.
+func (m *Model) renderFindQueryModal() string {
+	rowW := modalListWidth(m.width)
+	var sb strings.Builder
+	sb.WriteString(m.theme.modalTitle("Search the binary"))
+	sb.WriteByte('\n')
+	sb.WriteByte('\n')
+	sb.WriteString(" " + m.findQueryInput.View())
+	sb.WriteByte('\n')
+	sb.WriteByte('\n')
+	sb.WriteString(" " + m.theme.modalHint("↵ search disasm · data · strings · relocs   ·   Esc cancel"))
+	return m.theme.modalStyle.Render(layout.PadRight(sb.String(), rowW))
 }
 
 // findRunningNote reports how many of the source scans are still in flight, so

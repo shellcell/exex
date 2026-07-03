@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	tea "charm.land/bubbletea/v2"
+	"testing"
+)
 
 // TestFindModalSeedsAndSearch: f collects search seeds from the caret and, on
 // selection, opens the global-search results modal for that seed.
@@ -135,5 +138,36 @@ func TestFindSearchFacetsAndStreaming(t *testing.T) {
 	}
 	if m.facetStillScanning() {
 		t.Error("data facet reported but still marked scanning")
+	}
+}
+
+// TestFindQueryFreeText: the `l` global search opens a prompt, interprets a hex
+// literal as an address query (all address sources) and free text as a string
+// query, then runs the same content scan.
+func TestFindQueryFreeText(t *testing.T) {
+	h := newKeyHarness(t, systemBinary(t))
+	h.goView(modeDisasm, "4")
+	h.press("l")
+	if !h.m().findQueryActive {
+		t.Fatal("l did not open the free-text search prompt")
+	}
+	for _, r := range "0x1000" {
+		h.pump(tea.KeyPressMsg(tea.Key{Text: string(r), Code: r}))
+	}
+	h.press("enter")
+	if h.m().findQueryActive {
+		t.Error("prompt still open after Enter")
+	}
+	if !h.m().findResultsActive {
+		t.Fatalf("Enter did not start the search; status=%q", h.m().status)
+	}
+	if !h.m().findQuery.hasAddr {
+		t.Error("hex literal not interpreted as an address")
+	}
+
+	// Free text stays a string query.
+	q := h.m().queryForText("hello")
+	if q.text != "hello" {
+		t.Errorf("text query text = %q, want hello", q.text)
 	}
 }

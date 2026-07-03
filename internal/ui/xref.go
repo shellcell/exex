@@ -22,6 +22,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
@@ -161,11 +162,16 @@ func (m *Model) xrefLabelForTarget(target uint64) string {
 
 // xrefScanCmd decodes the whole executable image in chunks (reusing the decode
 // cache) off the UI goroutine and collects instructions that reference target.
-// scanDisasmRefs decodes the executable image in parallel chunks and collects
-// every instruction whose resolved operand address equals target. Shared by the
-// xref scan and the global value search; the caller captures svc/img/file/chunk
-// outside its goroutine so the scan never touches the Model.
+// scanDisasmRefs collects every instruction whose resolved operand address
+// equals target — the xref query, and one of the find query's disasm matchers.
 func (m *Model) scanDisasmRefs(target uint64, done <-chan struct{}) []xrefHit {
+	return m.scanDisasmMatching(func(text string) bool { return instReferences(text, target) }, done)
+}
+
+// scanDisasmMatching decodes the executable image in parallel chunks and collects
+// every instruction whose text satisfies match. Shared by the xref scan and the
+// global search (operand-reference or free-text matching).
+func (m *Model) scanDisasmMatching(match func(text string) bool, done <-chan struct{}) []xrefHit {
 	svc := m.disasmService()
 	img := m.file.ExecImage()
 	file := m.file
@@ -200,19 +206,20 @@ func (m *Model) scanDisasmRefs(target uint64, done <-chan struct{}) []xrefHit {
 				return
 			}
 			var hits []xrefHit
-			for _, inst := range svc.DecodeRange(start, chunk, xrefLead) {
+			svc.DecodeRangeFunc(start, chunk, xrefLead, func(inst disasm.Inst) bool {
 				if scanCancelled(done) {
-					return
+					return false
 				}
-				if !instReferences(inst.Text, target) {
-					continue
+				if !match(inst.Text) {
+					return true
 				}
 				sym := ""
 				if s, ok := file.SymbolAt(inst.Addr); ok {
 					sym = s.Display()
 				}
 				hits = append(hits, xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym})
-			}
+				return true
+			})
 			results[i] = hits
 		}(i, start)
 	}

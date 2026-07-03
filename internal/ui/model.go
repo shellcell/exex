@@ -331,6 +331,11 @@ type findState struct {
 	findTotal         int     // hits in the active facet before the text filter
 	findPending       int     // source scans still running (0 = done)
 	findFacetPending  [5]bool // per-facet: is that source still scanning? (index by findFacet)
+
+	// Free-text query modal (the `l` global search): type anything, then run the
+	// same content scan the caret-seeded `f` uses.
+	findQueryActive bool
+	findQueryInput  textinput.Model
 }
 
 // searchState stores modal and async state for view searches.

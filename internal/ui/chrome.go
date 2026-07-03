@@ -50,6 +50,8 @@ func (m *Model) View() tea.View {
 		out = m.overlayCenter(out, m.renderFindModal())
 	case m.findResultsActive:
 		out = m.overlayCenter(out, m.renderFindResultsModal())
+	case m.findQueryActive:
+		out = m.overlayCenter(out, m.renderFindQueryModal())
 	}
 	m.viewCache = out
 	m.viewDirty = false
@@ -93,6 +95,7 @@ func (m *Model) renderHelpModal() string {
 		row("d/h/m", "go to addr in disasm / hex / raw"),
 		row("␣ / >", "open caret address in another view (menu)"),
 		row("f", "find the value under the caret across the binary"),
+		row("l", "search the binary for anything you type (disasm/data/strings/relocs)"),
 		row("⇧a/⇧s/⇧l", "copy address / name / line"),
 		row("t / ⇥", "switch view"),
 		row("/  n/N", "search · next/prev"),

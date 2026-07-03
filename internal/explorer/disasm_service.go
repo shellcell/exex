@@ -159,6 +159,22 @@ func (s *DisasmService) DecodeRange(start, size, lead int) []disasm.Inst {
 	return s.decodeAcross(img, decodeStart, win.End, win.Start)
 }
 
+// DecodeRangeFunc is DecodeRange streamed: it calls fn for each instruction in
+// the range instead of returning a slice, so a scan that keeps only matching
+// instructions never allocates the full decoded slice. fn returns false to stop.
+func (s *DisasmService) DecodeRangeFunc(start, size, lead int, fn func(disasm.Inst) bool) {
+	if s == nil || s.file == nil || s.dis == nil {
+		return
+	}
+	img := s.file.ExecImage()
+	win := img.Window(start, size)
+	if len(win.Data) == 0 {
+		return
+	}
+	decodeStart := max(0, win.Start-lead)
+	s.decodeAcrossFunc(img, decodeStart, win.End, win.Start, fn)
+}
+
 // DecodeAt returns a window containing addr and the instructions overlapping it.
 func (s *DisasmService) DecodeAt(addr uint64, before int) (binfile.Window, []disasm.Inst) {
 	if s == nil || s.file == nil || s.dis == nil {
@@ -242,11 +258,23 @@ func (s *DisasmService) decodeInstWindow(win binfile.Window, decodeStart int) []
 // jump. Only instructions at offset >= visibleStart are returned; the bytes
 // before it are decode-resync context that is dropped.
 func (s *DisasmService) decodeAcross(img *binfile.Image, decodeStart, end, visibleStart int) []disasm.Inst {
+	var out []disasm.Inst
+	s.decodeAcrossFunc(img, decodeStart, end, visibleStart, func(in disasm.Inst) bool {
+		out = append(out, in)
+		return true
+	})
+	return out
+}
+
+// decodeAcrossFunc is decodeAcross streamed: it calls fn for each visible
+// instruction instead of collecting them, so a whole-image scan (xref / find /
+// syscalls) never materialises the multi-hundred-MB slice of every instruction —
+// it keeps only the matches fn retains. fn returns false to stop early.
+func (s *DisasmService) decodeAcrossFunc(img *binfile.Image, decodeStart, end, visibleStart int, fn func(disasm.Inst) bool) {
 	if img == nil || s.dis == nil || decodeStart < 0 {
-		return nil
+		return
 	}
 	end = min(end, img.Len())
-	var out []disasm.Inst
 	for p := decodeStart; p < end; {
 		r := img.RegionAt(p)
 		if r == nil {
@@ -267,7 +295,10 @@ func (s *DisasmService) decodeAcross(img *binfile.Image, decodeStart, end, visib
 				stop = true
 				return false
 			}
-			out = append(out, in)
+			if !fn(in) {
+				stop = true
+				return false
+			}
 			return true
 		})
 		if stop {
@@ -275,7 +306,6 @@ func (s *DisasmService) decodeAcross(img *binfile.Image, decodeStart, end, visib
 		}
 		p = regEnd
 	}
-	return out
 }
 
 // options returns a consistent snapshot of mutable service options.

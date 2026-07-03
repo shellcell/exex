@@ -677,3 +677,33 @@ gap** and consistent indentation, and **centre their empty/searching message**
 horizontally and vertically. Goto results show a **view badge**; the syscalls
 modal cycles scope on **`⇥`** (not just `t`). The find modal shows a live
 **"● searching N sources"** indicator while the concurrent scans complete.
+
+Follow-ups: **`l`** opens a **free-text global search** — type a symbol, string,
+or hex/decimal address and it runs the same content scan (a hex literal or a
+resolved symbol name searches disasm/data/relocs; any text searches strings), so
+you can search for something not under the caret. And an **address search now
+surfaces the string that lives *at* the target address** (tagged "at target"), so
+searching an address tells you what it is when it's a string. In the **Hex/Raw**
+views the Pointer seed reads the **pointer-word-aligned** value the follow-pointer
+action would use, so `f` mid-pointer matches `Enter`.
+
+The **`l`** free-text query splits cleanly: a `0x…` literal is an **address**
+search (operand refs / pointer words / reloc targets / the string at it); anything
+else is a **literal text/byte** search — instruction text (`disasm`), string
+content (`strings`), and the raw file bytes (`data` = hex/raw) — no symbol
+resolution, since an address is only ever a `0x…` value.
+
+**Perf/allocation review** (no perfreport regression: parse 6.8 ms / 9.2 MB,
+disasm render ~331 KB, retained heap 2.92 MB, peak 138 MB — all stable). The
+whole-image scan shared by xref / find / syscalls decoded every instruction into a
+multi-hundred-MB slice just to filter it; a streamed decode (`DecodeRangeFunc`,
+callback per instruction, no slice) cut the xref/find scan's allocation from
+**457 MB → 134 MB (3.4×)** with identical results (guarded by
+`TestDecodeRangeFuncMatchesSlice`). Per-instruction matching is allocation-free
+(`ContainsFold` folds against a pre-lowercased needle); the data/strings/relocs
+sources are near-zero alloc (the byte scan is 81 KB / 22 allocs). The residual
+~134 MB / 8.9 M allocs is x/arch formatting each instruction's text — inherent to
+decoding, and only reducible by structural operand matching (a disasm-package
+change, left as a future item). The syscall direct scan still materialises its
+slice (it needs a look-back window for number recovery); streaming it via a ring
+buffer is a follow-up.

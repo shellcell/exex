@@ -295,6 +295,16 @@ type gotoState struct {
 	gotoAddrPhys bool      // interpret a typed address as physical (LMA), resolving to virtual
 }
 
+// jumpState stores the "open caret position in another view" modal: a fixed list
+// of target views, each with a preview of where it would land for the caret's
+// current position (a virtual address, a file offset, or both).
+type jumpState struct {
+	jumpActive  bool
+	jumpCaret   caret
+	jumpTargets []jumpTarget
+	jumpSel     int
+}
+
 // searchState stores modal and async state for view searches.
 type searchState struct {
 	searchInput      textinput.Model
@@ -382,6 +392,7 @@ type Model struct {
 	sourcePaneState
 	interactionState
 	gotoState
+	jumpState
 	searchState
 	settingsState
 	xrefState

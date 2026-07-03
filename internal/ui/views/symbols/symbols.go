@@ -155,6 +155,28 @@ func (st *State) FilterByLib(ctx view.Context, lib string) {
 	st.Recompute(ctx)
 }
 
+// FilterByName narrows the view to symbols matching name (the Relocs view's "go
+// to the bound symbol" jump). Every narrowing facet is cleared first so the
+// target can't be hidden by a stale scope/bind/type/lib filter.
+func (st *State) FilterByName(ctx view.Context, name string) {
+	st.Lib = ""
+	st.KindOn = false
+	st.BindOn = false
+	st.Scope = ScopeAll
+	st.Filter.SetValue(name)
+	st.Cur, st.Top = 0, 0
+	st.Recompute(ctx)
+}
+
+// CaretAddr returns the address of the symbol under the cursor, for the shell's
+// cross-view "open caret in…" jump.
+func (st *State) CaretAddr(ctx view.Context) (uint64, bool) {
+	if s, ok := st.current(ctx); ok && s.Addr != 0 {
+		return s.Addr, true
+	}
+	return 0, false
+}
+
 // ClickFacet toggles the facet button at screen column x on the status row,
 // returning whether a button was hit.
 func (st *State) ClickFacet(ctx view.Context, host view.Host, x int) bool {
@@ -523,7 +545,7 @@ func (st *State) Update(ctx view.Context, host view.Host, key string) {
 		st.ToggleAbbrevAll(host)
 	case ".":
 		st.ToggleAbbrev(host)
-	case "enter", " ":
+	case "enter":
 		st.activateRow(ctx, host)
 	case "d":
 		if sym, ok := st.current(ctx); ok {

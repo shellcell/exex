@@ -405,6 +405,49 @@ func (st *State) currentSegment() (binfile.Segment, bool) {
 	return st.Segments[st.Filtered[st.Cur]], true
 }
 
+// CaretAddr returns the base address of the section/segment under the cursor,
+// for the shell's cross-view "open caret in…" jump.
+func (st *State) CaretAddr() (uint64, bool) {
+	if st.ShowSegments {
+		if s, ok := st.currentSegment(); ok {
+			return s.Addr, true
+		}
+		return 0, false
+	}
+	if s, ok := st.currentSection(); ok {
+		return s.Addr, true
+	}
+	return 0, false
+}
+
+// SelectByAddr moves the cursor to the section/segment whose address range covers
+// addr (the shell's "open caret in Sections" jump), clearing filters that would
+// hide it. Reports whether one was found.
+func (st *State) SelectByAddr(addr uint64) bool {
+	st.Filter.SetValue("")
+	st.TypeOn, st.FlagsOn = false, false
+	st.Recompute()
+	covers := func(base, size uint64) bool {
+		if size == 0 {
+			return base == addr
+		}
+		return addr >= base && addr < base+size
+	}
+	for i, idx := range st.Filtered {
+		var base, size uint64
+		if st.ShowSegments {
+			base, size = st.Segments[idx].Addr, st.Segments[idx].Size
+		} else {
+			base, size = st.Sections[idx].Addr, st.Sections[idx].Size
+		}
+		if covers(base, size) {
+			st.Cur, st.Top = i, 0
+			return true
+		}
+	}
+	return false
+}
+
 // Render draws the view body.
 func (st *State) Render(ctx view.Context, host view.Host) string {
 	bodyH := ctx.BodyH

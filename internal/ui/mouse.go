@@ -121,7 +121,7 @@ func (m *Model) mouseOverRightPane(x int) bool {
 // modalActive reports whether a list/field overlay modal (not the search prompt,
 // which handles its own clicks) is open.
 func (m *Model) modalActive() bool {
-	return m.xrefActive || m.syscallActive || m.cpufeatActive || m.gotoActive || m.settingsActive
+	return m.xrefActive || m.syscallActive || m.cpufeatActive || m.gotoActive || m.settingsActive || m.jumpActive
 }
 
 // modalList returns the open modal's selection pointer, rendered scroll top, item
@@ -138,6 +138,8 @@ func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 		return &m.gotoSel, m.gotoTop, len(m.gotoResults), false, true
 	case m.settingsActive:
 		return &m.settingsCur, m.settingsTop, settingsFieldCount, true, true
+	case m.jumpActive:
+		return &m.jumpSel, 0, len(m.jumpTargets), false, true
 	}
 	return nil, 0, 0, false, false
 }
@@ -171,6 +173,8 @@ func (m *Model) modalClick(x, y int) bool {
 		modal = m.renderGotoModal()
 	case m.settingsActive:
 		modal = m.renderSettingsModal()
+	case m.jumpActive:
+		modal = m.renderJumpModal()
 	default:
 		return false
 	}
@@ -218,6 +222,9 @@ func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 		return m, nil
 	case m.settingsActive:
 		m.cycleSetting(1)
+		return m, nil
+	case m.jumpActive:
+		m.activateJump()
 		return m, nil
 	}
 	return m, nil

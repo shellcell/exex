@@ -97,6 +97,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.syscallActive {
 		return m.updateSyscallModal(msg, key)
 	}
+	if m.jumpActive {
+		return m.updateJumpModal(key)
+	}
 	if m.settingsActive {
 		return m.updateSettings(key)
 	}
@@ -481,6 +484,9 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 	case actionHeader:
 		m.headerActive = true
 		m.headerScroll = 0
+		return m, nil, true
+	case actionJumpCaret:
+		m.openJumpModal()
 		return m, nil, true
 	}
 	return m, nil, false

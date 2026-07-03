@@ -272,7 +272,7 @@ func (st *State) Update(ctx view.Context, host view.Host, key string) {
 		if lib, ok := st.CurrentLib(ctx); ok {
 			host.CopyToClipboard(lib, "library")
 		}
-	case "enter", " ":
+	case "enter":
 		if st.Cur < len(st.Rows) && st.Rows[st.Cur].Node.Leaf < 0 {
 			st.ensureCollapsed()
 			if layout.TreeToggleSubtree(st.Rows, st.Cur, st.collapsed) {

@@ -5,6 +5,8 @@ package ui
 // resolves the address (or file offset) and switches view, reporting via the
 // status line when the target can't be shown.
 
+import "fmt"
+
 // jumpDisasmAtAddr opens the disassembly view at addr, or reports why it can't.
 // When the target isn't in the current (exec-only) image but a section with
 // content covers it — e.g. a kernel/multiboot section that isn't flagged
@@ -50,6 +52,82 @@ func (m *Model) jumpRawAtAddr(addr uint64) {
 		return
 	}
 	m.openRawAt(off)
+}
+
+// jumpSymbolsAtAddr opens the Symbols view located on the symbol covering addr
+// (the cross-view "open caret in Symbols" jump), filtered to its name so it is
+// the visible selection.
+func (m *Model) jumpSymbolsAtAddr(addr uint64) {
+	sym, ok := m.file.SymbolAt(addr)
+	if !ok || sym.Name == "" {
+		m.setStatus(fmt.Sprintf("no symbol at 0x%x", addr), true)
+		return
+	}
+	m.symbols.FilterByName(m.viewContext(), sym.Name)
+	m.setMode(modeSymbols)
+	m.setStatus("symbol "+m.displaySymbolName(sym)+" — Esc clears filter", false)
+}
+
+// jumpSectionsAtAddr opens the Sections view with the section containing addr
+// selected.
+func (m *Model) jumpSectionsAtAddr(addr uint64) {
+	if !m.sections.SelectByAddr(addr) {
+		m.setStatus(fmt.Sprintf("no section contains 0x%x", addr), true)
+		return
+	}
+	m.setMode(modeSections)
+}
+
+// jumpRelocsAtAddr opens the Relocs view with the relocation patching addr
+// selected, or reports when there is none.
+func (m *Model) jumpRelocsAtAddr(addr uint64) {
+	if !m.file.HasRelocs() {
+		m.setStatus("no relocations in this binary", true)
+		return
+	}
+	if !m.relocs.SelectByAddr(m.viewContext(), addr) {
+		m.setStatus(fmt.Sprintf("no relocation patches 0x%x", addr), true)
+		return
+	}
+	m.setMode(modeRelocs)
+}
+
+// jumpStringsAtAddr opens the Strings view with the string covering addr
+// selected, or reports when there is none.
+func (m *Model) jumpStringsAtAddr(addr uint64) {
+	if !m.strs.SelectByAddr(m.viewContext(), addr) {
+		m.setStatus(fmt.Sprintf("no string at 0x%x", addr), true)
+		return
+	}
+	m.setMode(modeStrings)
+}
+
+// jumpStringsAtOffset opens the Strings view with the string covering file offset
+// off selected — the offset-only counterpart used from the Raw view.
+func (m *Model) jumpStringsAtOffset(off uint64) {
+	if !m.strs.SelectByOffset(m.viewContext(), off) {
+		m.setStatus(fmt.Sprintf("no string at file offset 0x%x", off), true)
+		return
+	}
+	m.setMode(modeStrings)
+}
+
+// lowestVirtAddr returns the lowest mapped (allocated, non-zero) virtual address
+// in the image — the natural "start" when there is no entry point. ok is false
+// for a binary with no allocated sections (e.g. a pure object file).
+func (m *Model) lowestVirtAddr() (uint64, bool) {
+	var best uint64
+	ok := false
+	for i := range m.file.Sections {
+		s := &m.file.Sections[i]
+		if !s.Alloc || s.Addr == 0 || s.Size == 0 {
+			continue
+		}
+		if !ok || s.Addr < best {
+			best, ok = s.Addr, true
+		}
+	}
+	return best, ok
 }
 
 // fileOffsetForAddr maps a virtual address to its file offset using the section

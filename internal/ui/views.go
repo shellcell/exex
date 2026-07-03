@@ -168,14 +168,14 @@ func (v infoView) hints() []footerHint {
 }
 
 func (v sectionsView) hints() []footerHint {
-	return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {layout.CtrlKeys("t", "f"), "type/flags"}, {"⇧H", "header"}}
+	return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {layout.CtrlKeys("t", "f"), "type/flags"}, {"⇧H", "header"}}
 }
 
 func (v symbolsView) hints() []footerHint {
 	if v.symbols.TreeActive() {
 		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "flat"}}
 	}
-	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("t", "s", "b"), "type/scope/bind"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("t", "s", "b"), "type/scope/bind"}, {"⇧a/⇧s", "copy"}}
 }
 
 func (v disasmView) hints() []footerHint {
@@ -188,11 +188,11 @@ func (v disasmView) hints() []footerHint {
 		return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
 	case v.showSource && dwarf:
 		// Disasm-first with the source pane open.
-		return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"a", v.disasmAllHint()}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+		return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"␣", "open in…"}, {"a", v.disasmAllHint()}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 	default:
 		// Disasm-first, no pane. Offer tab to open the pane only when there is
 		// debug info to show.
-		hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"a", v.disasmAllHint()}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+		hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"␣", "open in…"}, {"a", v.disasmAllHint()}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 		if dwarf {
 			hints = append(hints, footerHint{"tab", "pane"})
 		}
@@ -201,15 +201,15 @@ func (v disasmView) hints() []footerHint {
 }
 
 func (v hexView) hints() []footerHint {
-	return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+	return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"␣", "open in…"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 }
 
 func (v rawView) hints() []footerHint {
-	return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+	return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"␣", "open in…"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 }
 
 func (v stringsView) hints() []footerHint {
-	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {layout.CtrlKeys("s"), "section"}, {layout.CtrlKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {layout.CtrlKeys("s"), "section"}, {layout.CtrlKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
 }
 
 func (v sourcesView) hints() []footerHint {
@@ -224,7 +224,7 @@ func (v libsView) hints() []footerHint {
 }
 
 func (v relocsView) hints() []footerHint {
-	return []footerHint{{"↵", "hex"}, {"d/h/m", "go to"}, {"e", "args"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "s"), "type/section"}, {"/", "filter"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "hex"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"e", "args"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "s"), "type/section"}, {"/", "filter"}, {"⇧a/⇧s", "copy"}}
 }
 
 // lineText: plain text of the current row, for the copy-line (⇧L) action. Only

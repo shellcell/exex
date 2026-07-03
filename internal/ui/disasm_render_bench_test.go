@@ -39,6 +39,30 @@ func BenchmarkDisasmScroll(b *testing.B) {
 	}
 }
 
+// TestDisasmInstRowCountMatches pins the cheap height counter to the real
+// renderer: for every instruction across a range of widths and both wrap modes,
+// disasmInstRowCount must equal the number of rows disasmInstRows emits, or the
+// scroll/click math (which trusts the counter via the height cache) breaks.
+func TestDisasmInstRowCountMatches(t *testing.T) {
+	m := benchmarkDisasmModel()
+	m.height = 40
+	insts := benchmarkDisasmInsts()
+	widths := []int{20, 28, 40, 60, 120, 200}
+	for _, wrap := range []bool{false, true} {
+		m.wrap = wrap
+		for _, w := range widths {
+			m.width = w
+			for _, inst := range insts {
+				want := len(m.disasmInstRows(inst, w, false, nil))
+				got := m.disasmInstRowCount(inst, w)
+				if got != want {
+					t.Errorf("wrap=%v w=%d %q: rowCount=%d, rendered %d rows", wrap, w, inst.Text, got, want)
+				}
+			}
+		}
+	}
+}
+
 func benchmarkDisasmModel() *Model {
 	return &Model{
 		theme: DefaultTheme(),

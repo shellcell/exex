@@ -144,6 +144,19 @@ func (st *State) PositionRawAt(ctx *view.Context, off uint64) {
 	st.PinCurrentSectionStart(ctx, Raw)
 }
 
+// HexCaretAddr returns the virtual address under the Hex cursor, for the shell's
+// cross-view "open caret in…" jump. ok is false before the image is built.
+func (st *State) HexCaretAddr() (uint64, bool) {
+	if st.HexImg == nil {
+		return 0, false
+	}
+	return st.HexImg.AddrAt(st.HexCur), true
+}
+
+// RawCaretOffset returns the file offset under the Raw cursor (RawCur indexes the
+// file bytes directly).
+func (st *State) RawCaretOffset() uint64 { return uint64(st.RawCur) }
+
 // Update handles keys local to the Hex/Raw byte views. Shell-owned search keys
 // and symbol-name abbreviation are intercepted by the shell adapter.
 func (st *State) Update(ctx *view.Context, host view.Host, md Mode, key string) {

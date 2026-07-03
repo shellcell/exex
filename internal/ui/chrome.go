@@ -44,6 +44,8 @@ func (m *Model) View() tea.View {
 		out = m.overlayCenter(out, m.renderSyscallModal())
 	case m.cpufeatActive:
 		out = m.overlayCenter(out, m.renderCPUFeatModal())
+	case m.jumpActive:
+		out = m.overlayCenter(out, m.renderJumpModal())
 	}
 	m.viewCache = out
 	m.viewDirty = false
@@ -85,6 +87,7 @@ func (m *Model) renderHelpModal() string {
 		row("?", "this help"),
 		row("w", "toggle long-line wrap"),
 		row("d/h/m", "go to addr in disasm / hex / raw"),
+		row("␣ / >", "open caret address in another view (menu)"),
 		row("⇧a/⇧s/⇧l", "copy address / name / line"),
 		row("t / ⇥", "switch view"),
 		row("/  n/N", "search · next/prev"),

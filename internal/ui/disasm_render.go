@@ -306,7 +306,7 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	}
 	return m.disasmHeightCache.Get(disasmHeightKey{i: i, w: w, wrap: m.wrap}, func() int {
 		inst := m.disasmInst[i]
-		h := len(m.disasmInstRows(inst, w, false, nil))
+		h := m.disasmInstRowCount(inst, w)
 		if _, ok := m.disasmSectionStart(i); ok {
 			h++ // the "═══ .section ═══" separator row
 		}
@@ -385,6 +385,55 @@ func (m *Model) disasmLabelRows(name string, w int) []string {
 		rows = append(rows, layout.PadRight(" "+m.theme.symbolNameStyle.Render(part), w))
 	}
 	return rows
+}
+
+// disasmInstRowCount returns the number of rows disasmInstRows would emit for
+// inst at width w, WITHOUT building any of the styled strings — the height cache
+// only needs the count, and computing it drives first-paint and every resize/
+// wrap-toggle over the whole (possibly huge) instruction list. It mirrors
+// disasmInstRows' row-splitting decisions exactly; TestDisasmInstRowCountMatches
+// pins the two together so they can't drift.
+func (m *Model) disasmInstRowCount(inst disasm.Inst, w int) int {
+	asmCol := m.disasmAsmColumn()
+	annCol := m.disasmAnnotationColumn(w)
+	// Syntax highlighting adds no visible width, so the plain aligned text's width
+	// matches the styled row's — no need to render (or cache-warm) the colours here.
+	asmEnd := asmCol + min(lipgloss.Width(dump.AlignAsm(inst.Text)), max(1, w-asmCol))
+
+	note := ""
+	if !m.cfg.Behavior.HideAnnotations {
+		note = m.instAnnotation(inst.Text, inst.Class)
+		if rn := m.relocNote(inst.Addr, len(inst.Bytes)); rn != "" {
+			if note != "" {
+				note = rn + ", " + note
+			} else {
+				note = rn
+			}
+		}
+	}
+	if note == "" {
+		return 1
+	}
+	inlineStart := max(annCol, asmEnd+2)
+	if inlineAvail := w - inlineStart; inlineAvail > 0 {
+		if first, rest := splitPlainWidth(note, inlineAvail); first != "" {
+			if rest == "" || !m.wrap {
+				return 1
+			}
+			return 1 + m.disasmAnnotationContinuationRowCount(rest, annCol, w)
+		}
+	}
+	return 1 + m.disasmAnnotationContinuationRowCount(note, annCol, w)
+}
+
+// disasmAnnotationContinuationRowCount counts the rows
+// disasmAnnotationContinuationRows would emit, without building them.
+func (m *Model) disasmAnnotationContinuationRowCount(note string, annCol, w int) int {
+	if !m.wrap {
+		return 1
+	}
+	belowW := max(1, w-annCol)
+	return len(strings.Split(strings.TrimRight(ansi.Wrap(strings.TrimLeft(note, " "), belowW, " \t/.-_:$@<>,"), "\n"), "\n"))
 }
 
 func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {

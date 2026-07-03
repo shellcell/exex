@@ -589,10 +589,22 @@ costs, not guesses. Baseline (arm64, Go 1.26, this tree):
 So the headline levers (strip, Chroma-gating) are **already done**. Genuine,
 ranked opportunities remaining:
 
-1. **Render/decode allocation churn** (highest value): the ~138 MB transient peak
-   vs 2.9 MB retained says the disasm decode + full-frame render paths allocate
-   heavily per pass. Profile (`-o disasm-all` and the TUI warm-render bench), then
-   pool/reuse the per-row and per-instruction buffers. Pure win, no UX change.
+1. **Render/decode allocation churn** — ✅ *investigated + first win landed.*
+   Profiling (memprofile of the disasm render bench) showed the render path is
+   already well-cached (asm-text cache, height cache, `viewCache`): the big
+   allocations — `decodeAcross` (~840 MB) and DWARF `loadLines` (~176 MB) — are
+   **one-time setup** the profile captures alongside the render, GC-reclaimed, not
+   steady-state churn (retained heap stays 2.9 MB). The one demonstrable waste:
+   `disasmInstVisualHeight` rendered the *full styled row* (`disasmInstRows`) just
+   to count its lines, on every height cache-miss (first paint, every resize/wrap
+   toggle, over the whole instruction list). Added `disasmInstRowCount` — the same
+   row-splitting decisions with none of the string building — pinned to the real
+   renderer by `TestDisasmInstRowCountMatches`. Measured: the height pass over 1024
+   instructions dropped **5.53 ms → 0.30 ms, 1.42 MB → 45 KB, 23.9k → 2.8k allocs**
+   (~18×), and the warm disasm frame fell ~380 KB → ~339 KB. The remaining 138 MB
+   perfreport peak is the one-time `disasm-all` full-image decode (~162 MB) — the
+   disassembler stringifying every instruction once — which is inherent to that
+   view and not reduced here.
 2. **Per-host-arch disasm build** — `x/arch` (1.25 MB) links every arch; an
    opt-in single-arch tag (host only) would shave ~0.5–0.8 MB for distro builds.
    Marginal, and complicates the matrix — low priority.
@@ -603,3 +615,32 @@ ranked opportunities remaining:
    without a specific offender identified by `-gcflags=-m`/deadcode analysis.
 
 Not a concern (measured, left alone): startup time, retained heap, `uax29`.
+
+## 40. Cross-view "open caret in…" modal  ✅ (done)
+
+The per-view `d`/`h`/`m` jumps (go to the caret address in disasm/hex/raw) only
+covered three destinations and had to be memorised. **Space** (or `>`) now opens a
+single discoverable menu from any address-bearing view (disasm, hex, raw,
+symbols, sections, strings, relocs): it takes the address under the cursor and
+lists every *other* view as a destination. A header shows what the address *is* —
+its covering symbol (demangled, with offset) and section, and, when the
+pointer-sized word there is itself a mapped address (a GOT slot, a vtable entry),
+where it points (`→ 0x… _malloc`). Each row previews its landing — the covering
+function (Disasm), section + address (Hex), file offset (Raw), the symbol
+(Symbols), the section (Sections), the quoted text of a string at that address
+(Strings), or the relocation type + bound symbol (Relocs). Rows carry the target
+view's number key as a badge, usable as a shortcut (press `5` → Hex); disabled
+rows (e.g. Disasm on a data address, no string here) are dimmed with the reason.
+Enter/click/digit navigates; the selection skips unreachable rows. The caret
+carries a virtual address *and/or* a file offset, so an offset-only position (a
+string in an unmapped section, a raw byte in a file header) still opens in Raw —
+and in Strings, matched by offset — while the address-keyed targets dim with "no
+virtual address"; the address views light up whenever the offset resolves to one.
+The **Info** view has no cursor, so the modal opens on the binary's natural start:
+its entry point, else the lowest mapped address. **Libs** and **Sources** are
+deliberately excluded — their rows are a library/source path, not an address, and
+each already has its full targeted-jump surface on Enter (imported symbols /
+source pane) and `o` (open as primary). Shell-side (`internal/ui/jumpto.go`),
+reusing the existing jump actions plus small
+`CaretAddr`/`SelectByAddr`/`SelectByOffset`/`StringAt`/`StringAtOffset` accessors
+on each view; the `d`/`h`/`m` shortcuts stay as fast paths.

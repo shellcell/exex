@@ -268,6 +268,32 @@ func (st *State) current(ctx view.Context) (binfile.Reloc, bool) {
 	return ctx.File.Relocations()[st.Filtered[st.Cur]], true
 }
 
+// CaretAddr returns the patched address of the relocation under the cursor, for
+// the shell's cross-view "open caret in…" jump.
+func (st *State) CaretAddr(ctx view.Context) (uint64, bool) {
+	if r, ok := st.current(ctx); ok && r.Offset != 0 {
+		return r.Offset, true
+	}
+	return 0, false
+}
+
+// SelectByAddr moves the cursor to the first relocation patching addr (the
+// shell's "open caret in Relocs" jump), clearing filters that would hide it.
+// Reports whether one was found.
+func (st *State) SelectByAddr(ctx view.Context, addr uint64) bool {
+	st.Filter.SetValue("")
+	st.typeOn, st.secOn = false, false
+	st.Recompute(ctx)
+	rels := ctx.File.Relocations()
+	for i, ri := range st.Filtered {
+		if rels[ri].Offset == addr {
+			st.Cur, st.Top = i, 0
+			return true
+		}
+	}
+	return false
+}
+
 // Render draws the view body.
 func (st *State) Render(ctx view.Context, host view.Host) string {
 	bodyH := ctx.BodyH

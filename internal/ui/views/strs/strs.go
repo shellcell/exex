@@ -275,6 +275,75 @@ func (st *State) Current() (binfile.StringEntry, bool) {
 	return st.List[st.Filtered[st.Cur]], true
 }
 
+// CaretAddr returns the address of the string under the cursor, for the shell's
+// cross-view "open caret in…" jump. ok is false for strings with no mapped
+// address (e.g. those living only in an unallocated file region).
+func (st *State) CaretAddr() (uint64, bool) {
+	if s, ok := st.Current(); ok && s.Addr != 0 {
+		return s.Addr, true
+	}
+	return 0, false
+}
+
+// StringAt returns the string whose mapped range covers addr, building the string
+// list on first need. Used by the cross-view jump modal to preview and offer a
+// "open in Strings" destination when the caret address falls inside a string.
+func (st *State) StringAt(ctx view.Context, addr uint64) (binfile.StringEntry, bool) {
+	st.Ensure(ctx)
+	for _, s := range st.List {
+		if s.HasAddr && addr >= s.Addr && addr < s.Addr+uint64(s.Len) {
+			return s, true
+		}
+	}
+	return binfile.StringEntry{}, false
+}
+
+// StringAtOffset returns the string whose file range covers off. Every string has
+// a file offset (unlike a virtual address), so this is the lookup the jump modal
+// uses from an offset-only caret (the Raw view over an unmapped region).
+func (st *State) StringAtOffset(ctx view.Context, off uint64) (binfile.StringEntry, bool) {
+	st.Ensure(ctx)
+	for _, s := range st.List {
+		if off >= s.Offset && off < s.Offset+uint64(s.Len) {
+			return s, true
+		}
+	}
+	return binfile.StringEntry{}, false
+}
+
+// SelectByAddr moves the cursor to the string covering addr (the shell's "open
+// caret in Strings" jump), clearing filters that would hide it. Reports whether
+// one was found.
+func (st *State) SelectByAddr(ctx view.Context, addr uint64) bool {
+	return st.selectMatching(ctx, func(s binfile.StringEntry) bool {
+		return s.HasAddr && addr >= s.Addr && addr < s.Addr+uint64(s.Len)
+	})
+}
+
+// SelectByOffset moves the cursor to the string covering file offset off (the
+// offset-only counterpart of SelectByAddr).
+func (st *State) SelectByOffset(ctx view.Context, off uint64) bool {
+	return st.selectMatching(ctx, func(s binfile.StringEntry) bool {
+		return off >= s.Offset && off < s.Offset+uint64(s.Len)
+	})
+}
+
+// selectMatching clears the filters and moves the cursor to the first string
+// satisfying pred, reporting whether one was found.
+func (st *State) selectMatching(ctx view.Context, pred func(binfile.StringEntry) bool) bool {
+	st.Ensure(ctx)
+	st.Filter.SetValue("")
+	st.SecOn = false
+	st.Recompute(ctx)
+	for i, idx := range st.Filtered {
+		if pred(st.List[idx]) {
+			st.Cur, st.Top = i, 0
+			return true
+		}
+	}
+	return false
+}
+
 // Update handles keys while the Strings view is active. A focused filter input
 // is captured centrally by the host, so by the time a key reaches here it is
 // navigation or an action.

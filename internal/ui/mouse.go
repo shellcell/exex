@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
 // doubleClickWindow is how close two clicks must be (in time, on the same row)
@@ -95,7 +96,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		suppressDouble := m.handleClick(ms.X, ms.Y)
 		if before != m.activeCursorState() {
 			m.viewportDetached = false
-			m.pinCurrentByteSectionStart()
+			switch m.mode {
+			case modeHex:
+				m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Hex)
+			case modeRaw:
+				m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Raw)
+			}
 		}
 		if isDouble && !suppressDouble {
 			// Double-clicking a member loads it (the new model must propagate).
@@ -291,27 +297,29 @@ func (m *Model) listGeometryFor() (listGeometry, bool) {
 			return listGeometry{len(m.archiveMembers), 2, oneRow, &m.memberSel, &m.memberTop, m.memberTop}, true
 		}
 	case modeSections:
-		return listGeometry{len(m.sectionsFiltered), 2, m.sectionRowHeight, &m.sectionsCur, &m.sectionsTop, m.renderedSectionsTop}, true
+		return listGeometry{len(m.sections.Filtered), 2, m.sections.RowHeightFn(m.viewContext()), &m.sections.Cur, &m.sections.Top, m.sections.RenderedTop}, true
 	case modeSymbols:
-		return listGeometry{len(m.symbolsRows), 2, m.symbolRowHeight, &m.symbolsCur, &m.symbolsTop, m.renderedSymbolsTop}, true
+		return listGeometry{len(m.symbols.Rows), 2, m.symbols.RowHeightFn(m.viewContext()), &m.symbols.Cur, &m.symbols.Top, m.symbols.RenderedTop}, true
 	case modeStrings:
-		m.ensureStrings()
-		if m.stringsCompact {
+		m.strs.Ensure(m.viewContext())
+		if m.strs.Compact {
 			return listGeometry{}, false // the · flow has its own line-based scroll
 		}
-		return listGeometry{len(m.stringsFiltered), 2, m.stringRowHeight, &m.stringsCur, &m.stringsTop, m.renderedStringsTop}, true
+		return listGeometry{len(m.strs.Filtered), 2, m.strs.RowHeightFn(m.viewContext()), &m.strs.Cur, &m.strs.Top, m.strs.RenderedTop}, true
 	case modeSources:
-		m.ensureSources()
-		return listGeometry{len(m.sourcesRows), 1, oneRow, &m.sourcesCur, &m.sourcesTop, m.renderedSourcesTop}, true
+		ctx := m.viewContext()
+		m.sources.Ensure(ctx)
+		return listGeometry{len(m.sources.Rows), 1, oneRow, &m.sources.Cur, &m.sources.Top, m.sources.RenderedTop}, true
 	case modeRelocs:
-		m.recomputeRelocs()
-		return listGeometry{len(m.relocFiltered), 2, oneRow, &m.relocCur, &m.relocTop, m.relocTop}, true
+		m.relocs.Recompute(m.viewContext())
+		return listGeometry{len(m.relocs.Filtered), 2, oneRow, &m.relocs.Cur, &m.relocs.Top, m.relocs.Top}, true
 	case modeLibs:
 		if m.file.Info == nil {
 			return listGeometry{}, false
 		}
-		m.buildLibRows()
-		return listGeometry{len(m.libsRows), m.libsHeaderRows(), m.libRowHeight, &m.libsCur, &m.libsTop, m.renderedLibsTop}, true
+		ctx := m.viewContext()
+		m.libs.BuildRows(ctx)
+		return listGeometry{len(m.libs.Rows), m.libs.HeaderRows(ctx), m.libs.RowHeightFn(ctx), &m.libs.Cur, &m.libs.Top, m.libs.RenderedTop}, true
 	}
 	return listGeometry{}, false
 }
@@ -326,23 +334,15 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 	}
 	switch m.mode {
 	case modeStrings: // compact · flow (the table is handled via listGeometry above)
-		m.scrollStringsFlow(delta)
+		m.strs.ScrollFlow(m.viewContext(), delta)
 	case modeDisasm:
 		m.scrollDisasmViewport(delta)
 	case modeHex:
-		m.ensureHex()
-		m.clearByteSectionPin(modeHex)
-		m.hexTop = m.scrollByteViewportTop(modeHex, m.hexImg, m.hexTop, max(1, m.bodyHeight()-1), delta, m.hexImg.AddrAt)
+		m.byteViews.Scroll(m.viewContextPtr(), hexraw.Hex, delta)
 	case modeRaw:
-		m.ensureRaw()
-		m.clearByteSectionPin(modeRaw)
-		m.rawTop = m.scrollByteViewportTop(modeRaw, rawBytes(m.rawData), m.rawTop, max(1, m.bodyHeight()-1), delta, identityAddr)
+		m.byteViews.Scroll(m.viewContextPtr(), hexraw.Raw, delta)
 	case modeInfo:
-		if delta < 0 {
-			m.headerVP.ScrollUp(-delta)
-		} else {
-			m.headerVP.ScrollDown(delta)
-		}
+		m.info.Scroll(delta)
 	}
 	return m, nil
 }
@@ -356,11 +356,9 @@ func (m *Model) captureViewportTop() {
 	case modeDisasm:
 		m.captureDisasmViewportTop()
 	case modeHex:
-		m.ensureHex()
-		m.hexTop = m.scrollByteViewportTop(modeHex, m.hexImg, m.renderedHexTop, max(1, m.bodyHeight()-1), 0, m.hexImg.AddrAt)
+		m.byteViews.CaptureViewportTop(m.viewContextPtr(), hexraw.Hex)
 	case modeRaw:
-		m.ensureRaw()
-		m.rawTop = m.scrollByteViewportTop(modeRaw, rawBytes(m.rawData), m.renderedRawTop, max(1, m.bodyHeight()-1), 0, identityAddr)
+		m.byteViews.CaptureViewportTop(m.viewContextPtr(), hexraw.Raw)
 	}
 }
 
@@ -439,31 +437,6 @@ func scrollViewportTop(top, n, visible, delta int, rowHeight func(int) int) int 
 	return layout.ViewportTop(top+delta, n, visible, rowHeight)
 }
 
-// scrollByteViewportTop scrolls a byte view's top by delta rows, stepping along
-// the address-aware row grid (see view_hex.go) and clamping so the last screen
-// stays full. delta == 0 just normalizes top to a valid row-start.
-func (m *Model) scrollByteViewportTop(md mode, data byteSource, top, visibleRows, delta int, addrAt func(pos int) uint64) int {
-	n := data.Len()
-	if n <= 0 {
-		return 0
-	}
-	top = m.hexRowTop(md, top, addrAt)
-	for ; delta > 0 && top < n; delta-- {
-		next := m.hexRowSpan(md, data, top, addrAt).end
-		if next >= n || next <= top {
-			break
-		}
-		top = next
-	}
-	for ; delta < 0 && top > 0; delta++ {
-		top = m.hexPrevRowTop(md, top, addrAt)
-	}
-	if maxTop := m.hexMaxTop(md, data, visibleRows, addrAt); top > maxTop {
-		top = maxTop
-	}
-	return top
-}
-
 func (m *Model) handleSearchPopupClick(x, y int) {
 	modal := m.renderSearchModal()
 	mw := lipgloss.Width(modal)
@@ -524,8 +497,8 @@ func (m *Model) handleClick(x, y int) bool {
 		return false
 	}
 	// The Symbols status line (first body row) carries clickable toggle buttons.
-	if m.mode == modeSymbols && bodyRow == 0 && !m.symbolsFilter.Focused() {
-		if m.clickSymbolFacet(x) {
+	if m.mode == modeSymbols && bodyRow == 0 && !m.symbols.Filter.Focused() {
+		if m.symbols.ClickFacet(m.viewContext(), m, x) {
 			return true
 		}
 	}
@@ -541,35 +514,25 @@ func (m *Model) handleClick(x, y int) bool {
 			*g.cur = idx
 			// Clicking a tree group toggles it (collapse/expand the lines below).
 			switch {
-			case m.mode == modeSymbols && idx < len(m.symbolsRows) && m.symbolsRows[idx].node.leaf < 0:
-				m.toggleSymbolNode()
-			case m.mode == modeSources && idx < len(m.sourcesRows) && m.sourcesRows[idx].node.leaf < 0:
-				m.toggleSourceNode()
-			case m.mode == modeLibs && idx < len(m.libsRows) && m.libsRows[idx].node.leaf < 0:
-				m.toggleLibNode()
+			case m.mode == modeSymbols && idx < len(m.symbols.Rows) && m.symbols.Rows[idx].Node.Leaf < 0:
+				m.symbols.ToggleNode()
+			case m.mode == modeSources && idx < len(m.sources.Rows) && m.sources.Rows[idx].Node.Leaf < 0:
+				m.sources.ToggleNode(m.viewContext())
+			case m.mode == modeLibs && idx < len(m.libs.Rows) && m.libs.Rows[idx].Node.Leaf < 0:
+				m.libs.ToggleNode(m.viewContext())
 			}
 		}
 		return false
 	}
 	switch m.mode {
 	case modeStrings: // compact · flow: map the click to the string under it
-		if idx, ok := m.flowStringAt(m.renderedStringsTop, bodyRow-1, x); ok {
-			m.stringsCur = idx
+		if idx, ok := m.strs.FlowStringAt(m.viewContext(), m.strs.RenderedTop, bodyRow-1, x); ok {
+			m.strs.Cur = idx
 		}
 	case modeHex:
-		m.ensureHex()
-		top := m.hexVisibleTop(modeHex, m.hexCur, m.hexTop, max(1, m.bodyHeight()-1), m.hexImg.AddrAt)
-		if m.viewportDetached {
-			top = m.scrollByteViewportTop(modeHex, m.hexImg, m.hexTop, max(1, m.bodyHeight()-1), 0, m.hexImg.AddrAt)
-		}
-		m.hexCur = m.clickByte(modeHex, m.hexImg, top, m.hexCur, x, bodyRow, m.hexImg.AddrAt)
+		m.byteViews.Click(m.viewContextPtr(), hexraw.Hex, x, bodyRow)
 	case modeRaw:
-		m.ensureRaw()
-		top := m.hexVisibleTop(modeRaw, m.rawCur, m.rawTop, max(1, m.bodyHeight()-1), identityAddr)
-		if m.viewportDetached {
-			top = m.scrollByteViewportTop(modeRaw, rawBytes(m.rawData), m.rawTop, max(1, m.bodyHeight()-1), 0, identityAddr)
-		}
-		m.rawCur = m.clickByte(modeRaw, rawBytes(m.rawData), top, m.rawCur, x, bodyRow, identityAddr)
+		m.byteViews.Click(m.viewContextPtr(), hexraw.Raw, x, bodyRow)
 	case modeDisasm:
 		if m.sourceFirst && m.srcFile != "" && m.clickInSourcePane(x) {
 			if ln, ok := m.sourceLineAtBodyRow(bodyRow, m.sourcePaneWidth()); ok {
@@ -604,52 +567,6 @@ func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
 	contentH := max(1, m.bodyHeight()-1)
 	idx, ok := layout.VisualItemAtRow(m.sourceTextTop(paneW, contentH), len(src), r, m.sourceRowHeight(paneW))
 	return idx + 1, ok
-}
-
-// clickByte maps a click at (x, bodyRow) onto a byte position in a hex dump.
-// Body layout: row 0 is the banner, byte rows follow with bytesPerHexRow bytes
-// each. The column→byte mapping lives in view_hex.go so it stays in sync with
-// the renderer.
-func (m *Model) clickByte(md mode, data byteSource, top, cur, x, bodyRow int, addrAt func(pos int) uint64) int {
-	r := bodyRow - 1 // strip the banner row
-	if r < 0 {
-		return cur
-	}
-	bpr := m.hexBytesPerRow()
-	emitted := 0
-	prevSec := ""
-	if top >= bpr {
-		prevSec = m.hexSectionName(md, top-bpr, addrAt)
-	}
-	for rowStart := top; rowStart < data.Len(); {
-		if sec := m.hexSectionName(md, rowStart, addrAt); sec != "" && sec != prevSec {
-			if emitted == r {
-				return cur // clicked a section-separator row
-			}
-			emitted++
-			prevSec = sec
-		} else {
-			prevSec = sec
-		}
-		if emitted == r {
-			span := m.hexRowSpan(md, data, rowStart, addrAt)
-			slot := hexColumnToByte(m.file.AddrHexWidth(), bpr, x)
-			if slot < span.lead {
-				return cur
-			}
-			pos := rowStart + slot - span.lead
-			if pos < rowStart || pos >= span.end {
-				return cur
-			}
-			if pos >= data.Len() {
-				pos = data.Len() - 1
-			}
-			return pos
-		}
-		emitted++
-		rowStart = m.hexRowSpan(md, data, rowStart, addrAt).end
-	}
-	return cur
 }
 
 // instAtBodyRow maps a click in the disasm scroller to an instruction index.

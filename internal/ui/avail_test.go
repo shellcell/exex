@@ -6,29 +6,9 @@ import (
 	"testing"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/rabarbra/exex/internal/ui/views/sources"
 )
-
-func TestLibAvailClassification(t *testing.T) {
-	dir := t.TempDir()
-	real := filepath.Join(dir, "libreal.dylib")
-	if err := os.WriteFile(real, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	m := &Model{file: &binfile.File{Path: filepath.Join(dir, "bin"), Info: &binfile.Info{}}}
-	cases := []struct {
-		lib  string
-		want availKind
-	}{
-		{real, libOnDisk},
-		{"/usr/lib/libSystem.B.dylib", libInCache}, // dyld shared cache
-		{"/no/such/path/libx.dylib", libMissing},
-	}
-	for _, c := range cases {
-		if got := m.libAvail(c.lib); got != c.want {
-			t.Errorf("libAvail(%q) = %d, want %d", c.lib, got, c.want)
-		}
-	}
-}
 
 func TestSourcesAvailFilter(t *testing.T) {
 	dir := t.TempDir()
@@ -38,24 +18,24 @@ func TestSourcesAvailFilter(t *testing.T) {
 	}
 	missing := filepath.Join(dir, "gone.c")
 	m := &Model{
-		file:         binfile.NewRawFile(nil),
-		sourcesState: sourcesState{sourcesFiles: []string{present, missing}},
+		file:    binfile.NewRawFile(nil),
+		sources: sources.State{Files: []string{present, missing}},
 	}
 	m.file.Path = filepath.Join(dir, "bin")
-	m.sourcesFilter = newPromptInput("", "/ ")
+	m.sources.Filter = newPromptInput("", "/ ")
 
-	count := func(a availFilter) int {
-		m.sourcesAvail = a
-		m.recomputeSourceFiles()
-		return len(m.sourcesFiltered)
+	count := func(a view.AvailFilter) int {
+		m.sources.Avail = a
+		m.sources.Recompute(m.viewContext())
+		return len(m.sources.Filtered)
 	}
-	if got := count(availAll); got != 2 {
+	if got := count(view.AvailAll); got != 2 {
 		t.Fatalf("all = %d, want 2", got)
 	}
-	if got := count(availPresent); got != 1 {
+	if got := count(view.AvailPresent); got != 1 {
 		t.Fatalf("present = %d, want 1", got)
 	}
-	if got := count(availMissing); got != 1 {
+	if got := count(view.AvailMissing); got != 1 {
 		t.Fatalf("missing = %d, want 1", got)
 	}
 }

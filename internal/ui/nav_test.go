@@ -8,6 +8,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/rabarbra/exex/internal/ui/views/sources"
+	"github.com/rabarbra/exex/internal/ui/views/symbols"
 )
 
 func TestSymbolsTreeGrouping(t *testing.T) {
@@ -29,47 +33,46 @@ func TestSymbolsTreeGrouping(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	m.width, m.height = 120, 30
-	m.symbolsTree = true
+	m.symbols.Tree = true
 	m.setMode(modeSymbols)
-	m.recomputeSymbols()
+	m.symbols.Recompute(m.viewContext())
 
 	// Expect a compressed "Io.Writer." root whose children are the "Allocating."
 	// group plus two leaves shown by their path from the root: "Discarding.drain"
 	// (a single symbol → not its own group, and crucially NOT nested under
 	// Allocating) and "alignBufferOptions".
-	roots := buildScopedTree(m.symbolsFiltered, func(i int) string { return m.file.Symbols[i].Display() })
-	if len(roots) != 1 || roots[0].label != "Io.Writer." {
+	roots := layout.BuildScopedTree(m.symbols.Filtered, func(i int) string { return m.file.Symbols[i].Display() })
+	if len(roots) != 1 || roots[0].Label != "Io.Writer." {
 		t.Fatalf("root = %v, want single Io.Writer.", labelsOf(roots))
 	}
-	if got := labelsOf(roots[0].children); strings.Join(got, "|") != "Allocating.|Discarding.drain|alignBufferOptions" {
+	if got := labelsOf(roots[0].Children); strings.Join(got, "|") != "Allocating.|Discarding.drain|alignBufferOptions" {
 		t.Fatalf("Io.Writer. children = %v", got)
 	}
 	// "Discarding.drain" must be a leaf, not an internal (collapsible) node.
-	if roots[0].children[1].leaf < 0 {
+	if roots[0].Children[1].Leaf < 0 {
 		t.Fatalf("Discarding.drain should be a leaf, not a group")
 	}
 
-	// Collapsing the Io.Writer. root should hide everything beneath it.
-	full := len(m.symbolsRows)
-	m.symbolsCollapsed = map[string]bool{"Io.Writer.": true}
-	m.buildSymbolRows()
-	if len(m.symbolsRows) != 1 {
-		t.Fatalf("collapsed root: %d visible rows, want 1 (was %d)", len(m.symbolsRows), full)
+	// Collapsing everything hides all rows beneath the single Io.Writer. root.
+	full := len(m.symbols.Rows)
+	m.symbols.SetAllCollapsed(true)
+	if len(m.symbols.Rows) != 1 {
+		t.Fatalf("collapsed root: %d visible rows, want 1 (was %d)", len(m.symbols.Rows), full)
 	}
 
 	// Expand-all clears collapse; collapse-all leaves only the roots/internal heads.
-	m.symbolsCur = 0
-	m.setAllSymbolsCollapsed(false)
-	if len(m.symbolsRows) != full {
-		t.Fatalf("expand all: %d rows, want %d", len(m.symbolsRows), full)
+	m.symbols.Cur = 0
+	m.symbols.SetAllCollapsed(false)
+	if len(m.symbols.Rows) != full {
+		t.Fatalf("expand all: %d rows, want %d", len(m.symbols.Rows), full)
 	}
 
 	// t toggles back to the flat table: one row per symbol, full names.
-	m.updateSymbols("t")
-	if len(m.symbolsRows) != len(syms) {
-		t.Fatalf("flat view: %d rows, want %d", len(m.symbolsRows), len(syms))
+	m.symbols.Update(m.viewContext(), m, "t")
+	if len(m.symbols.Rows) != len(syms) {
+		t.Fatalf("flat view: %d rows, want %d", len(m.symbols.Rows), len(syms))
 	}
-	if got := ansi.Strip(strings.TrimSpace(m.symbolRows(3, m.file.AddrHexWidth())[0])); !strings.Contains(got, "Io.Writer.Discarding.drain") {
+	if got := ansi.Strip(strings.TrimSpace(m.symbols.RowLines(m.viewContext(), 3)[0])); !strings.Contains(got, "Io.Writer.Discarding.drain") {
 		t.Fatalf("flat row should show full name, got %q", got)
 	}
 }
@@ -88,39 +91,39 @@ func TestSymbolsTreeKeys(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	m.width, m.height = 120, 30
-	m.symbolsTree = true
+	m.symbols.Tree = true
 	m.setMode(modeSymbols)
-	m.recomputeSymbols()
+	m.symbols.Recompute(m.viewContext())
 
 	rowLabel := func(i int) string {
-		if i < 0 || i >= len(m.symbolsRows) {
+		if i < 0 || i >= len(m.symbols.Rows) {
 			return ""
 		}
-		return m.symbolsRows[i].node.label
+		return m.symbols.Rows[i].Node.Label
 	}
 	// Tree: ▾ a. → {▾ b. → x,y; c.z}; top. Row 0 is the "a." group.
 	if rowLabel(0) != "a." {
 		t.Fatalf("row 0 = %q, want a.", rowLabel(0))
 	}
-	full := len(m.symbolsRows)
+	full := len(m.symbols.Rows)
 
 	// Enter on the (expanded) root recursively collapses everything below it.
-	m.symbolsCur = 0
-	m.updateSymbols("enter")
-	if len(m.symbolsRows) >= full || !m.isSymbolCollapsed("a.") {
-		t.Fatalf("enter on expanded root did not collapse subtree (%d rows)", len(m.symbolsRows))
+	m.symbols.Cur = 0
+	m.symbols.Update(m.viewContext(), m, "enter")
+	if len(m.symbols.Rows) >= full || !m.symbols.IsCollapsed("a.") {
+		t.Fatalf("enter on expanded root did not collapse subtree (%d rows)", len(m.symbols.Rows))
 	}
 	// Right expands the root one level.
-	m.updateSymbols("right")
-	if m.isSymbolCollapsed("a.") {
+	m.symbols.Update(m.viewContext(), m, "right")
+	if m.symbols.IsCollapsed("a.") {
 		t.Fatal("right should expand the a. group")
 	}
 	// Expand everything, then Left on a deep leaf folds its parent branch.
-	m.setAllSymbolsCollapsed(false)
-	full2 := len(m.symbolsRows)
+	m.symbols.SetAllCollapsed(false)
+	full2 := len(m.symbols.Rows)
 	leaf := -1
-	for i, r := range m.symbolsRows {
-		if r.node.leaf >= 0 && r.depth >= 2 {
+	for i, r := range m.symbols.Rows {
+		if r.Node.Leaf >= 0 && r.Depth >= 2 {
 			leaf = i
 			break
 		}
@@ -128,10 +131,10 @@ func TestSymbolsTreeKeys(t *testing.T) {
 	if leaf < 0 {
 		t.Fatal("no deep leaf row found")
 	}
-	m.symbolsCur = leaf
-	m.updateSymbols("left")
-	if len(m.symbolsRows) >= full2 {
-		t.Fatalf("left on a leaf did not fold its parent branch (%d→%d)", full2, len(m.symbolsRows))
+	m.symbols.Cur = leaf
+	m.symbols.Update(m.viewContext(), m, "left")
+	if len(m.symbols.Rows) >= full2 {
+		t.Fatalf("left on a leaf did not fold its parent branch (%d→%d)", full2, len(m.symbols.Rows))
 	}
 }
 
@@ -146,79 +149,79 @@ func TestSymbolsFacetClick(t *testing.T) {
 	}
 	m.width, m.height = 120, 20
 	m.setMode(modeSymbols)
-	m.recomputeSymbols()
-	_ = m.renderSymbols() // populates m.symbolFacets with x ranges
+	m.symbols.Recompute(m.viewContext())
+	_ = m.symbols.Render(m.viewContext(), m) // populates m.symbols.Facets with x ranges
 
-	hit := func(k facetKind) (int, bool) {
-		for _, fc := range m.symbolFacets {
-			if fc.kind == k {
-				return (fc.start + fc.end) / 2, true
+	hit := func(k symbols.FacetKind) (int, bool) {
+		for _, fc := range m.symbols.Facets {
+			if fc.Kind == k {
+				return (fc.Start + fc.End) / 2, true
 			}
 		}
 		return 0, false
 	}
 
 	// Clicking the sort button advances the sort.
-	x, ok := hit(facetSort)
+	x, ok := hit(symbols.FacetSort)
 	if !ok {
 		t.Fatal("no sort facet rendered")
 	}
-	if m.symbolsSort != sortByName {
-		t.Fatalf("precondition: sort = %v", m.symbolsSort)
+	if m.symbols.Sort != symbols.SortName {
+		t.Fatalf("precondition: sort = %v", m.symbols.Sort)
 	}
-	if !m.clickSymbolFacet(x) {
+	if !m.symbols.ClickFacet(m.viewContext(), m, x) {
 		t.Fatal("click on sort facet missed")
 	}
-	if m.symbolsSort != sortByAddr {
-		t.Fatalf("sort after click = %v, want address", m.symbolsSort)
+	if m.symbols.Sort != symbols.SortAddr {
+		t.Fatalf("sort after click = %v, want address", m.symbols.Sort)
 	}
 
 	// Clicking the tree button toggles the tree.
-	_ = m.renderSymbols()
-	x, ok = hit(facetTree)
+	_ = m.symbols.Render(m.viewContext(), m)
+	x, ok = hit(symbols.FacetTree)
 	if !ok {
 		t.Fatal("no tree facet rendered")
 	}
-	was := m.symbolsTree
-	if !m.clickSymbolFacet(x) {
+	was := m.symbols.Tree
+	if !m.symbols.ClickFacet(m.viewContext(), m, x) {
 		t.Fatal("click on tree facet missed")
 	}
-	if m.symbolsTree == was {
+	if m.symbols.Tree == was {
 		t.Fatal("tree facet click did not toggle tree mode")
 	}
 }
 
 func TestSourcesTree(t *testing.T) {
-	m := &Model{}
-	m.sourcesFiles = []string{
+	st := &sources.State{}
+	st.Files = []string{
 		"/home/u/proj/src/a.c",
 		"/home/u/proj/src/b.c",
 		"/home/u/proj/main.c",
 	}
-	m.sourcesFiltered = []int{0, 1, 2}
-	m.sourcesTree = true
-	m.buildSourceRows()
+	st.Filtered = []int{0, 1, 2}
+	st.Tree = true
+	st.BuildRows(view.Context{})
 
-	roots := buildTree(m.sourcesFiltered, func(i int) string { return m.sourcesFiles[i] }, segPath)
-	if len(roots) != 1 || roots[0].label != "/home/u/proj/" {
+	roots := layout.BuildTree(st.Filtered, func(i int) string { return st.Files[i] }, layout.SegPath)
+	if len(roots) != 1 || roots[0].Label != "/home/u/proj/" {
 		t.Fatalf("root = %v, want /home/u/proj/", labelsOf(roots))
 	}
-	if got := labelsOf(roots[0].children); strings.Join(got, "|") != "src/|main.c" {
+	if got := labelsOf(roots[0].Children); strings.Join(got, "|") != "src/|main.c" {
 		t.Fatalf("children = %v, want src/, main.c", got)
 	}
-	if len(m.sourcesRows) != 5 { // root + src/ + a.c + b.c + main.c
-		t.Fatalf("visible rows = %d, want 5", len(m.sourcesRows))
+	if len(st.Rows) != 5 { // root + src/ + a.c + b.c + main.c
+		t.Fatalf("visible rows = %d, want 5", len(st.Rows))
 	}
-	m.setAllSourcesCollapsed(true)
-	if len(m.sourcesRows) != 1 {
-		t.Fatalf("collapse-all rows = %d, want 1", len(m.sourcesRows))
+	st.SetAllCollapsed(view.Context{}, true)
+	if len(st.Rows) != 1 {
+		t.Fatalf("collapse-all rows = %d, want 1", len(st.Rows))
 	}
 }
 
-func labelsOf(nodes []*treeNode) []string {
+func labelsOf(nodes []*layout.TreeNode) []string {
 	var out []string
 	for _, n := range nodes {
-		out = append(out, n.label)
+		out = append(out, n.Label)
 	}
 	return out
 }
@@ -243,8 +246,8 @@ func TestPageStep(t *testing.T) {
 		{"empty list still returns at least one", 5, 5, 10, const1, 1},
 	}
 	for _, tc := range cases {
-		if got := pageStep(tc.from, tc.n, tc.visible, tc.rowHeight); got != tc.want {
-			t.Errorf("%s: pageStep(%d,%d,%d) = %d, want %d", tc.name, tc.from, tc.n, tc.visible, got, tc.want)
+		if got := layout.PageStep(tc.from, tc.n, tc.visible, tc.rowHeight); got != tc.want {
+			t.Errorf("%s: layout.PageStep(%d,%d,%d) = %d, want %d", tc.name, tc.from, tc.n, tc.visible, got, tc.want)
 		}
 	}
 }
@@ -307,13 +310,13 @@ func TestPageDownWrapLongLinesSymbols(t *testing.T) {
 	m.width, m.height = 80, 30
 	m.wrap = true
 	m.setMode(modeSymbols)
-	m.recomputeSymbols()
+	m.symbols.Recompute(m.viewContext())
 
-	assertPageWithinViewport(t, m, &m.symbolsCur,
-		m.symbolRowHeight,
-		func() { _ = m.renderSymbols() },
-		func() { m.updateSymbols("pgdown") },
-		func() { m.updateSymbols("pgup") })
+	assertPageWithinViewport(t, m, &m.symbols.Cur,
+		m.symbols.RowHeightFn(m.viewContext()),
+		func() { _ = m.symbols.Render(m.viewContext(), m) },
+		func() { m.symbols.Update(m.viewContext(), m, "pgdown") },
+		func() { m.symbols.Update(m.viewContext(), m, "pgup") })
 }
 
 func TestPageDownWrapLongLinesStrings(t *testing.T) {
@@ -337,12 +340,12 @@ func TestPageDownWrapLongLinesStrings(t *testing.T) {
 	m.setMode(modeStrings)
 	// Seed the strings list directly so ensureStrings won't recompute it from the
 	// (empty) synthetic file.
-	m.stringsList = list
-	m.recomputeStrings()
+	m.strs.List = list
+	m.strs.Recompute(m.viewContext())
 
-	assertPageWithinViewport(t, m, &m.stringsCur,
-		m.stringRowHeight,
-		func() { _ = m.renderStrings() },
-		func() { m.updateStrings("pgdown") },
-		func() { m.updateStrings("pgup") })
+	assertPageWithinViewport(t, m, &m.strs.Cur,
+		m.strs.RowHeightFn(m.viewContext()),
+		func() { _ = m.strs.Render(m.viewContext(), m) },
+		func() { m.strs.Update(m.viewContext(), m, "pgdown") },
+		func() { m.strs.Update(m.viewContext(), m, "pgup") })
 }

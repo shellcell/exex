@@ -31,7 +31,7 @@ func (m *Model) goBackFile() (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	prev := m.fileStack[n-1]
-	prev.fileStack = m.fileStack[:n-1 : n-1]
+	prev.fileStack = m.fileStack[: n-1 : n-1]
 	prev.width, prev.height = m.width, m.height
 	prev.viewDirty = true
 	prev.setStatus("back to "+prev.breadcrumbLeaf(), false)

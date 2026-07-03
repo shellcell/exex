@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
 // handleKey routes a key message through modal, global, and active-view handlers.
@@ -302,14 +304,14 @@ type cursorState struct {
 func (m *Model) activeCursorState() cursorState {
 	return cursorState{
 		mode:        m.mode,
-		sectionsCur: m.sectionsCur,
-		symbolsCur:  m.symbolsCur,
+		sectionsCur: m.sections.Cur,
+		symbolsCur:  m.symbols.Cur,
 		disasmCur:   m.disasmCur,
-		hexCur:      m.hexCur,
-		rawCur:      m.rawCur,
-		stringsCur:  m.stringsCur,
-		sourcesCur:  m.sourcesCur,
-		libsCur:     m.libsCur,
+		hexCur:      m.byteViews.HexCur,
+		rawCur:      m.byteViews.RawCur,
+		stringsCur:  m.strs.Cur,
+		sourcesCur:  m.sources.Cur,
+		libsCur:     m.libs.Cur,
 		memberSel:   m.memberSel,
 		srcFile:     m.srcFile,
 		srcCur:      m.srcCur,
@@ -413,7 +415,12 @@ func (m *Model) updateSearchInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cm
 		cmd := m.runSearchFromPrompt()
 		if before != m.activeCursorState() {
 			m.viewportDetached = false
-			m.pinCurrentByteSectionStart()
+			switch m.mode {
+			case modeHex:
+				m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Hex)
+			case modeRaw:
+				m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Raw)
+			}
 		}
 		return m, cmd
 	}
@@ -522,31 +529,24 @@ func (m *Model) ensureSourcePaneAvailable() bool {
 	if m.hasOpenSourceFile() {
 		return true
 	}
-	m.ensureSources()
-	if len(m.sourcesFiltered) == 0 {
+	ctx := m.viewContext()
+	m.sources.Ensure(ctx)
+	if len(m.sources.Filtered) == 0 {
 		return false
 	}
-	start := m.sourcesCur
-	if start < 0 || start >= len(m.sourcesFiltered) {
-		start = 0
+	selected := ""
+	if f, ok := m.sources.CurrentFile(); ok {
+		selected = f
+		if m.file.SourceLines(f) != nil && m.openSourceFile(f, 1) {
+			return true
+		}
 	}
-	for offset := 0; offset < len(m.sourcesFiltered); offset++ {
-		idx := (start + offset) % len(m.sourcesFiltered)
-		file := m.sourcesFiles[m.sourcesFiltered[idx]]
-		src := m.file.SourceLines(file)
-		if src == nil {
+	for _, idx := range m.sources.Filtered {
+		file := m.sources.Files[idx]
+		if file == selected || m.file.SourceLines(file) == nil {
 			continue
 		}
-		m.sourcesCur = idx
-		m.srcFile = file
-		m.srcCodeLines = m.mappedSourceLines(file)
-		m.srcCur = 1
-		if len(src) == 0 {
-			m.srcCur = 0
-		}
-		m.srcTop = 0
-		m.syncSourceAsm()
-		return true
+		return m.openSourceFile(file, 1)
 	}
 	return false
 }

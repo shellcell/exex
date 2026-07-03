@@ -122,7 +122,7 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	case "C":
 		m.copyFunctionDisasm()
 	case "e":
-		m.toggleSymbolAbbrevAll()
+		m.symbols.ToggleAbbrevAll(m)
 	case "a":
 		m.toggleDisasmAll()
 	}

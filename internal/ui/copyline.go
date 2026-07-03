@@ -37,16 +37,6 @@ func cleanCopyLine(s string) string {
 	return strings.TrimSpace(collapseSpaces(ansi.Strip(s)))
 }
 
-// byteRowText renders the hex/raw row containing the cursor and strips styling.
-func (m *Model) byteRowText(md mode, data byteSource, cur int, addrAt func(int) uint64) string {
-	if data.Len() == 0 {
-		return ""
-	}
-	start := m.hexRowTop(md, cur, addrAt)
-	span := m.hexRowSpan(md, data, start, addrAt)
-	return ansi.Strip(m.renderHexRow(md, data, cur, span, m.file.AddrHexWidth(), addrAt))
-}
-
 // collapseSpaces squeezes runs of spaces to one, so a wide table row copies as a
 // single readable, space-separated line rather than column-padded text.
 func collapseSpaces(s string) string {

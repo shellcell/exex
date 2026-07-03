@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	searchutil "github.com/rabarbra/exex/internal/bytesearch"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
 type searchMode = searchutil.Mode
@@ -110,29 +111,37 @@ func (m *Model) runDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 }
 
 func (m *Model) runHexSearch(forward, inclusive, fromCursor bool) {
-	m.ensureHex()
-	start := m.hexCur
+	ctx := m.viewContext()
+	data, cur, ok := m.byteViews.Data(&ctx, hexraw.Hex)
+	if !ok {
+		return
+	}
+	start := cur
 	if !fromCursor {
 		if forward {
 			start = -1
 		} else {
-			start = m.hexImg.Len() - 1
+			start = data.Len() - 1
 		}
 	}
-	m.hexCur = m.searchBytesAt(m.hexImg, start, forward, inclusive)
+	m.byteViews.SetCursor(hexraw.Hex, m.searchBytesAt(data, start, forward, inclusive))
 }
 
 func (m *Model) runRawSearch(forward, inclusive, fromCursor bool) {
-	m.ensureRaw()
-	start := m.rawCur
+	ctx := m.viewContext()
+	data, cur, ok := m.byteViews.Data(&ctx, hexraw.Raw)
+	if !ok {
+		return
+	}
+	start := cur
 	if !fromCursor {
 		if forward {
 			start = -1
 		} else {
-			start = len(m.rawData) - 1
+			start = data.Len() - 1
 		}
 	}
-	m.rawCur = m.searchBytesAt(rawBytes(m.rawData), start, forward, inclusive)
+	m.byteViews.SetCursor(hexraw.Raw, m.searchBytesAt(data, start, forward, inclusive))
 }
 
 func (m *Model) runSourcesSearch(forward, inclusive bool) {

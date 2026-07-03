@@ -210,17 +210,17 @@ func syscallNumberLess(a, b dump.SyscallSite) bool {
 // and the instruction text — so "write", "4", "0x4" or "_start" all narrow.
 func syscallRowMatches(r syscallRow, needle string) bool {
 	s := r.site
-	if containsFold(s.Name, needle) || containsFold(s.Sym, needle) ||
-		containsFold(s.Origin, needle) || containsFold(s.Text, needle) {
+	if layout.ContainsFold(s.Name, needle) || layout.ContainsFold(s.Sym, needle) ||
+		layout.ContainsFold(s.Origin, needle) || layout.ContainsFold(s.Text, needle) {
 		return true
 	}
 	if s.HasNum {
-		if containsFold(strconv.FormatInt(s.Num, 10), needle) ||
-			containsFold("0x"+strconv.FormatInt(s.Num, 16), needle) {
+		if layout.ContainsFold(strconv.FormatInt(s.Num, 10), needle) ||
+			layout.ContainsFold("0x"+strconv.FormatInt(s.Num, 16), needle) {
 			return true
 		}
 	}
-	return s.VDSO && containsFold("vdso", needle)
+	return s.VDSO && layout.ContainsFold("vdso", needle)
 }
 
 // syscallCategory classifies a site for colouring: resolved-to-a-name, number-only

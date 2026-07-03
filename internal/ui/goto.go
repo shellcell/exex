@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/views/strs"
 )
 
 // gotoKind tags a palette result so it can be coloured and routed to the right
@@ -183,7 +185,7 @@ flush:
 func (m *Model) appendSectionMatches(needle string) {
 	for i := range m.file.Sections {
 		s := m.file.Sections[i]
-		if s.Size == 0 || !containsFold(s.Name, needle) {
+		if s.Size == 0 || !layout.ContainsFold(s.Name, needle) {
 			continue
 		}
 		m.gotoResults = append(m.gotoResults, gotoTarget{
@@ -198,11 +200,11 @@ func (m *Model) appendSectionMatches(needle string) {
 // appendStringMatches matches printable strings (zero-copy over the file image).
 func (m *Model) appendStringMatches(needle string) {
 	for _, e := range m.file.Strings() {
-		if !containsFoldBytes(m.file.StringBytes(e), needle) {
+		if !layout.ContainsFoldBytes(m.file.StringBytes(e), needle) {
 			continue
 		}
 		m.gotoResults = append(m.gotoResults, gotoTarget{
-			kind: gkString, label: sanitizeString(m.file.StringText(e)), addr: e.Addr, off: e.Offset, hasAddr: e.HasAddr,
+			kind: gkString, label: strs.Sanitize(m.file.StringText(e)), addr: e.Addr, off: e.Offset, hasAddr: e.HasAddr,
 		})
 		if len(m.gotoResults) >= gotoMaxResults {
 			return
@@ -216,7 +218,7 @@ func (m *Model) appendLibMatches(needle string) {
 		return
 	}
 	for _, lib := range m.file.Info.DynamicLibs {
-		if containsFold(lib, needle) {
+		if layout.ContainsFold(lib, needle) {
 			m.gotoResults = append(m.gotoResults, gotoTarget{kind: gkLib, label: lib})
 		}
 		if len(m.gotoResults) >= gotoMaxResults {
@@ -261,7 +263,7 @@ func (m *Model) activateGoto() {
 // openLibsFiltered shows the Libraries view filtered to lib (where the user can
 // open it as primary).
 func (m *Model) openLibsFiltered(lib string) {
-	m.libsFilter.SetValue(lib)
+	m.libs.Filter.SetValue(lib)
 	m.setMode(modeLibs)
 	m.setStatus("library: "+lib+"  (press o to open it)", false)
 }
@@ -274,8 +276,8 @@ func (m *Model) openSourceForAddr(addr uint64) {
 		m.setStatus(fmt.Sprintf("no source mapping for 0x%x", addr), true)
 		return
 	}
-	m.ensureSources()
-	m.openSourceFile(file, line)
+	m.sources.Ensure(m.viewContext())
+	m.openSourceFileInDisasm(file, line)
 }
 
 // closeGoto dismisses the goto modal and resets its transient state.
@@ -366,13 +368,13 @@ func (m *Model) resolveSymbolGoto(s string) (best binfile.Symbol, count int, exa
 
 // openSymbolsFiltered shows the Symbols view with q applied as the live filter.
 func (m *Model) openSymbolsFiltered(q string) {
-	m.symbolsFilter.SetValue(q)
-	m.recomputeSymbols()
-	m.symbolsCur = 0
-	m.symbolsTop = 0
+	m.symbols.Filter.SetValue(q)
+	m.symbols.Recompute(m.viewContext())
+	m.symbols.Cur = 0
+	m.symbols.Top = 0
 	m.viewportDetached = false
 	m.setMode(modeSymbols)
-	m.setStatus(fmt.Sprintf("%d symbols match %q", len(m.symbolsFiltered), q), false)
+	m.setStatus(fmt.Sprintf("%d symbols match %q", len(m.symbols.Filtered), q), false)
 }
 
 // gotoAddr jumps to a virtual address: disasm if it lands in executable code,

@@ -2,10 +2,12 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
 // modeView is the per-view behaviour behind the mode dispatch. Each concrete
@@ -106,27 +108,28 @@ type (
 )
 
 func (v infoView) body() string     { return v.renderInfo() }
-func (v sectionsView) body() string { return v.renderSections() }
-func (v symbolsView) body() string  { return v.renderSymbols() }
+func (v sectionsView) body() string { return v.sections.Render(v.viewContext(), v.Model) }
+func (v symbolsView) body() string  { return v.symbols.Render(v.viewContext(), v.Model) }
 func (v disasmView) body() string   { return v.renderDisasm() }
-func (v hexView) body() string      { return v.renderHex() }
-func (v rawView) body() string      { return v.renderRaw() }
-func (v stringsView) body() string  { return v.renderStrings() }
+func (v hexView) body() string      { return v.byteViews.Render(v.viewContextPtr(), hexraw.Hex) }
+func (v rawView) body() string      { return v.byteViews.Render(v.viewContextPtr(), hexraw.Raw) }
+func (v stringsView) body() string  { return v.strs.Render(v.viewContext(), v.Model) }
 func (v sourcesView) body() string  { return v.renderSources() }
-func (v libsView) body() string     { return v.renderLibs() }
-func (v relocsView) body() string   { return v.renderRelocs() }
+func (v libsView) body() string     { return v.libs.Render(v.viewContext(), v.Model) }
+func (v relocsView) body() string   { return v.relocs.Render(v.viewContext(), v.Model) }
 
 // ensure: only views with lazy state override the baseView no-op.
 
-func (v symbolsView) ensure() tea.Cmd { v.ensureSymbols(); return nil }
-func (v hexView) ensure() tea.Cmd     { v.ensureHex(); return nil }
-func (v rawView) ensure() tea.Cmd     { v.ensureRaw(); return nil }
-func (v stringsView) ensure() tea.Cmd { v.ensureStrings(); return nil }
-func (v sourcesView) ensure() tea.Cmd { v.ensureSources(); return nil }
+func (v symbolsView) ensure() tea.Cmd { v.symbols.Ensure(v.viewContext()); return nil }
+func (v hexView) ensure() tea.Cmd     { v.byteViews.EnsureHex(v.viewContextPtr()); return nil }
+func (v rawView) ensure() tea.Cmd     { v.byteViews.EnsureRaw(v.viewContextPtr()); return nil }
+func (v stringsView) ensure() tea.Cmd { v.strs.Ensure(v.viewContext()); return nil }
+func (v sourcesView) ensure() tea.Cmd { v.sources.Ensure(v.viewContext()); return nil }
 
 func (v relocsView) ensure() tea.Cmd {
-	v.buildRelocFacets()
-	v.recomputeRelocs()
+	ctx := v.viewContext()
+	v.relocs.BuildFacets(ctx)
+	v.relocs.Recompute(ctx)
 	return nil
 }
 
@@ -165,14 +168,14 @@ func (v infoView) hints() []footerHint {
 }
 
 func (v sectionsView) hints() []footerHint {
-	return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {ctrlKeys("t", "f"), "type/flags"}, {"⇧H", "header"}}
+	return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {layout.CtrlKeys("t", "f"), "type/flags"}, {"⇧H", "header"}}
 }
 
 func (v symbolsView) hints() []footerHint {
-	if v.symbolTreeActive() {
+	if v.symbols.TreeActive() {
 		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "flat"}}
 	}
-	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {ctrlKeys("t", "s", "b"), "type/scope/bind"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("t", "s", "b"), "type/scope/bind"}, {"⇧a/⇧s", "copy"}}
 }
 
 func (v disasmView) hints() []footerHint {
@@ -206,67 +209,48 @@ func (v rawView) hints() []footerHint {
 }
 
 func (v stringsView) hints() []footerHint {
-	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {ctrlKeys("s"), "section"}, {ctrlKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {layout.CtrlKeys("s"), "section"}, {layout.CtrlKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
 }
 
 func (v sourcesView) hints() []footerHint {
-	if v.sourcesTree {
-		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {ctrlKeys("p"), "present"}, {"t", "flat"}}
+	if v.sources.Tree {
+		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {layout.CtrlKeys("p"), "present"}, {"t", "flat"}}
 	}
-	return []footerHint{{"↵", "open"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {ctrlKeys("p"), "present"}, {"⇧s", "copy"}}
+	return []footerHint{{"↵", "open"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("p"), "present"}, {"⇧s", "copy"}}
 }
 
 func (v libsView) hints() []footerHint {
-	return []footerHint{{"↵", "imports"}, {"o", "open"}, {"r", "rev"}, {"t", "tree"}, {"/", "filter"}, {ctrlKeys("p"), "avail"}, {"⇧s", "copy"}}
+	return []footerHint{{"↵", "imports"}, {"o", "open"}, {"r", "rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("p"), "avail"}, {"⇧s", "copy"}}
 }
 
 func (v relocsView) hints() []footerHint {
-	return []footerHint{{"↵", "go to patched addr"}, {"s/r", "sort/rev"}, {ctrlKeys("t", "s"), "type/section"}, {"/", "filter"}}
+	return []footerHint{{"↵", "go to patched addr"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "s"), "type/section"}, {"/", "filter"}}
 }
 
 // lineText: plain text of the current row, for the copy-line (⇧L) action. Only
 // views with a row concept override the baseView "not copyable" default.
 
 func (v sectionsView) lineText() (string, bool) {
-	if v.sectionsCur < 0 || v.sectionsCur >= len(v.sectionsFiltered) {
-		return "", true
-	}
-	return cleanCopyLine(v.sectionRow(v.sectionsCur, v.file.AddrHexWidth())), true
+	return cleanCopyLine(v.sections.RowText(v.viewContext())), true
 }
 
 func (v symbolsView) lineText() (string, bool) {
-	if v.symbolsCur < 0 || v.symbolsCur >= len(v.symbolsRows) {
-		return "", true
-	}
-	return cleanCopyLine(strings.Join(v.symbolRows(v.symbolsCur, v.file.AddrHexWidth()), " ")), true
+	return cleanCopyLine(v.symbols.RowText(v.viewContext())), true
 }
 
 func (v stringsView) lineText() (string, bool) {
-	v.ensureStrings()
-	if v.stringsCur < 0 || v.stringsCur >= len(v.stringsFiltered) {
-		return "", true
-	}
-	return cleanCopyLine(v.stringRow(v.stringsCur, v.file.AddrHexWidth())), true
+	return cleanCopyLine(v.strs.RowText(v.viewContext())), true
 }
 
 func (v libsView) lineText() (string, bool) {
-	if v.libsCur < 0 || v.libsCur >= len(v.libsRows) {
-		return "", true
-	}
-	return cleanCopyLine(v.libRow(v.libsCur, false)), true
+	return cleanCopyLine(v.libs.RowText(v.viewContext())), true
 }
 
 func (v sourcesView) lineText() (string, bool) {
 	if v.srcFile != "" {
 		return v.srcFile, true // open file: copy its path
 	}
-	if f, ok := v.sourceFileAt(v.sourcesCur); ok {
-		return f, true
-	}
-	if v.sourcesCur >= 0 && v.sourcesCur < len(v.sourcesRows) {
-		return v.sourcesRows[v.sourcesCur].node.label, true
-	}
-	return "", true
+	return v.sources.RowText(), true
 }
 
 func (v disasmView) lineText() (string, bool) {
@@ -279,13 +263,11 @@ func (v disasmView) lineText() (string, bool) {
 }
 
 func (v hexView) lineText() (string, bool) {
-	v.ensureHex()
-	return cleanCopyLine(v.byteRowText(modeHex, v.hexImg, v.hexCur, v.hexImg.AddrAt)), true
+	return cleanCopyLine(v.byteViews.RowText(v.viewContextPtr(), hexraw.Hex)), true
 }
 
 func (v rawView) lineText() (string, bool) {
-	v.ensureRaw()
-	return cleanCopyLine(v.byteRowText(modeRaw, rawBytes(v.rawData), v.rawCur, identityAddr)), true
+	return cleanCopyLine(v.byteViews.RowText(v.viewContextPtr(), hexraw.Raw)), true
 }
 
 // headerRow / sortHeaderClick: only the table views with a clickable sort header
@@ -294,27 +276,30 @@ func (v rawView) lineText() (string, bool) {
 func (v sectionsView) headerRow(bodyRow int) bool { return bodyRow == 1 }
 func (v symbolsView) headerRow(bodyRow int) bool  { return bodyRow == 1 }
 func (v relocsView) headerRow(bodyRow int) bool   { return bodyRow == 1 }
-func (v libsView) headerRow(bodyRow int) bool     { return bodyRow == v.libsTitleRow() }
+func (v libsView) headerRow(bodyRow int) bool {
+	return bodyRow == v.libs.TitleRow(v.viewContext())
+}
 
 func (v stringsView) headerRow(bodyRow int) bool {
-	v.ensureStrings()
-	return len(v.stringsList) > 0 && bodyRow == 1
+	v.strs.Ensure(v.viewContext())
+	return len(v.strs.List) > 0 && bodyRow == 1
 }
 
 func (v sectionsView) sortHeaderClick(x, bodyRow int) bool {
-	return bodyRow == 1 && v.clickSectionsHeader(x)
+	return bodyRow == 1 && v.sections.ClickHeader(v.viewContext(), v.Model, x)
 }
 func (v symbolsView) sortHeaderClick(x, bodyRow int) bool {
-	return bodyRow == 1 && v.clickSymbolsHeader(x)
+	return bodyRow == 1 && v.symbols.ClickHeader(v.viewContext(), v.Model, x)
 }
 func (v stringsView) sortHeaderClick(x, bodyRow int) bool {
-	return bodyRow == 1 && v.clickStringsHeader(x)
+	return bodyRow == 1 && v.strs.ClickHeader(v.viewContext(), v.Model, x)
 }
 func (v relocsView) sortHeaderClick(x, bodyRow int) bool {
-	return bodyRow == 1 && v.clickRelocsHeader(x)
+	return bodyRow == 1 && v.relocs.ClickHeader(v.viewContext(), v.Model, x)
 }
 func (v libsView) sortHeaderClick(x, bodyRow int) bool {
-	return bodyRow == v.libsTitleRow() && v.clickLibsHeader(x)
+	ctx := v.viewContext()
+	return bodyRow == v.libs.TitleRow(ctx) && v.libs.ClickHeader(ctx, v.Model, x)
 }
 
 // handleKey: each view routes to its own key handler. Info also needs the raw
@@ -324,53 +309,81 @@ func (v infoView) handleKey(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	return v.updateInfo(msg, key)
 }
 func (v sectionsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateSections(key)
+	v.sections.Update(v.viewContext(), v.Model, key)
+	return v.Model, nil
 }
 func (v symbolsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateSymbols(key)
+	v.symbols.Update(v.viewContext(), v.Model, key)
+	return v.Model, nil
 }
 func (v disasmView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	return v.updateDisasm(key)
 }
 func (v hexView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateHex(key)
+	if key == "/" {
+		v.openSearch()
+		return v.Model, nil
+	}
+	v.byteViews.Update(v.viewContextPtr(), v.Model, hexraw.Hex, key)
+	return v.Model, nil
 }
 func (v rawView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateRaw(key)
+	if key == "/" {
+		v.openSearch()
+		return v.Model, nil
+	}
+	v.byteViews.Update(v.viewContextPtr(), v.Model, hexraw.Raw, key)
+	return v.Model, nil
 }
 func (v stringsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateStrings(key)
+	v.strs.Update(v.viewContext(), v.Model, key)
+	return v.Model, nil
 }
 func (v sourcesView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	return v.updateSources(key)
 }
 func (v libsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateLibs(key)
+	// Opening a library as the primary file replaces the whole model, which is
+	// beyond the view.Host surface — intercept it here.
+	if key == "o" {
+		if lib, ok := v.libs.CurrentLib(v.viewContext()); ok {
+			return v.openLibAsPrimary(lib)
+		}
+		return v.Model, nil
+	}
+	v.libs.Update(v.viewContext(), v.Model, key)
+	return v.Model, nil
 }
 func (v relocsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	return v.updateRelocs(key)
+	v.relocs.Update(v.viewContext(), v.Model, key)
+	return v.Model, nil
 }
 
 // captureFilter: only the filterable views override the "no filter" default.
 
 func (v symbolsView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
-	return filterCapture(&v.symbolsFilter, key, msg, v.recomputeSymbols)
+	ctx := v.viewContext()
+	return filterCapture(&v.symbols.Filter, key, msg, func() { v.symbols.Recompute(ctx) })
 }
 func (v sectionsView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
-	return filterCapture(&v.sectionsFilter, key, msg, v.recomputeSections)
+	return filterCapture(&v.sections.Filter, key, msg, v.sections.Recompute)
 }
 func (v stringsView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
-	return filterCapture(&v.stringsFilter, key, msg, v.recomputeStrings)
+	ctx := v.viewContext()
+	return filterCapture(&v.strs.Filter, key, msg, func() { v.strs.Recompute(ctx) })
 }
 func (v libsView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
-	return filterCapture(&v.libsFilter, key, msg, v.buildLibRows)
+	ctx := v.viewContext()
+	return filterCapture(&v.libs.Filter, key, msg, func() { v.libs.BuildRows(ctx) })
 }
 func (v relocsView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
-	return filterCapture(&v.relocFilter, key, msg, v.recomputeRelocs)
+	ctx := v.viewContext()
+	return filterCapture(&v.relocs.Filter, key, msg, func() { v.relocs.Recompute(ctx) })
 }
 func (v sourcesView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
 	if v.srcFile == "" {
-		return filterCapture(&v.sourcesFilter, key, msg, v.recomputeSourceFiles)
+		ctx := v.viewContext()
+		return filterCapture(&v.sources.Filter, key, msg, func() { v.sources.Recompute(ctx) })
 	}
 	return nil, false
 }

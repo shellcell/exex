@@ -369,8 +369,8 @@ func xrefLess(a, b xrefHit, key xrefSortKey) bool {
 }
 
 func xrefMatches(h xrefHit, needle string) bool {
-	return containsFold(h.sym, needle) || containsFold(h.text, needle) ||
-		containsFold("0x"+strconv.FormatUint(h.addr, 16), needle)
+	return layout.ContainsFold(h.sym, needle) || layout.ContainsFold(h.text, needle) ||
+		layout.ContainsFold("0x"+strconv.FormatUint(h.addr, 16), needle)
 }
 
 // xrefKind buckets a referencing instruction so the modal can colour and sort it:

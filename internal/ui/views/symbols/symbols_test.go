@@ -1,37 +1,60 @@
-package ui
+package symbols
 
 import (
 	"reflect"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
+
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/view"
 )
 
+// nopHost satisfies view.Host for tests that only need the state changes.
+type nopHost struct{}
+
+func (nopHost) SetStatus(string, bool)         {}
+func (nopHost) JumpHexAtAddr(uint64)           {}
+func (nopHost) JumpDisasmAtAddr(uint64)        {}
+func (nopHost) JumpRawAtAddr(uint64)           {}
+func (nopHost) OpenHexAt(uint64)               {}
+func (nopHost) OpenRawAt(uint64)               {}
+func (nopHost) OpenSymbol(binfile.Symbol)      {}
+func (nopHost) GotoAddr(uint64)                {}
+func (nopHost) OpenSymbolsForLib(string)       {}
+func (nopHost) OpenSourceFile(string)          {}
+func (nopHost) SymbolNamesChanged()            {}
+func (nopHost) CopyToClipboard(string, string) {}
+func (nopHost) ToggleWrap()                    {}
+func (nopHost) ListPage() int                  { return 10 }
+func (nopHost) SetPageRows(int)                {}
+
+func testCtx(f *binfile.File) view.Context {
+	return view.Context{File: f, Width: 120, BodyH: 30}
+}
+
 func TestSymbolScopeFilter(t *testing.T) {
-	m := &Model{
-		file: &binfile.File{Symbols: []binfile.Symbol{
-			{Name: "my_func", Addr: 0x1000},                      // internal (defined here)
-			{Name: "my_data", Addr: 0x2000},                      // internal
-			{Name: "malloc", Addr: 0x3000, Library: "libc.so.6"}, // imported (PLT/GOT)
-			{Name: "undef", Addr: 0},                             // undefined: neither internal nor imported
-		}},
-		symbolsState: symbolsState{},
-	}
-	m.symbolsFilter = newPromptInput("", "/ ")
+	f := &binfile.File{Symbols: []binfile.Symbol{
+		{Name: "my_func", Addr: 0x1000},                      // internal (defined here)
+		{Name: "my_data", Addr: 0x2000},                      // internal
+		{Name: "malloc", Addr: 0x3000, Library: "libc.so.6"}, // imported (PLT/GOT)
+		{Name: "undef", Addr: 0},                             // undefined: neither internal nor imported
+	}}
+	st := &State{Filter: textinput.New()}
 
-	count := func(sc symbolScope) int {
-		m.symbolsScope = sc
-		m.recomputeSymbols()
-		return len(m.symbolsFiltered)
+	count := func(sc Scope) int {
+		st.Scope = sc
+		st.Recompute(testCtx(f))
+		return len(st.Filtered)
 	}
 
-	if got := count(scopeAll); got != 4 {
+	if got := count(ScopeAll); got != 4 {
 		t.Fatalf("scope all = %d, want 4", got)
 	}
-	if got := count(scopeInternal); got != 2 {
+	if got := count(ScopeInternal); got != 2 {
 		t.Fatalf("scope internal = %d, want 2 (defined here only)", got)
 	}
-	if got := count(scopeImported); got != 1 {
+	if got := count(ScopeImported); got != 1 {
 		t.Fatalf("scope imported = %d, want 1 (library-bound only)", got)
 	}
 }
@@ -62,34 +85,35 @@ func TestAbbrevBrackets(t *testing.T) {
 			"closure #1 <A>(B<A>) -> C<A> in foo.bar(...) -> E<A>"},
 	}
 	for _, c := range cases {
-		if got := abbrevBrackets(c.in); got != c.want {
-			t.Errorf("abbrevBrackets(%q) = %q, want %q", c.in, got, c.want)
+		if got := AbbrevBrackets(c.in); got != c.want {
+			t.Errorf("AbbrevBrackets(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
 func TestSymbolAbbrevToggles(t *testing.T) {
-	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
+	f := &binfile.File{Symbols: []binfile.Symbol{
 		{Name: "alpha<Integer>", Addr: 0x1000},
 		{Name: "beta<Character>", Addr: 0x2000},
-	}}}
-	m.symbolsFilter = newPromptInput("", "/ ")
-	m.recomputeSymbols()
+	}}
+	st := &State{Filter: textinput.New()}
+	ctx := testCtx(f)
+	st.Recompute(ctx)
 
-	label := func(row int) string { return m.symbolLabel(m.symbolsRows[row].node) }
+	label := func(row int) string { return st.label(st.Rows[row].Node) }
 
 	// Default: full names.
 	if label(0) != "alpha<Integer>" {
 		t.Fatalf("default label = %q, want alpha<Integer>", label(0))
 	}
 	// Global toggle abbreviates every row (both inners are > 5 bytes).
-	m.toggleSymbolAbbrevAll()
+	st.ToggleAbbrevAll(nopHost{})
 	if label(0) != "alpha<...>" || label(1) != "beta<...>" {
 		t.Fatalf("after toggle-all: %q, %q", label(0), label(1))
 	}
 	// Per-row override inverts just that row back to full.
-	m.symbolsCur = 0
-	m.toggleSymbolAbbrev()
+	st.Cur = 0
+	st.ToggleAbbrev(nopHost{})
 	if label(0) != "alpha<Integer>" {
 		t.Fatalf("per-row override label = %q, want alpha<Integer>", label(0))
 	}
@@ -97,68 +121,46 @@ func TestSymbolAbbrevToggles(t *testing.T) {
 		t.Fatalf("sibling row changed: %q", label(1))
 	}
 	// A fresh global toggle clears per-row overrides (back to uniform, here expanded).
-	m.toggleSymbolAbbrevAll()
+	st.ToggleAbbrevAll(nopHost{})
 	if label(0) != "alpha<Integer>" || label(1) != "beta<Character>" {
 		t.Fatalf("after second toggle-all: %q, %q", label(0), label(1))
 	}
 }
 
-func TestDisplaySymbolNameUsesGlobalAbbrevOnly(t *testing.T) {
-	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
-		{Name: "raw", Demangled: "foo<LongArgList>(int, char)", Addr: 0x1000},
-	}}}
-	s := m.file.Symbols[0]
-
-	// Off by default: the full demangled name (used by disasm/hex annotations).
-	if got := m.displaySymbolName(s); got != "foo<LongArgList>(int, char)" {
-		t.Fatalf("default = %q", got)
-	}
-	// Global toggle on: bracket lists collapse everywhere the helper is used.
-	m.symbolsAbbrev = true
-	if got := m.displaySymbolName(s); got != "foo<...>(...)" {
-		t.Fatalf("global on = %q", got)
-	}
-	// Symbols-list per-row overrides are list-specific and must not leak here.
-	m.symbolsAbbrevExcept = map[string]bool{"s0": true}
-	if got := m.displaySymbolName(s); got != "foo<...>(...)" {
-		t.Fatalf("per-row override leaked into shared helper = %q", got)
-	}
-}
-
 func TestSymbolSortAndBind(t *testing.T) {
-	m := &Model{file: &binfile.File{Symbols: []binfile.Symbol{
+	f := &binfile.File{Symbols: []binfile.Symbol{
 		{Name: "a", Addr: 0x1000, Size: 10, Bind: binfile.BindLocal},
 		{Name: "b", Addr: 0x3000, Size: 50, Bind: binfile.BindGlobal},
 		{Name: "c", Addr: 0x2000, Size: 30, Bind: binfile.BindGlobal},
-	}}}
-	m.symbolsFilter = newPromptInput("", "/ ")
+	}}
+	st := &State{Filter: textinput.New()}
 
 	addrs := func() []uint64 {
-		m.recomputeSymbols()
-		out := make([]uint64, 0, len(m.symbolsFiltered))
-		for _, idx := range m.symbolsFiltered {
-			out = append(out, m.file.Symbols[idx].Addr)
+		st.Recompute(testCtx(f))
+		out := make([]uint64, 0, len(st.Filtered))
+		for _, idx := range st.Filtered {
+			out = append(out, f.Symbols[idx].Addr)
 		}
 		return out
 	}
 
-	m.symbolsSort = sortByAddr
+	st.Sort = SortAddr
 	if got := addrs(); !reflect.DeepEqual(got, []uint64{0x1000, 0x2000, 0x3000}) {
 		t.Fatalf("sort by addr = %#x", got)
 	}
-	m.symbolsSort = sortBySize // ascending by size: a(10) c(30) b(50)
+	st.Sort = SortSize // ascending by size: a(10) c(30) b(50)
 	if got := addrs(); !reflect.DeepEqual(got, []uint64{0x1000, 0x2000, 0x3000}) {
 		t.Fatalf("sort by size = %#x", got)
 	}
-	m.symbolsSortDesc = true // reverse → largest first: b(50) c(30) a(10)
+	st.SortDesc = true // reverse → largest first: b(50) c(30) a(10)
 	if got := addrs(); !reflect.DeepEqual(got, []uint64{0x3000, 0x2000, 0x1000}) {
 		t.Fatalf("sort by size desc = %#x", got)
 	}
-	m.symbolsSortDesc = false
+	st.SortDesc = false
 
-	m.symbolsSort = sortByName
-	m.symbolsBindOn = true
-	m.symbolsBind = binfile.BindGlobal
+	st.Sort = SortName
+	st.BindOn = true
+	st.Bind = binfile.BindGlobal
 	if got := len(addrs()); got != 2 {
 		t.Fatalf("bind=global count = %d, want 2", got)
 	}

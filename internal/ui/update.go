@@ -134,29 +134,29 @@ func (m *Model) forwardToFocusedInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case m.searchActive:
 		m.searchInput, cmd = m.searchInput.Update(msg)
-	case m.symbolsFilter.Focused():
-		before := m.symbolsFilter.Value()
-		m.symbolsFilter, cmd = m.symbolsFilter.Update(msg)
-		if m.symbolsFilter.Value() != before {
-			m.recomputeSymbols()
+	case m.symbols.Filter.Focused():
+		before := m.symbols.Filter.Value()
+		m.symbols.Filter, cmd = m.symbols.Filter.Update(msg)
+		if m.symbols.Filter.Value() != before {
+			m.symbols.Recompute(m.viewContext())
 		}
-	case m.sectionsFilter.Focused():
-		before := m.sectionsFilter.Value()
-		m.sectionsFilter, cmd = m.sectionsFilter.Update(msg)
-		if m.sectionsFilter.Value() != before {
-			m.recomputeSections()
+	case m.sections.Filter.Focused():
+		before := m.sections.Filter.Value()
+		m.sections.Filter, cmd = m.sections.Filter.Update(msg)
+		if m.sections.Filter.Value() != before {
+			m.sections.Recompute()
 		}
-	case m.stringsFilter.Focused():
-		before := m.stringsFilter.Value()
-		m.stringsFilter, cmd = m.stringsFilter.Update(msg)
-		if m.stringsFilter.Value() != before {
-			m.recomputeStrings()
+	case m.strs.Filter.Focused():
+		before := m.strs.Filter.Value()
+		m.strs.Filter, cmd = m.strs.Filter.Update(msg)
+		if m.strs.Filter.Value() != before {
+			m.strs.Recompute(m.viewContext())
 		}
-	case m.sourcesFilter.Focused():
-		before := m.sourcesFilter.Value()
-		m.sourcesFilter, cmd = m.sourcesFilter.Update(msg)
-		if m.sourcesFilter.Value() != before {
-			m.recomputeSourceFiles()
+	case m.sources.Filter.Focused():
+		before := m.sources.Filter.Value()
+		m.sources.Filter, cmd = m.sources.Filter.Update(msg)
+		if m.sources.Filter.Value() != before {
+			m.sources.Recompute(m.viewContext())
 		}
 	}
 	return m, cmd
@@ -168,8 +168,6 @@ func (m *Model) resize(width, height int) {
 	}
 	m.width, m.height = width, height
 	bodyH := m.bodyHeight()
-	m.headerVP.SetWidth(m.width)
-	m.headerVP.SetHeight(bodyH)
 	m.srcVP.SetWidth(m.width / 2)
 	m.srcVP.SetHeight(bodyH)
 }
@@ -258,12 +256,7 @@ func (m *Model) applyDemangledNames(names []string) {
 // stale; they also appear in the disasm "<name>:" labels and disasm/hex
 // annotations, whose cached row heights wrap by name length.
 func (m *Model) invalidateSymbolNameState() {
-	m.symbolsByDisplay = nil
-	m.symbolsTreeInit = false
-	m.symbolsCollapsed = nil
-	if m.symbolsReady {
-		m.recomputeSymbols()
-	}
+	m.symbols.OnNamesChanged(m.viewContext())
 	m.clearSymbolNameCaches()
 	m.refreshModalSymbolNames()
 }

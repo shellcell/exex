@@ -7,14 +7,11 @@ package ui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/dump"
 	sourceutil "github.com/rabarbra/exex/internal/sourcefiles"
@@ -44,169 +41,6 @@ func (t *Theme) columnStyle(cols []int, col int) (lipgloss.Style, bool) {
 		}
 	}
 	return lipgloss.Style{}, false
-}
-
-// sourceSort is the flat-list order of the source files.
-type sourceSort uint8
-
-const (
-	srcSortProject sourceSort = iota // project files first (the natural default)
-	srcSortName                      // pure alphabetical by path
-)
-
-// String returns the sort's filter-status label.
-func (s sourceSort) String() string {
-	if s == srcSortName {
-		return "name"
-	}
-	return "project"
-}
-
-// applySourceSort orders sourcesFiltered for the flat list. The project-first
-// order is the natural order of sourcesFiles, so it only reverses for descending;
-// name order sorts by path. (Tree mode always groups alphabetically.)
-func (m *Model) applySourceSort() {
-	desc := m.sourcesSortDesc
-	if m.sourcesSort == srcSortName {
-		sort.SliceStable(m.sourcesFiltered, func(a, b int) bool {
-			fa, fb := m.sourcesFiles[m.sourcesFiltered[a]], m.sourcesFiles[m.sourcesFiltered[b]]
-			if desc {
-				return fa > fb
-			}
-			return fa < fb
-		})
-		return
-	}
-	if desc {
-		reverseInts(m.sourcesFiltered)
-	}
-}
-
-// ensureSources loads the source-file list once.
-func (m *Model) ensureSources() {
-	if m.sourcesFiles == nil {
-		m.sourcesFiles = m.file.SourceFiles()
-		if m.sourcesFiles == nil {
-			m.sourcesFiles = []string{}
-		}
-		wd, _ := os.Getwd()
-		sourceutil.SortForProject(m.sourcesFiles, m.file.Path, wd)
-		m.recomputeSourceFiles()
-	}
-}
-
-// recomputeSourceFiles rebuilds the filtered file list and visible rows from the
-// current filter (and, in tree mode, the directory tree + collapse state).
-func (m *Model) recomputeSourceFiles() {
-	needle := strings.ToLower(m.sourcesFilter.Value())
-	m.sourcesFiltered = m.sourcesFiltered[:0]
-	for i, f := range m.sourcesFiles {
-		if needle != "" && !containsFold(f, needle) {
-			continue
-		}
-		switch m.sourcesAvail {
-		case availPresent:
-			if !m.file.SourceExists(f) {
-				continue
-			}
-		case availMissing:
-			if m.file.SourceExists(f) {
-				continue
-			}
-		}
-		m.sourcesFiltered = append(m.sourcesFiltered, i)
-	}
-	m.applySourceSort()
-	m.buildSourceRows()
-	if m.sourcesCur >= len(m.sourcesRows) {
-		m.sourcesCur = max(0, len(m.sourcesRows)-1)
-	}
-}
-
-// sortedSourceIdxs returns the filtered file indices sorted alphabetically by
-// path — needed for the adjacency-based directory tree (the flat list keeps its
-// project-first order).
-func (m *Model) sortedSourceIdxs() []int {
-	idxs := append([]int(nil), m.sourcesFiltered...)
-	sort.Slice(idxs, func(a, b int) bool { return m.sourcesFiles[idxs[a]] < m.sourcesFiles[idxs[b]] })
-	return idxs
-}
-
-// buildSourceRows flattens the filtered files into a directory tree (tree mode) or
-// one leaf row per file (flat mode).
-func (m *Model) buildSourceRows() {
-	if m.sourcesTree {
-		roots := buildTree(m.sortedSourceIdxs(), func(i int) string { return m.sourcesFiles[i] }, segPath)
-		if !m.sourcesTreeInit {
-			m.sourcesTreeInit = true
-			if m.treeCollapseDefault {
-				m.sourcesCollapsed = map[string]bool{}
-				eachInternal(roots, func(p string) { m.sourcesCollapsed[p] = true })
-			}
-		}
-		collapsed := m.sourcesCollapsed
-		if m.sourcesFilter.Value() != "" {
-			collapsed = nil
-		}
-		m.sourcesRows = flattenTree(roots, collapsed, 0, m.sourcesRows[:0])
-		return
-	}
-	nodes := make([]treeNode, len(m.sourcesFiltered))
-	rows := m.sourcesRows[:0]
-	for k, idx := range m.sourcesFiltered {
-		nodes[k] = treeNode{label: m.sourcesFiles[idx], leaf: idx, count: 1}
-		rows = append(rows, treeRow{node: &nodes[k], depth: 0})
-	}
-	m.sourcesRows = rows
-}
-
-// sourceFileAt returns the file path for the row, when it is a leaf.
-func (m *Model) sourceFileAt(rowIdx int) (string, bool) {
-	if rowIdx < 0 || rowIdx >= len(m.sourcesRows) {
-		return "", false
-	}
-	n := m.sourcesRows[rowIdx].node
-	if n.leaf < 0 {
-		return "", false
-	}
-	return m.sourcesFiles[n.leaf], true
-}
-
-// toggleSourceNode collapses/expands the directory node at the current row.
-func (m *Model) toggleSourceNode() {
-	if m.sourcesCur < 0 || m.sourcesCur >= len(m.sourcesRows) {
-		return
-	}
-	n := m.sourcesRows[m.sourcesCur].node
-	if n.leaf >= 0 {
-		return
-	}
-	if m.sourcesCollapsed == nil {
-		m.sourcesCollapsed = map[string]bool{}
-	}
-	m.sourcesCollapsed[n.path] = !m.sourcesCollapsed[n.path]
-	m.buildSourceRows()
-	if m.sourcesCur >= len(m.sourcesRows) {
-		m.sourcesCur = max(0, len(m.sourcesRows)-1)
-	}
-}
-
-// setAllSourcesCollapsed collapses or expands every directory node.
-func (m *Model) setAllSourcesCollapsed(collapsed bool) {
-	if !m.sourcesTree {
-		return
-	}
-	if !collapsed {
-		m.sourcesCollapsed = nil
-	} else {
-		m.sourcesCollapsed = map[string]bool{}
-		roots := buildTree(m.sortedSourceIdxs(), func(i int) string { return m.sourcesFiles[i] }, segPath)
-		eachInternal(roots, func(p string) { m.sourcesCollapsed[p] = true })
-	}
-	m.buildSourceRows()
-	if m.sourcesCur >= len(m.sourcesRows) {
-		m.sourcesCur = max(0, len(m.sourcesRows)-1)
-	}
 }
 
 func (m *Model) mappedSourceLines(file string) map[int]bool {
@@ -290,128 +124,19 @@ func (m *Model) selectSourceFromInstRange(start int, inRange func(uint64) bool) 
 // into the disassembly view in source-first mode. The split source/disasm panes
 // live entirely in the disasm view now.
 func (m *Model) updateSources(key string) (tea.Model, tea.Cmd) {
-	m.ensureSources()
+	ctx := m.viewContext()
+	m.sources.Ensure(ctx)
 	if !m.file.HasDWARF() {
 		return m, nil
 	}
-	return m.updateSourceList(key)
-}
-
-func (m *Model) updateSourceList(key string) (tea.Model, tea.Cmd) {
-	if navKey(&m.sourcesCur, len(m.sourcesRows), m.listPage(), key) {
-		return m, nil
-	}
 	switch key {
-	case "/":
-		m.sourcesFilter.Focus()
-		return m, nil
-	case "esc":
-		dirty := m.sourcesAvail != availAll || m.sourcesFilter.Value() != "" || m.sourcesFilter.Focused()
-		m.sourcesFilter.SetValue("")
-		m.sourcesFilter.Blur()
-		m.sourcesAvail = availAll
-		m.sourcesCur, m.sourcesTop = 0, 0
-		m.recomputeSourceFiles()
-		if dirty {
-			m.setStatus("filters cleared", false)
-		}
-		return m, nil
 	case "ctrl+f":
 		m.srcSearchAll = true
 		m.openSearch()
 		return m, nil
-	case "ctrl+p":
-		// cycle availability filter: all → present → missing → all
-		switch m.sourcesAvail {
-		case availAll:
-			m.sourcesAvail = availPresent
-		case availPresent:
-			m.sourcesAvail = availMissing
-		default:
-			m.sourcesAvail = availAll
-		}
-		m.sourcesCur, m.sourcesTop = 0, 0
-		m.recomputeSourceFiles()
-		m.setStatus("sources: "+availLabel(m.sourcesAvail), false)
-		return m, nil
-	case "s":
-		m.sourcesSort = (m.sourcesSort + 1) % 2
-		m.sourcesCur, m.sourcesTop = 0, 0
-		m.recomputeSourceFiles()
-		m.setStatus("sort: "+m.sourcesSort.String(), false)
-	case "r":
-		m.sourcesSortDesc = !m.sourcesSortDesc
-		m.sourcesCur, m.sourcesTop = 0, 0
-		m.recomputeSourceFiles()
-		dir := "ascending"
-		if m.sourcesSortDesc {
-			dir = "descending"
-		}
-		m.setStatus("sort order: "+dir, false)
-	case "t":
-		m.sourcesTree = !m.sourcesTree
-		m.sourcesCur, m.sourcesTop = 0, 0
-		m.recomputeSourceFiles()
-		view := "flat list"
-		if m.sourcesTree {
-			view = "tree"
-		}
-		m.setStatus("sources view: "+view, false)
-	case "-", "_":
-		m.setAllSourcesCollapsed(true)
-		m.setStatus("collapsed all", false)
-	case "+", "=":
-		m.setAllSourcesCollapsed(false)
-		m.setStatus("expanded all", false)
-	case "right":
-		if m.sourcesTree {
-			m.ensureSourcesCollapsed()
-			if treeExpandOne(m.sourcesRows, &m.sourcesCur, m.sourcesCollapsed) {
-				m.buildSourceRows()
-			}
-		}
-	case "left":
-		if m.sourcesTree {
-			m.ensureSourcesCollapsed()
-			if treeCollapseOne(m.sourcesRows, &m.sourcesCur, m.sourcesCollapsed) {
-				m.buildSourceRows()
-			}
-		}
-	case "S":
-		if f, ok := m.sourceFileAt(m.sourcesCur); ok {
-			m.copyToClipboard(f, "source path")
-		}
-	case "o":
-		// Open the selected file in the disasm source-first view (doc #27: `o`
-		// opens a source there, mirroring its "open lib as primary" role in Libs).
-		if f, ok := m.sourceFileAt(m.sourcesCur); ok {
-			m.openSourceFile(f, 1)
-			m.setMode(modeDisasm)
-			m.showSource = true
-			m.sourceFirst = true
-		}
-	case "w":
-		m.toggleWrap()
-	case "enter", " ":
-		if m.sourcesCur >= 0 && m.sourcesCur < len(m.sourcesRows) && m.sourcesRows[m.sourcesCur].node.leaf < 0 {
-			m.ensureSourcesCollapsed()
-			if treeToggleSubtree(m.sourcesRows, m.sourcesCur, m.sourcesCollapsed) {
-				m.buildSourceRows()
-			}
-		} else if f, ok := m.sourceFileAt(m.sourcesCur); ok {
-			m.openSourceFile(f, 1)
-			m.setMode(modeDisasm)
-			m.showSource = true
-			m.sourceFirst = true
-		}
 	}
+	m.sources.Update(ctx, m, key)
 	return m, nil
-}
-
-func (m *Model) ensureSourcesCollapsed() {
-	if m.sourcesCollapsed == nil {
-		m.sourcesCollapsed = map[string]bool{}
-	}
 }
 
 // updateSourceOpenSrc drives source-first navigation: the source cursor leads
@@ -503,12 +228,13 @@ func (m *Model) gotoMappedLine(forward bool) {
 	m.setStatus("no more mapped lines", false)
 }
 
-// openSourceFile switches to the open-file pane at the given 1-based line.
-func (m *Model) openSourceFile(file string, line int) {
+// openSourceFile switches the source-first pane to file at the given 1-based
+// line. It leaves mode selection to the caller.
+func (m *Model) openSourceFile(file string, line int) bool {
 	src := m.file.SourceLines(file)
 	if src == nil {
 		m.setStatus("source file not found: "+filepath.Base(file), true)
-		return
+		return false
 	}
 	m.srcFile = file
 	m.srcCodeLines = m.mappedSourceLines(file)
@@ -521,6 +247,14 @@ func (m *Model) openSourceFile(file string, line int) {
 	m.srcCur = line
 	m.srcTop = 0
 	m.syncSourceAsm()
+	return true
+}
+
+func (m *Model) openSourceFileInDisasm(file string, line int) {
+	m.openSourceFile(file, line)
+	m.setMode(modeDisasm)
+	m.showSource = true
+	m.sourceFirst = true
 }
 
 // syncSourceAsm points the disasm cursor at the address mapped from the current
@@ -602,101 +336,25 @@ func (m *Model) openSrcMatch(i int) {
 // grepSources scans every source file for the query (capped).
 func (m *Model) grepSources(query string) []srcMatch {
 	const cap = 1000
-	return sourceutil.Grep(m.sourcesFiles, m.file.SourceLines, query, cap)
+	return sourceutil.Grep(m.sources.Files, m.file.SourceLines, query, cap)
 }
 
 // ---- rendering ----
 
 func (m *Model) renderSources() string {
-	bodyH := m.bodyHeight()
-	m.ensureSources()
+	ctx := m.viewContext()
+	m.sources.Ensure(ctx)
 	if !m.file.HasDWARF() {
 		return m.emptyBody("no debug info — the Sources view needs DWARF (build with -g, or place a .dSYM / .debug sidecar next to the binary)")
 	}
 	// The Sources view is only ever the file list; opening a file switches to the
 	// disasm view (source-first), which owns the split panes.
-	return m.renderSourceList(bodyH)
+	return m.sources.Render(ctx, m)
 }
 
 // leftBorderPane draws a thin divider on the left edge of a pane.
 func (t Theme) leftBorderPane(content string) string {
 	return t.paneBorderStyle.Render(content)
-}
-
-func (m *Model) renderSourceList(bodyH int) string {
-	if bodyH < 2 {
-		bodyH = 2
-	}
-	filterRow := m.sourcesFilter.View()
-	if !m.sourcesFilter.Focused() {
-		facet := ""
-		if m.sourcesTree {
-			facet = "  tree"
-		}
-		if m.sourcesAvail != availAll {
-			facet += "  " + m.theme.helpKeyStyle.Render(ctrlKeys("p")) + " " + availLabel(m.sourcesAvail)
-		}
-		if !m.sourcesTree {
-			dir := "↑"
-			if m.sourcesSortDesc {
-				dir = "↓"
-			}
-			facet += "  " + m.theme.helpKeyStyle.Render("s") + " sort:" + m.sourcesSort.String() + dir
-		}
-		filterRow = m.theme.footerStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)",
-			m.sourcesFilter.Value(), len(m.sourcesFiltered), len(m.sourcesFiles))) + m.theme.footerStyle.Render(facet)
-	}
-
-	visible := bodyH - 1
-	if visible < 1 {
-		visible = 1
-	}
-	one := func(int) int { return 1 }
-	top := m.visualTopForView(m.sourcesCur, m.sourcesTop, len(m.sourcesRows), visible, one)
-	m.sourcesTop = top
-	m.renderedSourcesTop = top
-	m.pageRows = pageStep(top, len(m.sourcesRows), visible, one)
-	end := top + visible
-	if end > len(m.sourcesRows) {
-		end = len(m.sourcesRows)
-	}
-
-	if len(m.sourcesRows) == 0 {
-		msg := "no source files"
-		if m.sourcesFilter.Value() != "" || m.sourcesAvail != availAll {
-			msg = "no matching source files  ·  Esc clears filters"
-		}
-		return m.emptyList(msg, filterRow)
-	}
-	var b strings.Builder
-	b.WriteString(filterRow)
-	b.WriteString("\n")
-	for i := top; i < end; i++ {
-		row := m.sourcesRows[i]
-		n := row.node
-		selected := i == m.sourcesCur
-		if n.leaf < 0 {
-			collapsed := m.sourcesCollapsed != nil && m.sourcesCollapsed[n.path]
-			b.WriteString(m.treeNodeRow(row.depth, n.label, n.count, collapsed, selected, " ", m.width))
-			b.WriteString("\n")
-			continue
-		}
-		full := m.sourcesFiles[n.leaf]
-		indent := strings.Repeat(" ", row.depth*treeIndent)
-		trunc := layout.TruncateMiddle(n.label, max(8, m.width-len(indent)-2))
-		name := m.theme.colorPathByPrefix(full, trunc)
-		if !m.file.SourceExists(full) { // not on disk: dim it (can't be opened)
-			name = m.theme.srcShadowStyle.Render(trunc)
-		}
-		line := layout.PadRight(" "+indent+name, m.width)
-		if selected {
-			b.WriteString(m.theme.tableSelStyle.Render(ansi.Strip(line)))
-		} else {
-			b.WriteString(m.theme.tableRowStyle.Render(line))
-		}
-		b.WriteString("\n")
-	}
-	return layout.PadBody(b.String(), m.width, bodyH)
 }
 
 // gutterWidth is the visible width of the source line-number gutter
@@ -718,7 +376,7 @@ func (m *Model) renderSourceText(w, h int) string {
 	top = m.visualTopForView(m.srcCur-1, top, len(src), contentH, m.sourceRowHeight(w))
 	m.srcTop = top + 1
 	m.renderedSrcTop = top
-	m.pageRows = pageStep(top, len(src), contentH, m.sourceRowHeight(w))
+	m.pageRows = layout.PageStep(top, len(src), contentH, m.sourceRowHeight(w))
 
 	var b strings.Builder
 	suffix := fmt.Sprintf(":%d", m.srcCur)
@@ -934,7 +592,7 @@ func (m *Model) sourceAsmAnchorIndex() int {
 }
 
 func (m *Model) sourceAsmRow(i, addrW, w int) string {
-	return m.sourceAsmRowCache.get(sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}, func() string {
+	return m.sourceAsmRowCache.Get(sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}, func() string {
 		inst := m.disasmInst[i]
 		// Colour only the address by mapping (shared addrMapStyle policy); the
 		// instruction text keeps its normal class colours so the pane reads like

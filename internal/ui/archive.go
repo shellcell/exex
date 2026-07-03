@@ -106,7 +106,7 @@ func (m *Model) updateMembersList(key string) (tea.Model, tea.Cmd) {
 		m.infoMembers = false // back to the loaded member's header
 		return m, nil
 	}
-	navKey(&m.memberSel, len(m.archiveMembers), m.listPage(), key)
+	layout.NavKey(&m.memberSel, len(m.archiveMembers), m.listPage(), key)
 	return m, nil
 }
 

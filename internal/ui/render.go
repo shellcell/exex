@@ -59,24 +59,20 @@ func bytesHexSpaced(b []byte, maxN int) string {
 // text to the window width (capped for readability) so it stays inside narrow or
 // short terminals instead of overflowing.
 func (m *Model) placeCentred(msg string, h int) string {
-	w := layout.Clamp(m.width-4, 1, 60)
-	styled := m.theme.srcShadowStyle.Width(w).Align(lipgloss.Center).Render(msg)
-	return lipgloss.Place(m.width, max(1, h), lipgloss.Center, lipgloss.Center, styled)
+	return m.viewContext().PlaceCentred(msg, h)
 }
 
 // emptyBody centres a dim message in the whole body area, for a view that has no
 // entries at all (no filter/header rows to keep).
 func (m *Model) emptyBody(msg string) string {
-	return m.placeCentred(msg, m.bodyHeight())
+	return m.viewContext().EmptyBody(msg)
 }
 
 // emptyList renders a list view's empty state: the leading rows (filter / column
 // header) are kept and a dim message is centred in the body below them, so an
 // empty (or fully-filtered) table reads clearly instead of as a blank area.
 func (m *Model) emptyList(msg string, leading ...string) string {
-	bodyH := m.bodyHeight()
-	rows := append(leading, strings.Split(m.placeCentred(msg, bodyH-len(leading)), "\n")...)
-	return layout.PadBodyRows(rows, m.width, bodyH)
+	return m.viewContext().EmptyList(msg, leading...)
 }
 
 // wrapStatus returns the footer label for the current wrap setting.
@@ -137,24 +133,7 @@ func (t Theme) renderViewBackground(s string, w int) string {
 }
 
 func renderBackground(s string, w int, st lipgloss.Style) string {
-	return renderStyle(s, w, st)
-}
-
-func renderStyle(s string, w int, st lipgloss.Style) string {
-	prefix := stylePrefix(st)
-	if prefix == "" {
-		return s
-	}
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		if w > 0 && lipgloss.Width(line) != w {
-			line = layout.PadRight(line, w)
-		}
-		line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+prefix)
-		line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+prefix)
-		lines[i] = prefix + line + "\x1b[0m"
-	}
-	return strings.Join(lines, "\n")
+	return layout.RenderStyle(s, w, st)
 }
 
 func (t Theme) viewTitleLine(s string, w int) string {
@@ -165,26 +144,14 @@ func (t Theme) stickyTitleLine(s string, w int) string {
 	return renderBackground(layout.PadRight(layout.FitANSIWidth(s, w), w), w, t.stickySymStyle)
 }
 
-func stylePrefix(st lipgloss.Style) string {
-	sample := st.Render("x")
-	i := strings.IndexByte(sample, 'x')
-	if i <= 0 {
-		return ""
-	}
-	return sample[:i]
-}
-
 // tableHeader renders a full-width table header line.
 func (m *Model) tableHeader(s string) string {
-	return m.theme.viewTitleLine(layout.TruncateMiddle(s, m.width), m.width)
+	return m.viewContext().TableHeader(s)
 }
 
 // visualTopForView respects detached viewport state when computing list top.
 func (m *Model) visualTopForView(cur, top, n, visible int, rowHeight func(int) int) int {
-	if m.viewportDetached {
-		return layout.ViewportTop(top, n, visible, rowHeight)
-	}
-	return layout.VisualTop(cur, top, n, visible, rowHeight)
+	return m.viewContext().VisualTop(cur, top, n, visible, rowHeight)
 }
 
 // The scroll/viewport geometry (VisualTop, …) and the modal Overlay compositor

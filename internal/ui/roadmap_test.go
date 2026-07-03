@@ -14,7 +14,15 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
+
+const testBytesPerHexRow = 16
+
+func testHexBodyStart(addrW int) int { return 1 + 2 + addrW + 2 }
+
+func renderHexTest(m *Model) string { return m.byteViews.Render(m.viewContextPtr(), hexraw.Hex) }
+func renderRawTest(m *Model) string { return m.byteViews.Render(m.viewContextPtr(), hexraw.Raw) }
 
 func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
 	m := &Model{
@@ -25,17 +33,17 @@ func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
 			{Name: "sec", Kind: binfile.SymSection},
 		}},
 	}
-	m.symbolsFilter = textinput.New()
-	m.recomputeSymbols()
-	if got := len(m.symbolsFiltered); got != 3 {
+	m.symbols.Filter = textinput.New()
+	m.symbols.Recompute(m.viewContext())
+	if got := len(m.symbols.Filtered); got != 3 {
 		t.Fatalf("initial filtered count = %d, want 3", got)
 	}
-	m.cycleSymbolKindFilter()
-	m.recomputeSymbols()
-	if got := len(m.symbolsFiltered); got != 1 {
+	m.symbols.Update(m.viewContext(), m, "ctrl+t")
+	m.symbols.Recompute(m.viewContext())
+	if got := len(m.symbols.Filtered); got != 1 {
 		t.Fatalf("func filtered count = %d, want 1", got)
 	}
-	if sym := m.file.Symbols[m.symbolsFiltered[0]]; sym.Kind != binfile.SymFunc {
+	if sym := m.file.Symbols[m.symbols.Filtered[0]]; sym.Kind != binfile.SymFunc {
 		t.Fatalf("filtered symbol kind = %v, want func", sym.Kind)
 	}
 }
@@ -74,8 +82,8 @@ func TestGotoUnmappedAddressOpensRaw(t *testing.T) {
 	if m.mode != modeRaw {
 		t.Fatalf("mode = %v, want raw", m.mode)
 	}
-	if m.rawCur != 0 {
-		t.Fatalf("raw cursor = %d, want clamped 0", m.rawCur)
+	if m.byteViews.RawCur != 0 {
+		t.Fatalf("raw cursor = %d, want clamped 0", m.byteViews.RawCur)
 	}
 }
 
@@ -122,18 +130,18 @@ func TestDefaultViewAndNavHelpers(t *testing.T) {
 
 func TestHexColumnToByteBounds(t *testing.T) {
 	addrW := 8
-	bpr := bytesPerHexRow
-	start := hexBodyStart(addrW)
-	if got := hexColumnToByte(addrW, bpr, start-10); got != 0 {
+	bpr := testBytesPerHexRow
+	start := testHexBodyStart(addrW)
+	if got := hexraw.ColumnToByte(addrW, bpr, start-10); got != 0 {
 		t.Fatalf("column before hex body = %d, want 0", got)
 	}
-	if got := hexColumnToByte(addrW, bpr, start); got != 0 {
+	if got := hexraw.ColumnToByte(addrW, bpr, start); got != 0 {
 		t.Fatalf("first byte column = %d, want 0", got)
 	}
-	if got := hexColumnToByte(addrW, bpr, start+3*8+1); got != 8 {
+	if got := hexraw.ColumnToByte(addrW, bpr, start+3*8+1); got != 8 {
 		t.Fatalf("column after midpoint gap = %d, want 8", got)
 	}
-	if got := hexColumnToByte(addrW, bpr, start+1000); got != bytesPerHexRow-1 {
+	if got := hexraw.ColumnToByte(addrW, bpr, start+1000); got != testBytesPerHexRow-1 {
 		t.Fatalf("column after row = %d, want last byte", got)
 	}
 }
@@ -143,27 +151,37 @@ func TestHexVisibleTopPreservesUnalignedSectionStart(t *testing.T) {
 	// starts at data position 0x65 / address 0x2003 (lead 3).
 	const sectionStart = 0x65
 	m := &Model{
-		theme: DefaultTheme(),
-		file:  &binfile.File{},
-		hexState: hexState{hexImg: binfile.NewImage(make([]byte, 0x200), []binfile.Region{
+		theme:       DefaultTheme(),
+		file:        &binfile.File{},
+		layoutState: layoutState{width: 120, height: 13},
+		byteViews: hexraw.State{HexImg: binfile.NewImage(make([]byte, 0x200), []binfile.Region{
 			{Addr: 0x1000, Size: sectionStart, Off: 0, Name: "A"},
 			{Addr: 0x2003, Size: 0x200 - sectionStart, Off: sectionStart, Name: "B"},
 		})},
 	}
-	addrAt := m.hexImg.AddrAt
 
-	if got := m.hexVisibleTop(modeHex, sectionStart, sectionStart, 10, addrAt); got != sectionStart {
+	m.byteViews.HexCur = sectionStart
+	m.byteViews.HexTop = sectionStart
+	renderHexTest(m)
+	if got := m.byteViews.HexTop; got != sectionStart {
 		t.Fatalf("hexVisibleTop at section start = 0x%x, want 0x%x", got, sectionStart)
 	}
 	// The row ending the previous section is address-aligned at 0x60.
-	if got := m.hexVisibleTop(modeHex, sectionStart-1, sectionStart, 10, addrAt); got != 0x60 {
+	m.byteViews.HexCur = sectionStart - 1
+	m.byteViews.HexTop = sectionStart
+	renderHexTest(m)
+	if got := m.byteViews.HexTop; got != 0x60 {
 		t.Fatalf("hexVisibleTop before section start = 0x%x, want 0x60", got)
 	}
-	if got := m.scrollByteViewportTop(modeHex, m.hexImg, sectionStart, 10, -1, addrAt); got != 0x60 {
+	m.byteViews.HexTop = sectionStart
+	m.byteViews.Scroll(m.viewContextPtr(), hexraw.Hex, -1)
+	if got := m.byteViews.HexTop; got != 0x60 {
 		t.Fatalf("scrollByteViewportTop up = 0x%x, want 0x60", got)
 	}
 	// Section B's first row spans the 13 bytes up to the next aligned address.
-	if got := m.scrollByteViewportTop(modeHex, m.hexImg, sectionStart, 10, 1, addrAt); got != sectionStart+13 {
+	m.byteViews.HexTop = sectionStart
+	m.byteViews.Scroll(m.viewContextPtr(), hexraw.Hex, 1)
+	if got := m.byteViews.HexTop; got != sectionStart+13 {
 		t.Fatalf("scrollByteViewportTop down = 0x%x, want 0x%x", got, sectionStart+13)
 	}
 }
@@ -181,12 +199,12 @@ func TestHexMiddleRowsNeverGap(t *testing.T) {
 		theme:       DefaultTheme(),
 		file:        &binfile.File{},
 		layoutState: layoutState{width: 120, height: 12},
-		hexState:    hexState{hexImg: binfile.NewImage(data, []binfile.Region{{Addr: 0x1029052b8, Size: uint64(len(data)), Off: 0, Name: "__objc_data"}})},
+		byteViews:   hexraw.State{HexImg: binfile.NewImage(data, []binfile.Region{{Addr: 0x1029052b8, Size: uint64(len(data)), Off: 0, Name: "__objc_data"}})},
 	}
 	for range 40 { // scroll well past the section start
-		m.updateHex("down")
+		m.byteViews.Update(m.viewContextPtr(), m, hexraw.Hex, "down")
 	}
-	lines := strings.Split(ansi.Strip(m.renderHex()), "\n")
+	lines := strings.Split(ansi.Strip(renderHexTest(m)), "\n")
 	var body []string
 	for _, ln := range lines {
 		if strings.Contains(ln, "0x0000000") {
@@ -199,7 +217,7 @@ func TestHexMiddleRowsNeverGap(t *testing.T) {
 	for i, ln := range body {
 		// Hex column begins after " 0x"+addr digits+"  "; check its first slot.
 		addrW := m.file.AddrHexWidth()
-		first := ln[hexBodyStart(addrW) : hexBodyStart(addrW)+2]
+		first := ln[testHexBodyStart(addrW) : testHexBodyStart(addrW)+2]
 		if first == "  " {
 			t.Fatalf("row %d has a leading gap (mid-section row must be full):\n%s", i, ln)
 		}
@@ -217,9 +235,9 @@ func TestHexAndRawRowsSplitAtUnalignedSectionStart(t *testing.T) {
 		theme:       DefaultTheme(),
 		file:        &binfile.File{Sections: sections},
 		layoutState: layoutState{width: 120, height: 10},
-		rawState:    rawState{rawData: raw, rawCur: 0x17, rawTop: 0x14},
+		byteViews:   hexraw.State{RawData: raw, RawCur: 0x17, RawTop: 0x14},
 	}
-	assertSectionBytesBelowSeparator(t, ansi.Strip(rawModel.renderRaw()), "__objc_methname", "43  47 43", "0x0000000000000010")
+	assertSectionBytesBelowSeparator(t, ansi.Strip(renderRawTest(rawModel)), "__objc_methname", "43  47 43", "0x0000000000000010")
 
 	hexData := make([]byte, 0x30)
 	copy(hexData[0x10:], []byte{'e', 'd', 0, 'C', 'G', 'C', 'o', 'l', 'o', 'r'})
@@ -228,53 +246,47 @@ func TestHexAndRawRowsSplitAtUnalignedSectionStart(t *testing.T) {
 		file:             &binfile.File{Sections: sections},
 		layoutState:      layoutState{width: 120, height: 10},
 		interactionState: interactionState{viewportDetached: true},
-		hexState: hexState{hexImg: binfile.NewImage(hexData, []binfile.Region{
+		byteViews: hexraw.State{HexImg: binfile.NewImage(hexData, []binfile.Region{
 			{Addr: 0x10203cb04, Size: 0x13, Off: 0, Name: "prev"},
 			{Addr: 0x10203cb17, Size: 0x20, Off: 0x13, Name: "__objc_methname"},
-		}), hexCur: 0x13, hexTop: 0x10},
+		}), HexCur: 0x13, HexTop: 0x10},
 	}
-	assertSectionBytesBelowSeparator(t, ansi.Strip(hexModel.renderHex()), "__objc_methname", "43  47 43", "0x000000010203cb10")
+	assertSectionBytesBelowSeparator(t, ansi.Strip(renderHexTest(hexModel)), "__objc_methname", "43  47 43", "0x000000010203cb10")
 }
 
 func TestOpeningUnalignedSectionPinsSeparatorAtTop(t *testing.T) {
 	section := binfile.Section{Name: "__objc_methname", Addr: 0x10203cb17, Size: 0x20, Offset: 0x17, FileSize: 0x20, Alloc: true}
 	hexModel := &Model{
-		theme:       DefaultTheme(),
-		file:        &binfile.File{Sections: []binfile.Section{section}},
-		layoutState: layoutState{width: 120, height: 8},
-		interactionState: interactionState{
-			viewportDetached: true,
-			renderedHexTop:   99,
-		},
-		hexState: hexState{hexImg: binfile.NewImage([]byte("CGColor.CGContext._device"), []binfile.Region{{Addr: section.Addr, Size: section.FileSize, Off: 0, Name: section.Name}})},
+		theme:            DefaultTheme(),
+		file:             &binfile.File{Sections: []binfile.Section{section}},
+		layoutState:      layoutState{width: 120, height: 8},
+		interactionState: interactionState{viewportDetached: true},
+		byteViews:        hexraw.State{HexRenderedTop: 99, HexImg: binfile.NewImage([]byte("CGColor.CGContext._device"), []binfile.Region{{Addr: section.Addr, Size: section.FileSize, Off: 0, Name: section.Name}})},
 	}
 	hexModel.openHexAt(section.Addr)
 	if hexModel.viewportDetached {
 		t.Fatal("openHexAt did not reattach viewport")
 	}
-	if hexModel.hexTop != hexModel.hexCur {
-		t.Fatalf("hexTop = %d, want section cursor %d", hexModel.hexTop, hexModel.hexCur)
+	if hexModel.byteViews.HexTop != hexModel.byteViews.HexCur {
+		t.Fatalf("hexTop = %d, want section cursor %d", hexModel.byteViews.HexTop, hexModel.byteViews.HexCur)
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(hexModel.renderHex()), section.Name)
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderHexTest(hexModel)), section.Name)
 
 	rawModel := &Model{
-		theme:       DefaultTheme(),
-		file:        &binfile.File{Sections: []binfile.Section{section}},
-		layoutState: layoutState{width: 120, height: 8},
-		interactionState: interactionState{
-			viewportDetached: true,
-			renderedRawTop:   99,
-		},
-		rawState: rawState{rawData: []byte("abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzz")},
+		theme:            DefaultTheme(),
+		file:             &binfile.File{Sections: []binfile.Section{section}},
+		layoutState:      layoutState{width: 120, height: 8},
+		interactionState: interactionState{viewportDetached: true},
+		byteViews:        hexraw.State{RawRenderedTop: 99, RawData: []byte("abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzz")},
 	}
 	rawModel.openRawAt(section.Offset)
 	if rawModel.viewportDetached {
 		t.Fatal("openRawAt did not reattach viewport")
 	}
-	if rawModel.rawTop != rawModel.rawCur {
-		t.Fatalf("rawTop = %d, want section cursor %d", rawModel.rawTop, rawModel.rawCur)
+	if rawModel.byteViews.RawTop != rawModel.byteViews.RawCur {
+		t.Fatalf("rawTop = %d, want section cursor %d", rawModel.byteViews.RawTop, rawModel.byteViews.RawCur)
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(rawModel.renderRaw()), section.Name)
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderRawTest(rawModel)), section.Name)
 }
 
 func TestCurrentUnalignedSectionSnapsPastPreviousSectionGap(t *testing.T) {
@@ -289,13 +301,13 @@ func TestCurrentUnalignedSectionSnapsPastPreviousSectionGap(t *testing.T) {
 		theme:       DefaultTheme(),
 		file:        &binfile.File{Sections: sections},
 		layoutState: layoutState{width: 120, height: 10},
-		hexState: hexState{hexImg: binfile.NewImage(hexData, []binfile.Region{
+		byteViews: hexraw.State{HexImg: binfile.NewImage(hexData, []binfile.Region{
 			{Addr: sections[0].Addr, Size: sections[0].FileSize, Off: 0, Name: sections[0].Name},
 			{Addr: sections[1].Addr, Size: sections[1].FileSize, Off: 0x4e, Name: sections[1].Name},
-		}), hexCur: 0x7f, hexTop: 0},
+		}), HexCur: 0x7f, HexTop: 0},
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(hexModel.renderHex()), sections[1].Name)
-	if got, want := hexModel.hexTop, 0x4e; got != want {
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderHexTest(hexModel)), sections[1].Name)
+	if got, want := hexModel.byteViews.HexTop, 0x4e; got != want {
 		t.Fatalf("hexTop = 0x%x, want current section start 0x%x", got, want)
 	}
 	model, _ := hexModel.handleMouse(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 10, Y: 4}))
@@ -303,7 +315,7 @@ func TestCurrentUnalignedSectionSnapsPastPreviousSectionGap(t *testing.T) {
 	if !hexModel.viewportDetached {
 		t.Fatal("hex wheel up did not detach viewport")
 	}
-	if got, limit := hexModel.hexTop, 0x4e; got >= limit {
+	if got, limit := hexModel.byteViews.HexTop, 0x4e; got >= limit {
 		t.Fatalf("hex wheel up top = 0x%x, want before section start 0x%x", got, limit)
 	}
 
@@ -314,10 +326,10 @@ func TestCurrentUnalignedSectionSnapsPastPreviousSectionGap(t *testing.T) {
 		theme:       DefaultTheme(),
 		file:        &binfile.File{Sections: sections},
 		layoutState: layoutState{width: 120, height: 10},
-		rawState:    rawState{rawData: rawData, rawCur: 0x7f, rawTop: 0x10},
+		byteViews:   hexraw.State{RawData: rawData, RawCur: 0x7f, RawTop: 0x10},
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(rawModel.renderRaw()), sections[1].Name)
-	if got, want := rawModel.rawTop, 0x4e; got != want {
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderRawTest(rawModel)), sections[1].Name)
+	if got, want := rawModel.byteViews.RawTop, 0x4e; got != want {
 		t.Fatalf("rawTop = 0x%x, want current section start 0x%x", got, want)
 	}
 	model, _ = rawModel.handleMouse(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 10, Y: 4}))
@@ -325,7 +337,7 @@ func TestCurrentUnalignedSectionSnapsPastPreviousSectionGap(t *testing.T) {
 	if !rawModel.viewportDetached {
 		t.Fatal("raw wheel up did not detach viewport")
 	}
-	if got, limit := rawModel.rawTop, 0x4e; got >= limit {
+	if got, limit := rawModel.byteViews.RawTop, 0x4e; got >= limit {
 		t.Fatalf("raw wheel up top = 0x%x, want before section start 0x%x", got, limit)
 	}
 }
@@ -338,30 +350,27 @@ func TestPinnedUnalignedSectionOverridesStaleDetachedTop(t *testing.T) {
 	hexData := make([]byte, 0x100)
 	copy(hexData[0x67:], []byte("CGColor.CGContext._device"))
 	m := &Model{
-		mode:        modeHex,
-		theme:       DefaultTheme(),
-		file:        &binfile.File{Sections: sections},
-		layoutState: layoutState{width: 120, height: 10},
-		interactionState: interactionState{
-			viewportDetached: true,
-			renderedHexTop:   0,
-		},
-		hexState: hexState{hexImg: binfile.NewImage(hexData, []binfile.Region{
+		mode:             modeHex,
+		theme:            DefaultTheme(),
+		file:             &binfile.File{Sections: sections},
+		layoutState:      layoutState{width: 120, height: 10},
+		interactionState: interactionState{viewportDetached: true},
+		byteViews: hexraw.State{HexRenderedTop: 0, HexImg: binfile.NewImage(hexData, []binfile.Region{
 			{Addr: sections[0].Addr, Size: sections[0].FileSize, Off: 0, Name: sections[0].Name},
 			{Addr: sections[1].Addr, Size: sections[1].FileSize, Off: 0x67, Name: sections[1].Name},
-		}), hexCur: 0x67, hexTop: 0, hexPinnedTop: 0x67, hexPinned: true},
+		}), HexCur: 0x67, HexTop: 0, HexPinnedTop: 0x67, HexPinned: true},
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(m.renderHex()), sections[1].Name)
-	if got, want := m.hexTop, 0x67; got != want {
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderHexTest(m)), sections[1].Name)
+	if got, want := m.byteViews.HexTop, 0x67; got != want {
 		t.Fatalf("hexTop = 0x%x, want pinned section start 0x%x", got, want)
 	}
 	m.wheelSuppressUntil = time.Time{}
 	model, _ := m.handleMouse(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 10, Y: 4}))
 	m = model.(*Model)
-	if m.hexPinned {
+	if m.byteViews.HexPinned {
 		t.Fatal("wheel up did not clear pinned section")
 	}
-	if got, limit := m.hexTop, 0x67; got >= limit {
+	if got, limit := m.byteViews.HexTop, 0x67; got >= limit {
 		t.Fatalf("wheel up top = 0x%x, want before pinned section 0x%x", got, limit)
 	}
 }
@@ -380,10 +389,10 @@ func TestHexSearchReattachesViewportAtUnalignedSectionStart(t *testing.T) {
 		layoutState:      layoutState{width: 120, height: 10},
 		interactionState: interactionState{viewportDetached: true},
 		searchState:      searchState{searchActive: true, searchMode: searchModeText, searchForward: true, searchFromCursor: false},
-		hexState: hexState{hexImg: binfile.NewImage(hexData, []binfile.Region{
+		byteViews: hexraw.State{HexImg: binfile.NewImage(hexData, []binfile.Region{
 			{Addr: sections[0].Addr, Size: sections[0].FileSize, Off: 0, Name: sections[0].Name},
 			{Addr: sections[1].Addr, Size: sections[1].FileSize, Off: 0x4e, Name: sections[1].Name},
-		}), hexCur: 0, hexTop: 0},
+		}), HexCur: 0, HexTop: 0},
 	}
 	m.searchInput = textinput.New()
 	m.searchInput.SetValue("Vibrant")
@@ -392,10 +401,10 @@ func TestHexSearchReattachesViewportAtUnalignedSectionStart(t *testing.T) {
 	if m.viewportDetached {
 		t.Fatal("search did not reattach viewport")
 	}
-	if got, want := m.hexCur, 0x4e; got != want {
+	if got, want := m.byteViews.HexCur, 0x4e; got != want {
 		t.Fatalf("hex search cursor = 0x%x, want 0x%x", got, want)
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(m.renderHex()), sections[1].Name)
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderHexTest(m)), sections[1].Name)
 }
 
 func TestGhosttyObjcMethnameOpenPinsSeparatorAtTop(t *testing.T) {
@@ -413,10 +422,10 @@ func TestGhosttyObjcMethnameOpenPinsSeparatorAtTop(t *testing.T) {
 	}
 	m.width, m.height = 120, 20
 	m.openHexAt(0x10203cb17)
-	if m.hexTop != m.hexCur {
-		t.Fatalf("hexTop = %d addr 0x%x, hexCur = %d addr 0x%x", m.hexTop, m.hexImg.AddrAt(m.hexTop), m.hexCur, m.hexImg.AddrAt(m.hexCur))
+	if m.byteViews.HexTop != m.byteViews.HexCur {
+		t.Fatalf("hexTop = %d addr 0x%x, hexCur = %d addr 0x%x", m.byteViews.HexTop, m.byteViews.HexImg.AddrAt(m.byteViews.HexTop), m.byteViews.HexCur, m.byteViews.HexImg.AddrAt(m.byteViews.HexCur))
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(m.renderHex()), "__objc_methname")
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderHexTest(m)), "__objc_methname")
 }
 
 func TestGhosttyObjcMethnameSectionKeyPinsSeparatorAtTop(t *testing.T) {
@@ -435,24 +444,22 @@ func TestGhosttyObjcMethnameSectionKeyPinsSeparatorAtTop(t *testing.T) {
 	m.width, m.height = 120, 20
 	// ] jumps to the next section start and pins the separator at the top.
 	m.openHexAt(0x10203cae0)
-	model, _ := m.updateHex("]")
-	m = model.(*Model)
-	addr := m.hexImg.AddrAt(m.hexCur)
+	m.byteViews.Update(m.viewContextPtr(), m, hexraw.Hex, "]")
+	addr := m.byteViews.HexImg.AddrAt(m.byteViews.HexCur)
 	if addr != 0x10203cb17 {
 		t.Fatalf("] landed at 0x%x, want 0x10203cb17", addr)
 	}
-	if m.hexTop != m.hexCur {
-		t.Fatalf("hexTop = %d addr 0x%x, hexCur = %d addr 0x%x", m.hexTop, m.hexImg.AddrAt(m.hexTop), m.hexCur, m.hexImg.AddrAt(m.hexCur))
+	if m.byteViews.HexTop != m.byteViews.HexCur {
+		t.Fatalf("hexTop = %d addr 0x%x, hexCur = %d addr 0x%x", m.byteViews.HexTop, m.byteViews.HexImg.AddrAt(m.byteViews.HexTop), m.byteViews.HexCur, m.byteViews.HexImg.AddrAt(m.byteViews.HexCur))
 	}
-	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(m.renderHex()), "__objc_methname")
+	assertSeparatorDirectlyUnderBanner(t, ansi.Strip(renderHexTest(m)), "__objc_methname")
 
 	// [ jumps back to the previous section, again pinning its separator on top.
-	model, _ = m.updateHex("[")
-	m = model.(*Model)
-	if m.hexTop != m.hexCur {
-		t.Fatalf("after [ hexTop = %d, hexCur = %d", m.hexTop, m.hexCur)
+	m.byteViews.Update(m.viewContextPtr(), m, hexraw.Hex, "[")
+	if m.byteViews.HexTop != m.byteViews.HexCur {
+		t.Fatalf("after [ hexTop = %d, hexCur = %d", m.byteViews.HexTop, m.byteViews.HexCur)
 	}
-	if got := m.hexImg.AddrAt(m.hexCur); got >= 0x10203cb17 {
+	if got := m.byteViews.HexImg.AddrAt(m.byteViews.HexCur); got >= 0x10203cb17 {
 		t.Fatalf("[ landed at 0x%x, want a section before 0x10203cb17", got)
 	}
 }
@@ -491,7 +498,7 @@ func assertSectionBytesBelowSeparator(t *testing.T, out, section, bytes, lineAdd
 	if !strings.Contains(line, lineAddr) {
 		t.Fatalf("post-separator line %q does not contain aligned address %q", line, lineAddr)
 	}
-	if idx := strings.Index(line, bytes[:2]); idx <= hexBodyStart(16) {
+	if idx := strings.Index(line, bytes[:2]); idx <= testHexBodyStart(16) {
 		t.Fatalf("post-separator bytes are not offset on line: %q", line)
 	}
 }
@@ -600,9 +607,9 @@ func TestWrappedSymbolsKeepAddressGrayOnContinuation(t *testing.T) {
 			}},
 		},
 	}
-	m.symbolsFiltered = []int{0}
-	m.buildSymbolRows()
-	rows := m.symbolRows(0, 8)
+	m.symbols.Filtered = []int{0}
+	m.symbols.Recompute(m.viewContext())
+	rows := m.symbols.RowLines(m.viewContext(), 0)
 	if len(rows) < 2 {
 		t.Fatalf("symbol did not wrap: %q", rows)
 	}
@@ -625,19 +632,19 @@ func TestWrappedSymbolsMouseSelectionUsesVisualRows(t *testing.T) {
 			{Name: "second", Addr: 0x2000, Kind: binfile.SymObject},
 		}},
 	}
-	m.symbolsFiltered = []int{0, 1}
-	m.buildSymbolRows()
-	firstRows := m.symbolRowHeight(0)
+	m.symbols.Filtered = []int{0, 1}
+	m.symbols.Recompute(m.viewContext())
+	firstRows := m.symbols.RowHeightFn(m.viewContext())(0)
 	if firstRows < 2 {
 		t.Fatalf("first symbol did not wrap")
 	}
 	m.handleClick(1, 1+2+firstRows-1)
-	if m.symbolsCur != 0 {
-		t.Fatalf("click on first continuation selected %d, want 0", m.symbolsCur)
+	if m.symbols.Cur != 0 {
+		t.Fatalf("click on first continuation selected %d, want 0", m.symbols.Cur)
 	}
 	m.handleClick(1, 1+2+firstRows)
-	if m.symbolsCur != 1 {
-		t.Fatalf("click after wrapped first selected %d, want 1", m.symbolsCur)
+	if m.symbols.Cur != 1 {
+		t.Fatalf("click after wrapped first selected %d, want 1", m.symbols.Cur)
 	}
 }
 
@@ -657,14 +664,15 @@ func TestVisualItemAtRowUsesWrappedHeights(t *testing.T) {
 }
 
 func TestRawClickSkipsSectionSplitRows(t *testing.T) {
-	m := &Model{layoutState: layoutState{width: 100}, file: &binfile.File{Sections: []binfile.Section{{Name: ".text", Offset: 0, FileSize: 32}}}}
+	m := &Model{layoutState: layoutState{width: 100, height: 10}, file: &binfile.File{Sections: []binfile.Section{{Name: ".text", Offset: 0, FileSize: 32}}}}
 	data := make([]byte, 64)
-	cur := m.clickByte(modeRaw, rawBytes(data), 0, 7, hexBodyStart(16), 1, func(pos int) uint64 { return uint64(pos) })
-	if cur != 7 {
+	m.byteViews = hexraw.State{RawData: data, RawCur: 7}
+	m.byteViews.Click(m.viewContextPtr(), hexraw.Raw, testHexBodyStart(16), 1)
+	if cur := m.byteViews.RawCur; cur != 7 {
 		t.Fatalf("click on split row changed cursor to %d", cur)
 	}
-	cur = m.clickByte(modeRaw, rawBytes(data), 0, 7, hexBodyStart(16), 2, func(pos int) uint64 { return uint64(pos) })
-	if cur != 0 {
+	m.byteViews.Click(m.viewContextPtr(), hexraw.Raw, testHexBodyStart(16), 2)
+	if cur := m.byteViews.RawCur; cur != 0 {
 		t.Fatalf("click on first data row selected %d, want 0", cur)
 	}
 }

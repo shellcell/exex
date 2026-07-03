@@ -43,7 +43,12 @@ func benchView(b *testing.B, md mode) {
 	}
 }
 
-func BenchmarkViewDisasm(b *testing.B)  { benchView(b, modeDisasm) }
-func BenchmarkViewHex(b *testing.B)     { benchView(b, modeHex) }
-func BenchmarkViewSymbols(b *testing.B) { benchView(b, modeSymbols) }
-func BenchmarkViewRelocs(b *testing.B)  { benchView(b, modeRelocs) }
+func BenchmarkViewDisasm(b *testing.B)   { benchView(b, modeDisasm) }
+func BenchmarkViewHex(b *testing.B)      { benchView(b, modeHex) }
+func BenchmarkViewSymbols(b *testing.B)  { benchView(b, modeSymbols) }
+func BenchmarkViewRelocs(b *testing.B)   { benchView(b, modeRelocs) }
+func BenchmarkViewRaw(b *testing.B)      { benchView(b, modeRaw) }
+func BenchmarkViewStrings(b *testing.B)  { benchView(b, modeStrings) }
+func BenchmarkViewSections(b *testing.B) { benchView(b, modeSections) }
+func BenchmarkViewLibs(b *testing.B)     { benchView(b, modeLibs) }
+func BenchmarkViewInfo(b *testing.B)     { benchView(b, modeInfo) }

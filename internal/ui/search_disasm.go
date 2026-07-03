@@ -16,6 +16,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 type disasmSearchHit struct {
@@ -373,7 +374,7 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 	}
 	matchText := func(s string) bool {
 		if queryASCII {
-			return containsFold(s, query)
+			return layout.ContainsFold(s, query)
 		}
 		return strings.Contains(strings.ToLower(s), query)
 	}

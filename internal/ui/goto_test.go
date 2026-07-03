@@ -66,22 +66,21 @@ func TestAppendSymbolMatchesFlushesWhenExactBucketFillsCap(t *testing.T) {
 
 func TestStartupGotoMultipleMatchesOpensSymbols(t *testing.T) {
 	m := &Model{
-		theme:        DefaultTheme(),
-		layoutState:  layoutState{width: 120, height: 30},
-		file:         &binfile.File{Symbols: []binfile.Symbol{{Name: "do_thing", Addr: 0x1000}, {Name: "do_other", Addr: 0x2000}}},
-		symbolsState: symbolsState{},
+		theme:       DefaultTheme(),
+		layoutState: layoutState{width: 120, height: 30},
+		file:        &binfile.File{Symbols: []binfile.Symbol{{Name: "do_thing", Addr: 0x1000}, {Name: "do_other", Addr: 0x2000}}},
 	}
-	m.symbolsFilter = newPromptInput("", "/ ")
-	m.recomputeSymbols()
+	m.symbols.Filter = newPromptInput("", "/ ")
+	m.symbols.Recompute(m.viewContext())
 	m.gotoTargetString("do_") // two substring matches, no exact
 	if m.mode != modeSymbols {
 		t.Fatalf("multiple matches should open Symbols view, got mode %v", m.mode)
 	}
-	if got := m.symbolsFilter.Value(); got != "do_" {
+	if got := m.symbols.Filter.Value(); got != "do_" {
 		t.Fatalf("filter = %q, want do_", got)
 	}
-	if len(m.symbolsFiltered) != 2 {
-		t.Fatalf("filtered count = %d, want 2", len(m.symbolsFiltered))
+	if len(m.symbols.Filtered) != 2 {
+		t.Fatalf("filtered count = %d, want 2", len(m.symbols.Filtered))
 	}
 }
 

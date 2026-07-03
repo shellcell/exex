@@ -98,7 +98,7 @@ func (m *Model) renderHelpModal() string {
 		row("/", "filter / search"),
 		row("↑/↓", "move line"),
 		row("s/r", "sort · reverse"),
-		row("PgUp/PgDn  [ ]", "page  ("+ctrlKeys("↑", "↓")+")"),
+		row("PgUp/PgDn  [ ]", "page  ("+layout.CtrlKeys("↑", "↓")+")"),
 		row("Home/End ^A/^E", "begin/end"),
 		row("Esc", "clear filters"),
 		blank,
@@ -112,11 +112,11 @@ func (m *Model) renderHelpModal() string {
 		row("↵ Enter", "open entry point · open selected member"),
 		blank,
 		head("Sections"),
-		row(ctrlKeys("t", "f"), "filter by type / flags"),
+		row(layout.CtrlKeys("t", "f"), "filter by type / flags"),
 		row("t / ⇥", "cycle sections / segments / header"),
 		blank,
 		head("Symbols"),
-		row(ctrlKeys("t", "b", "s"), "filter by type / bind / scope"),
+		row(layout.CtrlKeys("t", "b", "s"), "filter by type / bind / scope"),
 		row("e / .", "collapse (…)/<…> to ... · all / current"),
 	}
 	right := []helpEntry{
@@ -144,21 +144,21 @@ func (m *Model) renderHelpModal() string {
 		blank,
 		head("Sources"),
 		row("[ ]", "prev / next mapped line"),
-		row(ctrlKeys("p"), "filter: all / present / missing"),
+		row(layout.CtrlKeys("p"), "filter: all / present / missing"),
 		row("t / ⇥", "toggle directory tree / flat list"),
 		row("↵ Enter / o", "open in disasm source-first view"),
 		blank,
 		head("Libraries / Relocations"),
 		row("8 / 0", "libraries view / relocations view"),
 		row("o", "(libs) open as primary"),
-		row(ctrlKeys("p"), "(libs) filter all/on-disk/cache"),
+		row(layout.CtrlKeys("p"), "(libs) filter all/on-disk/cache"),
 		row("t / ⇥", "(libs) flat ↔ tree"),
 		row("↵", "libs: imported symbols · relocs: go to patched addr"),
-		row("s/r  "+ctrlKeys("t", "s"), "(relocs) sort/rev · type/section filter"),
+		row("s/r  "+layout.CtrlKeys("t", "s"), "(relocs) sort/rev · type/section filter"),
 		blank,
 		head("Strings"),
-		row(ctrlKeys("s"), "filter by section"),
-		row(ctrlKeys("p"), "filter to paths only"),
+		row(layout.CtrlKeys("s"), "filter by section"),
+		row(layout.CtrlKeys("p"), "filter to paths only"),
 		row("t / ⇥", "table ↔ compact (· flow) layout"),
 	}
 
@@ -259,7 +259,7 @@ func modalListWidth(termW int) int         { return layout.Clamp(termW-8, 40, 12
 // overlayCenter draws a pre-rendered modal centred over bg.
 func (m *Model) overlayCenter(bg, modal string) string {
 	mw := lipgloss.Width(modal)
-	modal = renderStyle(modal, mw, m.theme.tableRowStyle)
+	modal = layout.RenderStyle(modal, mw, m.theme.tableRowStyle)
 	modal = m.theme.renderViewBackground(modal, mw)
 	mh := lipgloss.Height(modal)
 	return layout.Overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)

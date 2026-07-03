@@ -1,40 +1,9 @@
-package ui
+package layout
 
-import (
-	"fmt"
-	"sort"
-	"strings"
+import "sort"
 
-	"github.com/charmbracelet/x/ansi"
-
-	"github.com/rabarbra/exex/internal/ui/layout"
-)
-
-// treeNodeRow renders a collapsible group row: indent + arrow + coloured label +
-// dim "(count)". Group nodes use the tree-node colour (not the leaf colours); a
-// selected node is shown in reverse video of that colour (a coloured cursor cue),
-// rather than the full-width white selection bar that leaf rows get. leftPad is
-// the view's leading margin ("" for symbols, " " for sources/libs).
-func (m *Model) treeNodeRow(depth int, label string, count int, collapsed, selected bool, leftPad string, width int) string {
-	indent := strings.Repeat(" ", depth*treeIndent)
-	arrow := "▾ "
-	if collapsed {
-		arrow = "▸ "
-	}
-	style := m.theme.treeNodeStyle
-	if selected {
-		style = style.Reverse(true)
-	}
-	cnt := ""
-	if collapsed {
-		cnt = fmt.Sprintf("  (%d)", max(count, 0)) // show the hidden-leaf count
-	}
-	avail := width - len(leftPad) - len(indent) - 2 - ansi.StringWidth(cnt)
-	if avail < 1 {
-		avail = 1
-	}
-	return leftPad + indent + style.Render(arrow+layout.TruncateMiddle(label, avail)) + m.theme.srcShadowStyle.Render(cnt)
-}
+// TreeIndent is the per-depth indentation of a tree row.
+const TreeIndent = 2
 
 // A small, reusable collapsible "name tree" shared by the list views (symbols,
 // sources, libs). It groups path-like strings — C++/Swift scoped names split on
@@ -42,25 +11,25 @@ func (m *Model) treeNodeRow(depth int, label string, count int, collapsed, selec
 // internal nodes can be collapsed. Building and flattening are pure functions;
 // the owning view keeps the collapse state and the flattened row slice.
 
-// treeNode is one node of a name tree. Internal (group) nodes have leaf == -1
+// TreeNode is one node of a name tree. Internal (group) nodes have leaf == -1
 // and children; leaves carry the index of the underlying item (symbol/file/lib).
-type treeNode struct {
-	label    string // segment shown for this node; internal nodes keep the trailing separator
-	path     string // internal nodes only: full path from the root, the collapse-state key. Left empty for leaves (never read for them — collapse keys off the item index), which avoids a prefix+label concatenation per leaf (tens of MB on a 100k+-symbol tree).
-	leaf     int    // item index for a leaf, -1 for an internal node
-	count    int    // number of leaf descendants (for the collapsed "(n)" hint)
-	children []*treeNode
+type TreeNode struct {
+	Label    string // segment shown for this node; internal nodes keep the trailing separator
+	Path     string // internal nodes only: full path from the root, the collapse-state key. Left empty for leaves (never read for them — collapse keys off the item index), which avoids a prefix+label concatenation per leaf (tens of MB on a 100k+-symbol tree).
+	Leaf     int    // item index for a leaf, -1 for an internal node
+	Count    int    // number of leaf descendants (for the collapsed "(n)" hint)
+	Children []*TreeNode
 }
 
-// treeRow is one flattened, currently-visible row: a node and its depth.
-type treeRow struct {
-	node  *treeNode
-	depth int
+// TreeRow is one flattened, currently-visible row: a node and its depth.
+type TreeRow struct {
+	Node  *TreeNode
+	Depth int
 }
 
-// segFunc returns the byte length of the first path segment of s (including its
+// SegFunc returns the byte length of the first path segment of s (including its
 // trailing separator), or -1 when s has no separator (so s is a leaf remainder).
-type segFunc func(s string) int
+type SegFunc func(s string) int
 
 // segScoped splits a scoped name into its first segment by scope/word boundary:
 // ".", "::" and " " (space), weighed equally — the earliest one at bracket depth
@@ -136,8 +105,8 @@ func segUnder(s string) int {
 	return -1
 }
 
-// segPath splits on "/" (filesystem paths and library install paths).
-func segPath(s string) int {
+// SegPath splits on "/" (filesystem paths and library install paths).
+func SegPath(s string) int {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '/' {
 			return i + 1
@@ -146,16 +115,16 @@ func segPath(s string) int {
 	return -1
 }
 
-// buildTree groups idxs (already sorted by label) into a name tree using seg to
+// BuildTree groups idxs (already sorted by label) into a name tree using seg to
 // pick segment boundaries.
-func buildTree(idxs []int, label func(int) string, seg segFunc) []*treeNode {
+func BuildTree(idxs []int, label func(int) string, seg SegFunc) []*TreeNode {
 	return buildTreeLevel(idxs, label, seg, 0, "")
 }
 
-// buildScopedTree groups symbols into a two-pass name tree: first by scope/word
+// BuildScopedTree groups symbols into a two-pass name tree: first by scope/word
 // boundaries (segScoped), then folding whatever that leaves as singletons by a
 // shared "_" prefix (segUnder). idxs must already be sorted by label.
-func buildScopedTree(idxs []int, label func(int) string) []*treeNode {
+func BuildScopedTree(idxs []int, label func(int) string) []*TreeNode {
 	return buildScopedLevel(idxs, label, 0, "")
 }
 
@@ -164,8 +133,8 @@ func buildScopedTree(idxs []int, label func(int) string) []*treeNode {
 // through to pass 2, which folds them by a shared "_" prefix. Anything still
 // unique becomes a leaf shown by its remaining path. Groups (from either pass)
 // sort before leaves, each in label order.
-func buildScopedLevel(idxs []int, label func(int) string, prefixLen int, prefix string) []*treeNode {
-	var nodes []*treeNode
+func buildScopedLevel(idxs []int, label func(int) string, prefixLen int, prefix string) []*TreeNode {
+	var nodes []*TreeNode
 
 	// Pass 1: fold by scope/word boundary; collect the leftovers (unique segments).
 	var rest []int
@@ -207,7 +176,7 @@ func buildScopedLevel(idxs []int, label func(int) string, prefixLen int, prefix 
 				continue
 			}
 		}
-		nodes = append(nodes, &treeNode{label: rem, leaf: rest[i], count: 1}) // leaves need no path
+		nodes = append(nodes, &TreeNode{Label: rem, Leaf: rest[i], Count: 1}) // leaves need no path
 		i++
 	}
 
@@ -217,36 +186,36 @@ func buildScopedLevel(idxs []int, label func(int) string, prefixLen int, prefix 
 		if a, b := leafRank(nodes[i]), leafRank(nodes[j]); a != b {
 			return a < b
 		}
-		return nodes[i].label < nodes[j].label
+		return nodes[i].Label < nodes[j].Label
 	})
 	return nodes
 }
 
 // sharesSeg reports whether full (at prefixLen) begins with seg and has seg as its
 // own first segment under fn — i.e. it belongs in the same group.
-func sharesSeg(full string, prefixLen, sl int, seg string, fn segFunc) bool {
+func sharesSeg(full string, prefixLen, sl int, seg string, fn SegFunc) bool {
 	return len(full) >= prefixLen+sl && full[prefixLen:prefixLen+sl] == seg && fn(full[prefixLen:]) == sl
 }
 
 // scopedGroup builds an internal node for idxs (which all share segment seg),
 // recursing for its children, compressing single-child chains and summing counts.
-func scopedGroup(idxs []int, label func(int) string, seg string, prefixLen int, prefix string) *treeNode {
-	node := &treeNode{label: seg, path: prefix + seg, leaf: -1}
-	node.children = buildScopedLevel(idxs, label, prefixLen+len(seg), node.path)
+func scopedGroup(idxs []int, label func(int) string, seg string, prefixLen int, prefix string) *TreeNode {
+	node := &TreeNode{Label: seg, Path: prefix + seg, Leaf: -1}
+	node.Children = buildScopedLevel(idxs, label, prefixLen+len(seg), node.Path)
 	compressTree(node)
-	for _, c := range node.children {
-		node.count += c.count
+	for _, c := range node.Children {
+		node.Count += c.Count
 	}
 	return node
 }
 
-func buildTreeLevel(idxs []int, label func(int) string, seg segFunc, prefixLen int, prefix string) []*treeNode {
-	var nodes []*treeNode
+func buildTreeLevel(idxs []int, label func(int) string, seg SegFunc, prefixLen int, prefix string) []*TreeNode {
+	var nodes []*TreeNode
 	for i := 0; i < len(idxs); {
 		rem := label(idxs[i])[prefixLen:]
 		sl := seg(rem)
 		if sl < 0 {
-			nodes = append(nodes, &treeNode{label: rem, leaf: idxs[i], count: 1}) // leaves need no path
+			nodes = append(nodes, &TreeNode{Label: rem, Leaf: idxs[i], Count: 1}) // leaves need no path
 			i++
 			continue
 		}
@@ -262,15 +231,15 @@ func buildTreeLevel(idxs []int, label func(int) string, seg segFunc, prefixLen i
 		}
 		if j-i == 1 {
 			// A segment owned by a single item needs no group: show it whole as a leaf.
-			nodes = append(nodes, &treeNode{label: rem, leaf: idxs[i], count: 1}) // leaves need no path
+			nodes = append(nodes, &TreeNode{Label: rem, Leaf: idxs[i], Count: 1}) // leaves need no path
 			i++
 			continue
 		}
-		node := &treeNode{label: segStr, path: prefix + segStr, leaf: -1}
-		node.children = buildTreeLevel(idxs[i:j], label, seg, prefixLen+sl, node.path)
+		node := &TreeNode{Label: segStr, Path: prefix + segStr, Leaf: -1}
+		node.Children = buildTreeLevel(idxs[i:j], label, seg, prefixLen+sl, node.Path)
 		compressTree(node)
-		for _, c := range node.children {
-			node.count += c.count
+		for _, c := range node.Children {
+			node.Count += c.Count
 		}
 		nodes = append(nodes, node)
 		i = j
@@ -282,8 +251,8 @@ func buildTreeLevel(idxs []int, label func(int) string, seg segFunc, prefixLen i
 	return nodes
 }
 
-func leafRank(n *treeNode) int {
-	if n.leaf < 0 {
+func leafRank(n *TreeNode) int {
+	if n.Leaf < 0 {
 		return 0 // internal (group) node sorts first
 	}
 	return 1
@@ -291,79 +260,79 @@ func leafRank(n *treeNode) int {
 
 // compressTree folds chains of single internal children into one node, so a run
 // of single-child namespaces (a::b::c::) reads as one row instead of three.
-func compressTree(n *treeNode) {
-	for len(n.children) == 1 && n.children[0].leaf < 0 {
-		c := n.children[0]
-		n.label += c.label
-		n.path = c.path
-		n.children = c.children
+func compressTree(n *TreeNode) {
+	for len(n.Children) == 1 && n.Children[0].Leaf < 0 {
+		c := n.Children[0]
+		n.Label += c.Label
+		n.Path = c.Path
+		n.Children = c.Children
 	}
 }
 
-// flattenTree appends the visible rows of nodes to out: every node, plus the
+// FlattenTree appends the visible rows of nodes to out: every node, plus the
 // children of expanded internal nodes (collapsed[path] hides descendants).
-func flattenTree(nodes []*treeNode, collapsed map[string]bool, depth int, out []treeRow) []treeRow {
+func FlattenTree(nodes []*TreeNode, collapsed map[string]bool, depth int, out []TreeRow) []TreeRow {
 	for _, n := range nodes {
-		out = append(out, treeRow{node: n, depth: depth})
-		if n.leaf < 0 && !collapsed[n.path] {
-			out = flattenTree(n.children, collapsed, depth+1, out)
+		out = append(out, TreeRow{Node: n, Depth: depth})
+		if n.Leaf < 0 && !collapsed[n.Path] {
+			out = FlattenTree(n.Children, collapsed, depth+1, out)
 		}
 	}
 	return out
 }
 
-// treeExpandOne expands the collapsed node at *cur (one level) and moves the
+// TreeExpandOne expands the collapsed node at *cur (one level) and moves the
 // cursor onto the first item of the now-revealed branch. Returns whether anything
 // changed (the caller then rebuilds the flattened rows).
-func treeExpandOne(rows []treeRow, cur *int, collapsed map[string]bool) bool {
+func TreeExpandOne(rows []TreeRow, cur *int, collapsed map[string]bool) bool {
 	if *cur < 0 || *cur >= len(rows) {
 		return false
 	}
-	n := rows[*cur].node
-	if n.leaf >= 0 || !collapsed[n.path] {
+	n := rows[*cur].Node
+	if n.Leaf >= 0 || !collapsed[n.Path] {
 		return false
 	}
-	delete(collapsed, n.path)
+	delete(collapsed, n.Path)
 	*cur++ // land on the first child of the expanded branch
 	return true
 }
 
-// treeCollapseOne collapses the node at *cur, or — when it is a leaf or already
+// TreeCollapseOne collapses the node at *cur, or — when it is a leaf or already
 // collapsed — the nearest ancestor group above it (moving the cursor onto it).
-func treeCollapseOne(rows []treeRow, cur *int, collapsed map[string]bool) bool {
+func TreeCollapseOne(rows []TreeRow, cur *int, collapsed map[string]bool) bool {
 	if *cur < 0 || *cur >= len(rows) {
 		return false
 	}
 	row := rows[*cur]
-	if row.node.leaf < 0 && !collapsed[row.node.path] {
-		collapsed[row.node.path] = true
+	if row.Node.Leaf < 0 && !collapsed[row.Node.Path] {
+		collapsed[row.Node.Path] = true
 		return true
 	}
 	for k := *cur - 1; k >= 0; k-- {
-		if rows[k].depth < row.depth && rows[k].node.leaf < 0 {
+		if rows[k].Depth < row.Depth && rows[k].Node.Leaf < 0 {
 			*cur = k
-			collapsed[rows[k].node.path] = true
+			collapsed[rows[k].Node.Path] = true
 			return true
 		}
 	}
 	return false
 }
 
-// treeToggleSubtree expands or collapses the whole subtree under the node at cur:
+// TreeToggleSubtree expands or collapses the whole subtree under the node at cur:
 // collapse-all-below when it is currently expanded, expand-all-below when not.
-func treeToggleSubtree(rows []treeRow, cur int, collapsed map[string]bool) bool {
-	if cur < 0 || cur >= len(rows) || rows[cur].node.leaf >= 0 {
+func TreeToggleSubtree(rows []TreeRow, cur int, collapsed map[string]bool) bool {
+	if cur < 0 || cur >= len(rows) || rows[cur].Node.Leaf >= 0 {
 		return false
 	}
-	n := rows[cur].node
-	setSubtreeCollapsed(n, collapsed, !collapsed[n.path])
+	n := rows[cur].Node
+	setSubtreeCollapsed(n, collapsed, !collapsed[n.Path])
 	return true
 }
 
 // setSubtreeCollapsed collapses (c=true) or expands (c=false) node and every
 // internal node beneath it in the given collapse set.
-func setSubtreeCollapsed(node *treeNode, collapsed map[string]bool, c bool) {
-	eachInternal([]*treeNode{node}, func(p string) {
+func setSubtreeCollapsed(node *TreeNode, collapsed map[string]bool, c bool) {
+	EachInternal([]*TreeNode{node}, func(p string) {
 		if c {
 			collapsed[p] = true
 		} else {
@@ -372,12 +341,12 @@ func setSubtreeCollapsed(node *treeNode, collapsed map[string]bool, c bool) {
 	})
 }
 
-// eachInternal calls fn for every internal node's path (used by "collapse all").
-func eachInternal(nodes []*treeNode, fn func(path string)) {
+// EachInternal calls fn for every internal node's path (used by "collapse all").
+func EachInternal(nodes []*TreeNode, fn func(path string)) {
 	for _, n := range nodes {
-		if n.leaf < 0 {
-			fn(n.path)
-			eachInternal(n.children, fn)
+		if n.Leaf < 0 {
+			fn(n.Path)
+			EachInternal(n.Children, fn)
 		}
 	}
 }

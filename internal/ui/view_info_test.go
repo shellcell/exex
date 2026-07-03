@@ -6,6 +6,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 func TestInfoViewUsesThemeBodyForeground(t *testing.T) {
@@ -22,7 +23,7 @@ func TestInfoViewUsesThemeBodyForeground(t *testing.T) {
 	}
 
 	out := m.renderInfo()
-	want := renderStyle("64-bit, little-endian", 0, m.theme.tableRowStyle)
+	want := layout.RenderStyle("64-bit, little-endian", 0, m.theme.tableRowStyle)
 	if !strings.Contains(out, want) {
 		t.Fatalf("info value does not use themed body foreground: %q", out)
 	}

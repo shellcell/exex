@@ -1,4 +1,4 @@
-package ui
+package layout
 
 import (
 	"strings"
@@ -7,14 +7,14 @@ import (
 
 // dumpTree renders the scoped tree as an indented outline ("[label]" for group
 // nodes, bare label for leaves) so grouping decisions are easy to assert on.
-func dumpTree(nodes []*treeNode, depth int, b *strings.Builder) {
+func dumpTree(nodes []*TreeNode, depth int, b *strings.Builder) {
 	for _, n := range nodes {
 		b.WriteString(strings.Repeat("  ", depth))
-		if n.leaf < 0 {
-			b.WriteString("[" + n.label + "]\n")
-			dumpTree(n.children, depth+1, b)
+		if n.Leaf < 0 {
+			b.WriteString("[" + n.Label + "]\n")
+			dumpTree(n.Children, depth+1, b)
 		} else {
-			b.WriteString(n.label + "\n")
+			b.WriteString(n.Label + "\n")
 		}
 	}
 }
@@ -27,7 +27,7 @@ func scopedOutline(names []string) string {
 		idxs[i] = i
 	}
 	var b strings.Builder
-	dumpTree(buildScopedTree(idxs, func(i int) string { return names[i] }), 0, &b)
+	dumpTree(BuildScopedTree(idxs, func(i int) string { return names[i] }), 0, &b)
 	return b.String()
 }
 

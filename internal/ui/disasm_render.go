@@ -19,7 +19,7 @@ import (
 
 // renderInstText colours an instruction's assembly text, caching the result.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
-	return m.disasmAsmCache.get(disasmAsmCacheKey{text: text, addr: instAddr, cls: class}, func() string {
+	return m.disasmAsmCache.Get(disasmAsmCacheKey{text: text, addr: instAddr, cls: class}, func() string {
 		return m.renderInstTextStyled(text, class, instAddr)
 	})
 }
@@ -304,7 +304,7 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	if i < 0 || i >= len(m.disasmInst) {
 		return 1
 	}
-	return m.disasmHeightCache.get(disasmHeightKey{i: i, w: w, wrap: m.wrap}, func() int {
+	return m.disasmHeightCache.Get(disasmHeightKey{i: i, w: w, wrap: m.wrap}, func() int {
 		inst := m.disasmInst[i]
 		h := len(m.disasmInstRows(inst, w, false, nil))
 		if _, ok := m.disasmSectionStart(i); ok {

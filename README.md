@@ -327,6 +327,13 @@ it's the fast first look: open any ELF/Mach-O/PE, read its layout and code, foll
 references and source mappings interactively, and drop to plain text when you need
 to script.
 
+## Architecture
+
+For contributors: [`docs/architecture.md`](docs/architecture.md) describes the
+package layering (core `binfile`/`disasm`, domain services, the two frontends),
+the TUI's view contract (`view.Context` / `view.Host`) and the rendering &
+performance conventions, with diagrams.
+
 ## Acknowledgements
 
 exex builds on the work of the Go toolchain and standard library authors, plus

@@ -12,6 +12,16 @@ import (
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
+	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	infoview "github.com/rabarbra/exex/internal/ui/views/info"
+	"github.com/rabarbra/exex/internal/ui/views/libs"
+	"github.com/rabarbra/exex/internal/ui/views/relocs"
+	"github.com/rabarbra/exex/internal/ui/views/sections"
+	"github.com/rabarbra/exex/internal/ui/views/sources"
+	"github.com/rabarbra/exex/internal/ui/views/strs"
+	"github.com/rabarbra/exex/internal/ui/views/symbols"
 )
 
 // mode identifies the active top-level view.
@@ -61,123 +71,6 @@ func (m mode) String() string {
 // layoutState tracks terminal dimensions and the header viewport.
 type layoutState struct {
 	width, height int
-	headerVP      viewport.Model
-}
-
-// sectionsState stores list/filter state for the Sections view, which toggles
-// between the section table and the coarser segment (memory-region) table.
-type sectionsState struct {
-	sections           []binfile.Section
-	segments           []binfile.Segment
-	showSegments       bool // the `t` toggle: list segments instead of sections
-	sectionsFilter     textinput.Model
-	sectionsFiltered   []int // indices into the active slice (sections or segments)
-	sectionsCur        int
-	sectionsTop        int
-	sectionsSort       sectionSort // sort field for the (filtered) list
-	sectionsSortDesc   bool        // reverse the active sort
-	sectionsTypeOn     bool        // type-name column filter active
-	sectionsType       string      // the type name it restricts to
-	sectionsTypes      []string    // distinct type names, for cycling
-	sectionsFlagsOn    bool        // flags column filter active
-	sectionsFlags      string      // the flag string it restricts to
-	sectionsFlagsList  []string    // distinct flag strings, for cycling
-	sectionRowCache    rowMemo[rowCacheKey, string]
-	sectionHeightCache rowMemo[rowCacheKey, int]
-}
-
-// rowCacheKey identifies a rendered table-row variant. The Sections, Symbols
-// and Strings views all cache rows by the same coordinates: the item index plus
-// every layout input that changes how a row renders.
-type rowCacheKey struct {
-	i     int
-	width int
-	addrW int
-	wrap  bool
-}
-
-// rowMemo is a lazily-allocated memo cache for rendered rows (or their heights),
-// keyed by K. It centralises the "nil-check → lookup → build → store" pattern the
-// list/disasm renderers repeated by hand, so a renderer can't forget to allocate
-// or to populate the cache, and invalidation is a single clear(). The zero value
-// (nil map) is ready to use.
-type rowMemo[K comparable, V any] map[K]V
-
-// rowMemoCap bounds each memo so a long scroll through a huge table (millions of
-// symbol/string rows) can't grow the cache for the whole session. When full the
-// memo is flushed wholesale — cheaper than per-entry eviction, and the visible
-// window repopulates in one render pass.
-const rowMemoCap = 4096
-
-// get returns the cached value for key, building and caching it on a miss.
-func (m *rowMemo[K, V]) get(key K, build func() V) V {
-	if *m == nil {
-		*m = make(rowMemo[K, V])
-	} else if v, ok := (*m)[key]; ok {
-		return v
-	}
-	if len(*m) >= rowMemoCap {
-		clear(*m)
-	}
-	v := build()
-	(*m)[key] = v
-	return v
-}
-
-// symbolsState stores list/filter state for the Symbols view.
-type symbolsState struct {
-	symbolsFilter       textinput.Model
-	symbolsFiltered     []int // indices into file.Symbols (sorted by name)
-	symbolsCur          int
-	symbolsTop          int
-	symbolsKind         binfile.SymKind
-	symbolsKindOn       bool
-	symbolsBind         binfile.SymBind
-	symbolsBindOn       bool
-	symbolsScope        symbolScope     // all / internal (defined here) / imported (from libs)
-	symbolsSort         symbolSort      // view order: name / address / size
-	symbolsSortDesc     bool            // reverse the active sort (descending)
-	symbolsLib          string          // when set, show only imports bound to this library
-	symbolsTree         bool            // group names into a collapsible namespace tree (name sort)
-	symbolsAbbrev       bool            // global: render "(…)"/"<…>" contents as "..."
-	symbolsAbbrevExcept map[string]bool // per-row overrides inverting symbolsAbbrev
-	symbolsCollapsed    map[string]bool // collapsed tree node paths (persist across rebuilds)
-	symbolsCollapsedAlt map[string]bool // pre-filter collapse state, saved while a search filter is active
-	symbolsFiltering    bool            // whether a search filter is currently narrowing the tree
-	symbolsRoots        []*treeNode     // built tree; cached so collapse toggles only re-flatten
-	symbolsRows         []treeRow       // flattened visible rows (tree nodes + leaves), nav/render unit
-	symbolsReady        bool            // rows/tree have been built at least once
-	symbolsTreeInit     bool            // collapse-default applied once
-	symbolsByDisplay    []int           // all symbol indices sorted by Display(); built lazily
-	demangledNames      []string        // cached ComputeDemangled result, for the live demangle toggle
-	symbolFacets        []facetHit      // clickable toggle buttons on the status line (x ranges)
-	symbolRowCache      rowMemo[rowCacheKey, []string]
-	symbolHeightCache   rowMemo[rowCacheKey, int]
-}
-
-// facetKind identifies a clickable toggle button on the symbols status line.
-type facetKind int
-
-const (
-	facetType facetKind = iota
-	facetScope
-	facetSort
-	facetSortDir
-	facetBind
-	facetTree
-	facetAbbrev
-)
-
-// facetHit is the screen-column span [start,end) of one clickable toggle button.
-type facetHit struct {
-	start, end int
-	kind       facetKind
-}
-
-// clearSymbolCaches drops cached symbol rows and heights.
-func (m *Model) clearSymbolCaches() {
-	m.symbolRowCache = nil
-	m.symbolHeightCache = nil
 }
 
 // clearSymbolNameCaches drops caches whose layout depends on how symbol names
@@ -190,23 +83,11 @@ func (m *Model) clearSymbolNameCaches() {
 	m.disasmHeightCache = nil
 }
 
-// clearSectionCaches drops cached section rows and heights.
-func (m *Model) clearSectionCaches() {
-	m.sectionRowCache = nil
-	m.sectionHeightCache = nil
-}
-
-// clearStringCaches drops cached string rows and heights.
-func (m *Model) clearStringCaches() {
-	m.stringRowCache = nil
-	m.stringHeightCache = nil
-}
-
 // clearAllViewCaches drops all row caches affected by global layout toggles.
 func (m *Model) clearAllViewCaches() {
-	m.clearSymbolCaches()
-	m.clearSectionCaches()
-	m.clearStringCaches()
+	m.symbols.DropCaches()
+	m.sections.DropCaches()
+	m.strs.DropCaches()
 	m.srcLineHeightCache = nil
 }
 
@@ -214,13 +95,14 @@ func (m *Model) clearAllViewCaches() {
 // theme change is reflected on the next render. (Height/column caches depend only
 // on geometry, not colour, so they're left intact.)
 func (m *Model) clearColorCaches() {
+	m.viewStylesCache = nil
 	m.clearAllViewCaches()
 	m.disasmAsmCache = nil
 	m.disasmTokenStyles = nil
 	m.disasmStyledMode = 0
 	m.sourceAsmRowCache = nil
-	m.relocRowCache = nil
-	m.infoBody = "" // restyle the Info page on the next render
+	m.relocs.DropCaches()
+	m.info.DropCaches() // restyle the Info page on the next render
 }
 
 // disasmState holds the currently loaded decode window only. The first window
@@ -247,8 +129,8 @@ type disasmState struct {
 	rightScroll         int // extra scroll offset for the follower (right) pane; 0 = auto-follow
 	srcVP               viewport.Model
 	srcHighlighter      *syntax.Highlighter
-	sourceAsmRowCache   rowMemo[sourceAsmRowCacheKey, string]
-	disasmAsmCache      rowMemo[disasmAsmCacheKey, string]
+	sourceAsmRowCache   layout.RowMemo[sourceAsmRowCacheKey, string]
+	disasmAsmCache      layout.RowMemo[disasmAsmCacheKey, string]
 	// disasmTokenStyles caches Chroma token-type → style (default build only); it
 	// is keyed by int(chroma.TokenType) so the model stays chroma-free for `lite`.
 	disasmTokenStyles map[int]lipgloss.Style
@@ -259,7 +141,7 @@ type disasmState struct {
 	// disasmHeightCache memoizes per-instruction rendered height (it otherwise
 	// re-renders each instruction to count rows, which the scroll math calls
 	// dozens of times per wheel tick). Reset whenever disasmInst is replaced.
-	disasmHeightCache rowMemo[disasmHeightKey, int]
+	disasmHeightCache layout.RowMemo[disasmHeightKey, int]
 	// execSecStarts maps each executable section's start address to its name, so
 	// the disasm scroller's per-row section-separator check is an O(1) lookup
 	// instead of a scan over all sections. Built once (sections are immutable).
@@ -296,92 +178,11 @@ type historyState struct {
 	historyPos int
 }
 
-// hexState stores cursor and viewport state for the mapped hex view.
-type hexState struct {
-	hexImg       *binfile.Image
-	hexCur       int // byte position into hexImg.Data
-	hexTop       int // first row's byte position
-	hexPinnedTop int // section start pinned by jump/search until wheel scroll
-	hexPinned    bool
-}
-
-// rawState stores cursor and viewport state for the raw file view.
-type rawState struct {
-	rawData      []byte
-	rawCur       int
-	rawTop       int
-	rawPinnedTop int // section start pinned by jump/search until wheel scroll
-	rawPinned    bool
-	// rawSecByOff is the file-backed sections sorted by file offset, so the raw
-	// view's per-row section lookups binary-search instead of scanning every
-	// section. Built once (sections are immutable).
-	rawSecByOff []*binfile.Section
-}
-
-// libsState stores cursor and viewport state for the Libraries view.
-type libsState struct {
-	libsCur       int
-	libsTop       int
-	libsTree      bool            // show needed libraries as a path tree
-	libsCollapsed map[string]bool // collapsed directory paths
-	libsRows      []treeRow       // flattened visible rows (dirs + libs)
-	libsTreeInit  bool
-	libsAvail     availFilter // availability filter: all / on-disk / in cache
-	libsAvailKind map[string]availKind
-	libsFilter    textinput.Model // name search (the `/` filter)
-	libsSortDesc  bool            // reverse the (name) sort
-}
-
-// relocsState stores cursor, filter and cache state for the Relocations view.
-type relocsState struct {
-	relocCur      int             // cursor in the relocation table
-	relocTop      int             // viewport top of the relocation table
-	relocFilter   textinput.Model // symbol/type/section search (the `/` filter)
-	relocFiltered []int           // indices into file.Relocations() after the filter
-	relocSort     relocSortField  // sort field for the relocation table
-	relocSortDesc bool            // reverse the relocation sort
-	relocTypeOn   bool            // type-name facet filter active
-	relocType     string          // the relocation type it restricts to
-	relocTypes    []string        // distinct types, for cycling
-	relocSecOn    bool            // section facet filter active
-	relocSec      string          // the section it restricts to
-	relocSecs     []string        // distinct sections, for cycling
-	relocRowCache rowMemo[rowCacheKey, string]
-}
-
-// stringsState stores list, filter and cache state for printable strings.
-type stringsState struct {
-	stringsList       []binfile.StringEntry
-	stringsFilter     textinput.Model
-	stringsFiltered   []int // indices into stringsList
-	stringsCur        int   // index into stringsFiltered
-	stringsTop        int
-	stringsSections   []string   // distinct owning-section names, for the section filter
-	stringsSecOn      bool       // section filter active
-	stringsSec        string     // the section name the filter restricts to
-	stringsSort       stringSort // sort field for the (filtered) list
-	stringsSortDesc   bool       // reverse the active sort
-	stringsCompact    bool       // flow strings inline (· separated, no columns) vs the table
-	stringsPathsOnly  bool       // show only path-like strings (filesystem paths / URLs)
-	stringRowCache    rowMemo[rowCacheKey, string]
-	stringHeightCache rowMemo[rowCacheKey, int]
-}
-
-// sourcesState stores file-list and open-file state for the Sources view.
-type sourcesState struct {
-	sourcesFiles       []string
-	sourcesFilter      textinput.Model
-	sourcesFiltered    []int
-	sourcesCur         int
-	sourcesTop         int
-	sourcesTree        bool            // show the file list as a directory tree
-	sourcesAvail       availFilter     // availability filter: all / present / missing
-	sourcesSort        sourceSort      // flat-list order: project-first or name
-	sourcesSortDesc    bool            // reverse the active sort
-	sourcesCollapsed   map[string]bool // collapsed directory paths
-	sourcesRows        []treeRow       // flattened visible rows (dirs + files)
-	sourcesTreeInit    bool
-	srcFile            string // open source file ("" = showing the file list)
+// sourcePaneState stores the source-first disasm pane state. The Sources file
+// list itself lives in views/sources.State; the split pane stays in the shell
+// because it drives the disasm window and syntax highlighter.
+type sourcePaneState struct {
+	srcFile            string // open source file ("" = no source-first pane)
 	srcCur             int    // 1-based current line in the open file
 	srcTop             int
 	srcCodeLines       map[int]bool // lines in srcFile that have machine code
@@ -417,18 +218,6 @@ type interactionState struct {
 	// it is built (config behavior.tree_collapsed).
 	treeCollapseDefault bool
 
-	// hexNumeric switches the hex/raw views' trailing column from ASCII (default)
-	// to the numeric interpretation selected by hexInterp. `t` toggles ascii vs
-	// numeric; shift+t cycles the interpretation. The pointer-sized hex
-	// interpretation resolves each word to the symbol/section it points at.
-	hexNumeric bool
-	hexInterp  int // index into hexInterps; -1 until initialised to the pointer width
-
-	// hexInspect replaces the hex/raw banner with a data inspector that decodes
-	// the bytes under the cursor as int/uint of every width, float, char and
-	// pointer (the `i` key). It updates live as the cursor moves.
-	hexInspect bool
-
 	// Mouse double-click tracking (for follow-on-double-click in disasm).
 	lastClickY  int
 	lastClickAt time.Time
@@ -452,18 +241,11 @@ type interactionState struct {
 	pendingKeyN int
 	keyTicking  bool
 
-	// Last top row/offset actually rendered for each scrollable view. Wheel input
-	// starts from these screen snapshots so queued key/mouse events cannot snap
-	// the first wheel step back to the caret-derived top.
-	renderedSectionsTop int
-	renderedSymbolsTop  int
-	renderedDisasmTop   int
-	renderedHexTop      int
-	renderedRawTop      int
-	renderedStringsTop  int
-	renderedSourcesTop  int
-	renderedLibsTop     int
-	renderedSrcTop      int
+	// Last top row/offset actually rendered for shell-owned scrollable views. Wheel
+	// input starts from these screen snapshots so queued key/mouse events cannot
+	// snap the first wheel step back to the caret-derived top.
+	renderedDisasmTop int
+	renderedSrcTop    int
 
 	// pageRows is the active view's page size (items per screen) recorded at the
 	// last render, so pgup/pgdown ([ / ]) advance by exactly one screen instead
@@ -479,11 +261,6 @@ type interactionState struct {
 	// mach_header + load commands, PE headers); headerScroll is its scroll offset.
 	headerActive bool
 	headerScroll int
-
-	// infoBody caches the Info view's styled body (static per width/theme/arch);
-	// infoBodyW is the width it was built for. Cleared on a theme change.
-	infoBody  string
-	infoBodyW int
 
 	// View output memoization. Bubble Tea calls View() after every message, so a
 	// burst of wheel events that only accumulate (without changing what's shown)
@@ -582,17 +359,26 @@ type Model struct {
 
 	mode mode
 
+	// viewStylesCache is the lazily-built style/closure vocabulary shared with
+	// the view packages (see viewStyles). Dropped on theme or settings changes.
+	viewStylesCache *view.Styles
+
 	layoutState
-	sectionsState
-	symbolsState
+	info     infoview.State
+	sections sections.State
+	symbols  symbols.State
 	disasmState
+
+	// demangledNames caches the background ComputeDemangled result so the
+	// demangle setting can be toggled live without recomputing.
+	demangledNames []string
 	historyState
-	hexState
-	rawState
-	libsState
-	relocsState
-	stringsState
-	sourcesState
+	byteViews hexraw.State
+	libs      libs.State
+	relocs    relocs.State
+	strs      strs.State
+	sources   sources.State
+	sourcePaneState
 	interactionState
 	gotoState
 	searchState

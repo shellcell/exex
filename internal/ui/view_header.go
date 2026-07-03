@@ -53,21 +53,3 @@ func (m *Model) renderHeaderModal() string {
 	sb.WriteString(m.theme.modalHint(hint))
 	return m.theme.modalStyle.Render(sb.String())
 }
-
-// cycleSectionsMode advances the Sections view's `t` toggle between the section
-// and segment tables (the raw header moved to the ⇧H overlay), skipping segments
-// when the binary has none (e.g. PE). It returns a status label for the new mode.
-func (m *Model) cycleSectionsMode() string {
-	if m.showSegments {
-		m.showSegments = false
-	} else if len(m.segments) > 0 {
-		m.showSegments = true
-	}
-	m.sectionsCur, m.sectionsTop = 0, 0
-	m.sectionsFilter.SetValue("")
-	m.recomputeSections()
-	if m.showSegments {
-		return "showing segments (t for sections)"
-	}
-	return "showing sections (t for segments)"
-}

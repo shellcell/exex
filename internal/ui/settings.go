@@ -16,6 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/syntax"
 	"github.com/rabarbra/exex/internal/theme"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
 const settingsFieldCount = 16
@@ -119,6 +120,9 @@ func (m *Model) updateSettings(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) cycleSetting(dir int) {
+	// Several settings below are baked into the cached view styles; rebuild it
+	// from the post-change values on the next frame.
+	m.viewStylesCache = nil
 	switch m.settingsCur {
 	case 0:
 		list := settingsThemeList()
@@ -139,30 +143,28 @@ func (m *Model) cycleSetting(dir int) {
 		m.disasmTarget = t // future default landings / redirects use the new strategy
 	case 5:
 		m.cfg.Behavior.TreeSymbols = !m.cfg.Behavior.TreeSymbols
-		m.symbolsTree = m.cfg.Behavior.TreeSymbols
-		m.recomputeSymbols()
+		m.symbols.Tree = m.cfg.Behavior.TreeSymbols
+		m.symbols.Recompute(m.viewContext())
 	case 6:
 		m.cfg.Behavior.TreeSources = !m.cfg.Behavior.TreeSources
-		m.sourcesTree = m.cfg.Behavior.TreeSources
-		if m.sourcesFiles != nil {
-			m.recomputeSourceFiles()
+		m.sources.Tree = m.cfg.Behavior.TreeSources
+		if m.sources.Files != nil {
+			m.sources.Recompute(m.viewContext())
 		}
 	case 7:
 		m.cfg.Behavior.TreeLibs = !m.cfg.Behavior.TreeLibs
-		m.libsTree = m.cfg.Behavior.TreeLibs
-		m.buildLibRows()
+		m.libs.Tree = m.cfg.Behavior.TreeLibs
+		m.libs.BuildRows(m.viewContext())
 	case 8:
 		m.cfg.Behavior.TreeCollapsed = !m.cfg.Behavior.TreeCollapsed
 		m.treeCollapseDefault = m.cfg.Behavior.TreeCollapsed
 		// Apply live to whichever trees are currently shown.
-		m.setAllSymbolsCollapsed(m.treeCollapseDefault)
-		m.setAllSourcesCollapsed(m.treeCollapseDefault)
-		m.setAllLibsCollapsed(m.treeCollapseDefault)
+		m.symbols.SetAllCollapsed(m.treeCollapseDefault)
+		m.sources.SetAllCollapsed(m.viewContext(), m.treeCollapseDefault)
+		m.libs.SetAllCollapsed(m.viewContext(), m.treeCollapseDefault)
 	case 9:
 		m.cfg.Behavior.AbbrevArgs = !m.cfg.Behavior.AbbrevArgs
-		m.symbolsAbbrev = m.cfg.Behavior.AbbrevArgs
-		m.symbolsAbbrevExcept = nil
-		m.clearSymbolCaches()
+		m.symbols.SetAbbrevAll(m.cfg.Behavior.AbbrevArgs)
 		m.clearSymbolNameCaches()
 	case 10:
 		m.toggleDemangle() // flips cfg.Behavior.NoDemangle and re-applies/clears live
@@ -187,9 +189,7 @@ func (m *Model) cycleSetting(dir int) {
 		m.cfg.Behavior.HexBytesPerRow = cycleHexBytesPerRow(m.cfg.Behavior.HexBytesPerRow, dir)
 		// Re-snap the scroll anchors to the new row width and redraw (Hex/Raw render
 		// uncached, so nothing else to invalidate).
-		bpr := m.hexBytesPerRow()
-		m.hexTop = (m.hexTop / bpr) * bpr
-		m.rawTop = (m.rawTop / bpr) * bpr
+		m.byteViews.SnapTops(hexraw.BytesPerRow(m.viewContextPtr()))
 		m.viewDirty = true
 	}
 }
@@ -302,7 +302,7 @@ func (m *Model) settingsValue(i int) string {
 		}
 		return "full"
 	case 15:
-		return strconv.Itoa(m.hexBytesPerRow())
+		return strconv.Itoa(hexraw.BytesPerRow(m.viewContextPtr()))
 	}
 	return ""
 }

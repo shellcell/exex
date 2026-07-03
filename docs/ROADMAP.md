@@ -707,3 +707,54 @@ decoding, and only reducible by structural operand matching (a disasm-package
 change, left as a future item). The syscall direct scan still materialises its
 slice (it needs a look-back window for number recovery); streaming it via a ring
 buffer is a follow-up.
+
+**Case sensitivity + search-modal unification.** Text matching is now
+**case-insensitive by default** with a per-search toggle. The `l` free-text search
+toggles case with `^i` in its prompt; the in-view `/` search (disasm / hex / raw)
+gained a **case** switch (click or `^i`) alongside mode/dir/origin. Caret-seeded
+`f` searches stay **case-sensitive** — a seed is an exact value from the binary.
+The byte/hex search folds ASCII case only for *text* patterns (a hex byte pattern
+never folds); `bytesearch.FindBytesFold` + `IsTextPattern` back this. The in-view
+search prompt was restyled to match the goto/find modals (title, gap, indented
+input, switch strip, hint). Verified the change is behaviour-preserving: a
+ground-truth scan of the Chrome Framework's x86_64 slice finds exactly the 3
+`0xbadbeef` instructions the default (case-insensitive) disasm search returns (the
+arm64 slice has none — it builds the constant via `mov`/`movk`).
+
+## 42. Structured section decoder  (idea)
+
+exex has the two ends of the spectrum — the **Hex** view (raw bytes) and the
+**interpreted** views (Symbols, Relocs, Libs) — plus the **⇧H header modal**,
+which already decodes the ELF header and Mach-O `mach_header` + load commands
+field-by-field. The gap in the middle is showing *how* a table is encoded: a
+**structured record view** that overlays a fixed-layout section with typed field
+annotations (offset, raw bytes, decoded value) per record.
+
+**Symtab is the flagship example.** The Symbols view shows the *result*; a
+structured view would show each `Elf64_Sym` / Mach-O `nlist_64` / COFF record:
+`st_name` (string-table offset → resolved string), `st_info` (bind+type nibbles),
+`st_other`, `st_shndx`, `st_value`, `st_size` — with the raw bytes each occupies.
+It bridges Hex ↔ Symbols and teaches the on-disk format, which is squarely exex's
+niche as a format explorer.
+
+**Scope: the well-defined fixed-record tables, not a generic "decode any
+section" engine** (open-ended, and mostly redundant with the interpreted views).
+Strong candidates, roughly in value order — tables exex does *not* yet decode
+structurally:
+- ELF **`.dynamic`** (`Elf_Dyn` tag/value pairs: NEEDED, RPATH, FLAGS, …) — genuinely
+  useful and currently unshown anywhere.
+- ELF **`.note.*`** (`.note.gnu.build-id`, `.note.ABI-tag`, package metadata).
+- ELF symbol **versioning** (`.gnu.version` / `.gnu.version_r` / `.gnu.version_d`).
+- **symtab / nlist** records as an encoding view (complements the Symbols view).
+- ELF program headers as records (the header modal covers the ELF header, not the
+  per-segment `Phdr` table).
+
+Lower priority (already interpreted elsewhere): relocation sections (Relocs view),
+Mach-O load commands (header modal), PE import/export directories (Libs/Symbols).
+
+**Shape.** Either a Hex-view overlay mode (annotate the selected section's bytes
+with field names/values, navigate record→record) or a dedicated table view driven
+by a small per-section-type record-layout registry in `binfile`. Start with
+`.dynamic` (highest signal, least redundant) + the symtab encoding view; extend to
+notes/version as the registry grows. Medium effort; the decoders are small and
+self-contained, mirroring `rawheader.go`.

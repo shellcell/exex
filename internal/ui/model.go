@@ -336,23 +336,25 @@ type findState struct {
 	// same content scan the caret-seeded `f` uses.
 	findQueryActive bool
 	findQueryInput  textinput.Model
+	findQueryCase   bool // case-sensitive matching (default off; toggled with ^i)
 }
 
 // searchState stores modal and async state for view searches.
 type searchState struct {
-	searchInput      textinput.Model
-	searchActive     bool
-	searchQuery      string
-	searchSeq        int
-	searchCancel     chan struct{}
-	searchRunning    bool
-	searchCancelable bool
-	searchResults    disasmSearchCache
-	searchCursorMode int
-	searchMode       searchMode
-	searchCursorAddr uint64
-	searchForward    bool
-	searchFromCursor bool
+	searchInput         textinput.Model
+	searchActive        bool
+	searchQuery         string
+	searchSeq           int
+	searchCancel        chan struct{}
+	searchRunning       bool
+	searchCancelable    bool
+	searchResults       disasmSearchCache
+	searchCursorMode    int
+	searchMode          searchMode
+	searchCursorAddr    uint64
+	searchForward       bool
+	searchFromCursor    bool
+	searchCaseSensitive bool // in-view search honours case (default off)
 }
 
 // settingsState stores state for the on-the-fly settings popup.

@@ -28,17 +28,18 @@ type disasmSearchHit struct {
 }
 
 type disasmSearchStep struct {
-	file      *binfile.File
-	seq       int
-	label     string
-	query     string
-	forward   bool
-	inclusive bool
-	logical   int
-	total     int
-	chunk     int
-	base      int
-	cancel    <-chan struct{}
+	file          *binfile.File
+	seq           int
+	label         string
+	query         string
+	caseSensitive bool
+	forward       bool
+	inclusive     bool
+	logical       int
+	total         int
+	chunk         int
+	base          int
+	cancel        <-chan struct{}
 }
 
 type disasmSearchProgressMsg struct {
@@ -226,16 +227,17 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 	done := make(chan struct{})
 	m.searchCancel = done
 	step := disasmSearchStep{
-		file:      m.file,
-		seq:       m.searchSeq,
-		label:     m.searchQuery,
-		query:     canonicalSearchQuery(m.searchQuery),
-		forward:   forward,
-		inclusive: inclusive,
-		total:     img.Len(),
-		chunk:     m.disasmSearchChunkBytes(),
-		base:      pos,
-		cancel:    done,
+		file:          m.file,
+		seq:           m.searchSeq,
+		label:         m.searchQuery,
+		query:         canonicalSearchQuery(m.searchQuery),
+		caseSensitive: m.searchCaseSensitive,
+		forward:       forward,
+		inclusive:     inclusive,
+		total:         img.Len(),
+		chunk:         m.disasmSearchChunkBytes(),
+		base:          pos,
+		cancel:        done,
 	}
 	if !fromCursor {
 		if forward {
@@ -269,6 +271,15 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 	return m.searchDisasmStepCmd(step)
 }
 
+// nameMatches compares a search query to a symbol name, honouring case
+// sensitivity (the fast path is an exact-name match).
+func nameMatches(q, name string, caseSensitive bool) bool {
+	if caseSensitive {
+		return q == name
+	}
+	return strings.EqualFold(q, name)
+}
+
 func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) (disasmSearchHit, bool) {
 	q := strings.TrimSpace(m.searchQuery)
 	if q == "" || len(m.disasmInst) == 0 {
@@ -291,7 +302,10 @@ func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) 
 		}
 		// Cheap, allocation-free name match first (Display is Demangled-or-Name,
 		// so checking both covers it); only then the binary-search membership test.
-		if !strings.EqualFold(q, sym.Name) && !(sym.Demangled != "" && strings.EqualFold(q, sym.Demangled)) {
+		// Honour case sensitivity so a sensitive search doesn't fast-path to a
+		// wrong-case symbol.
+		if !nameMatches(q, sym.Name, m.searchCaseSensitive) &&
+			!(sym.Demangled != "" && nameMatches(q, sym.Demangled, m.searchCaseSensitive)) {
 			continue
 		}
 		if _, ok := img.PosForAddr(sym.Addr); !ok {
@@ -373,6 +387,9 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		}
 	}
 	matchText := func(s string) bool {
+		if step.caseSensitive {
+			return strings.Contains(s, step.label) // exact, case-sensitive
+		}
 		if queryASCII {
 			return layout.ContainsFold(s, query)
 		}

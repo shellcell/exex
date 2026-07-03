@@ -94,3 +94,40 @@ func TestFindBytes(t *testing.T) {
 		t.Errorf("empty pattern = %d, want -1", got)
 	}
 }
+
+func TestFindBytesFold(t *testing.T) {
+	data := []byte("The Quick Brown FOX")
+	// insensitive finds regardless of case
+	if i := FindBytesFold(data, []byte("quick"), 0, true, true); i != 4 {
+		t.Errorf("fold forward: got %d, want 4", i)
+	}
+	if i := FindBytesFold(data, []byte("fox"), 0, true, true); i != 16 {
+		t.Errorf("fold fox: got %d, want 16", i)
+	}
+	// sensitive (fold=false) is exact
+	if i := FindBytesFold(data, []byte("quick"), 0, true, false); i != -1 {
+		t.Errorf("no-fold should not match lowercase: got %d, want -1", i)
+	}
+	if i := FindBytesFold(data, []byte("Quick"), 0, true, false); i != 4 {
+		t.Errorf("no-fold exact: got %d, want 4", i)
+	}
+	// backward
+	if i := FindBytesFold(data, []byte("BROWN"), 0x20, false, true); i != 10 {
+		t.Errorf("fold backward: got %d, want 10", i)
+	}
+}
+
+func TestIsTextPattern(t *testing.T) {
+	if !IsTextPattern("hello", ModeAuto) {
+		t.Error("plain word should be text")
+	}
+	if IsTextPattern("deadbeef", ModeAuto) {
+		t.Error("bare hex should be a byte pattern, not text")
+	}
+	if !IsTextPattern("deadbeef", ModeText) {
+		t.Error("explicit text mode is always text")
+	}
+	if IsTextPattern("de ad be ef", ModeHex) {
+		t.Error("hex mode is never text")
+	}
+}

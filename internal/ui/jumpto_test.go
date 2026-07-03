@@ -20,7 +20,10 @@ func TestJumpModalFromDisasm(t *testing.T) {
 			t.Error("jump modal offered the current (Disasm) view as a target")
 		}
 	}
-	for _, want := range []string{"Hex", "Raw", "Symbols", "Sections"} {
+	// Hex/Raw/Sections are reliably reachable for any mapped code caret. Symbols
+	// depends on a covering symbol, which a stripped binary (e.g. Ubuntu's system
+	// binaries) doesn't have — so require it only as a listed target, not enabled.
+	for _, want := range []string{"Hex", "Raw", "Sections"} {
 		tg, ok := byLabel[want]
 		if !ok {
 			t.Errorf("missing %s target", want)
@@ -29,6 +32,9 @@ func TestJumpModalFromDisasm(t *testing.T) {
 		if !tg.enabled || tg.preview == "" {
 			t.Errorf("%s target should be enabled with a preview, got enabled=%v preview=%q", want, tg.enabled, tg.preview)
 		}
+	}
+	if _, ok := byLabel["Symbols"]; !ok {
+		t.Error("missing Symbols target")
 	}
 
 	// The selection starts on the first enabled row; Enter navigates and closes.

@@ -60,6 +60,23 @@ func ParsePattern(q string, mode Mode) []byte {
 	return []byte(q)
 }
 
+// IsTextPattern reports whether ParsePattern would treat q as literal text (so
+// case-folding is meaningful) rather than a hex byte pattern (where it isn't).
+func IsTextPattern(q string, mode Mode) bool {
+	trimmed := strings.TrimSpace(q)
+	if mode == ModeText {
+		return true
+	}
+	if mode == ModeHex {
+		return false
+	}
+	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
+		return true // quoted is always text
+	}
+	compact := compactHexPattern(trimmed)
+	return !(q == trimmed && len(compact) >= 2 && len(compact)%2 == 0 && isHexStr(compact))
+}
+
 // compactHexPattern removes whitespace and an optional 0x/0X prefix.
 func compactHexPattern(s string) string {
 	compact := strings.Join(strings.Fields(s), "")
@@ -107,6 +124,61 @@ func FindBytes(data, pat []byte, start int, forward bool) int {
 		return -1
 	}
 	return bytes.LastIndex(data[:end], pat)
+}
+
+// FindBytesFold is FindBytes with optional ASCII case-insensitive matching. With
+// fold=false it is FindBytes (the fast exact bytes.Index). With fold=true it
+// matches letters ignoring ASCII case — for text patterns; a byte-value pattern
+// (hex) simply won't contain letters to fold, so callers can always pass the
+// view's case flag.
+func FindBytesFold(data, pat []byte, start int, forward, fold bool) int {
+	if !fold {
+		return FindBytes(data, pat, start, forward)
+	}
+	if len(pat) == 0 || len(pat) > len(data) {
+		return -1
+	}
+	if forward {
+		if start < 0 {
+			start = 0
+		}
+		for i := start; i <= len(data)-len(pat); i++ {
+			if equalFoldASCII(data[i:i+len(pat)], pat) {
+				return i
+			}
+		}
+		return -1
+	}
+	end := start + len(pat)
+	if end > len(data) {
+		end = len(data)
+	}
+	for i := end - len(pat); i >= 0; i-- {
+		if equalFoldASCII(data[i:i+len(pat)], pat) {
+			return i
+		}
+	}
+	return -1
+}
+
+// equalFoldASCII reports whether a and b are equal ignoring ASCII letter case.
+func equalFoldASCII(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if lowerASCII(a[i]) != lowerASCII(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
 }
 
 // isHexStr reports whether s is non-empty and contains only hex digits.

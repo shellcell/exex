@@ -419,6 +419,9 @@ func (m *Model) updateSearchInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cm
 	case "ctrl+o":
 		m.searchFromCursor = !m.searchFromCursor
 		return m, nil
+	case "ctrl+i":
+		m.toggleSearchCase()
+		return m, nil
 	case "enter":
 		before := m.activeCursorState()
 		m.searchQuery = strings.TrimSpace(m.searchInput.Value())

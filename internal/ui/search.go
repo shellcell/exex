@@ -64,11 +64,23 @@ func (m *Model) searchSwitches() []searchSwitch {
 			origin = "end"
 		}
 	}
+	caseTag := "insensitive"
+	if m.searchCaseSensitive {
+		caseTag = "sensitive"
+	}
 	return []searchSwitch{
 		{"mode", searchModeName(m.searchMode), m.cycleSearchMode},
+		{"case", caseTag, m.toggleSearchCase},
 		{"dir", dir, func() { m.searchForward = !m.searchForward }},
 		{"origin", origin, func() { m.searchFromCursor = !m.searchFromCursor }},
 	}
+}
+
+// toggleSearchCase flips case sensitivity and drops the disasm search cache,
+// whose hits were computed under the previous setting.
+func (m *Model) toggleSearchCase() {
+	m.searchCaseSensitive = !m.searchCaseSensitive
+	m.searchResults = disasmSearchCache{}
 }
 
 // openSearch opens the search prompt. Repeat search still uses searchQuery via
@@ -173,6 +185,9 @@ func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool)
 		m.setStatus("empty search pattern", true)
 		return cur
 	}
+	// Case-insensitive only for text patterns (folding a hex byte pattern would
+	// wrongly match unrelated letter values).
+	fold := !m.searchCaseSensitive && searchutil.IsTextPattern(m.searchQuery, m.searchMode)
 	start := cur
 	if !inclusive {
 		if forward {
@@ -181,7 +196,7 @@ func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool)
 			start--
 		}
 	}
-	if i := findBytesSrc(data, pat, start, forward); i >= 0 {
+	if i := findBytesSrc(data, pat, start, forward, fold); i >= 0 {
 		m.setStatus(fmt.Sprintf("match at offset +0x%x", i), false)
 		return i
 	}
@@ -195,7 +210,7 @@ func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool)
 // same speed as a flat []byte and never allocates. Matches are within a region
 // (sections) — the meaningful scope; a pattern straddling a section boundary in
 // the flattened image is not matched.
-func findBytesSrc(data byteSource, pat []byte, start int, forward bool) int {
+func findBytesSrc(data byteSource, pat []byte, start int, forward, fold bool) int {
 	n := data.Len()
 	if len(pat) == 0 || len(pat) > n {
 		return -1
@@ -211,7 +226,7 @@ func findBytesSrc(data byteSource, pat []byte, start int, forward bool) int {
 			}
 			from := max(start-r.Off, 0)
 			if from <= len(r.B)-len(pat) {
-				if j := searchutil.FindBytes(r.B, pat, from, true); j >= 0 {
+				if j := searchutil.FindBytesFold(r.B, pat, from, true, fold); j >= 0 {
 					return r.Off + j
 				}
 			}
@@ -228,7 +243,7 @@ func findBytesSrc(data byteSource, pat []byte, start int, forward bool) int {
 		}
 		hi := min(start-r.Off, len(r.B)-len(pat)) // greatest local start to consider
 		if hi >= 0 {
-			if j := searchutil.FindBytes(r.B, pat, hi, false); j >= 0 {
+			if j := searchutil.FindBytesFold(r.B, pat, hi, false, fold); j >= 0 {
 				return r.Off + j
 			}
 		}

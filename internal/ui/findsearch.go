@@ -59,10 +59,11 @@ func (f findFacet) String() string {
 // data words and reloc targets) and/or text (for string and reloc-symbol
 // matches). Derived from the chosen seed.
 type findQuery struct {
-	label   string // e.g. "_main", "0x1000" — for the modal title
-	addr    uint64
-	hasAddr bool
-	text    string
+	label         string // e.g. "_main", "0x1000" — for the modal title
+	addr          uint64
+	hasAddr       bool
+	text          string
+	caseSensitive bool // text matching honours case (default off for the l search)
 }
 
 // findHit is one occurrence: which source/view it came from, its address and/or
@@ -88,12 +89,16 @@ func (m *Model) openFindQuery() {
 	m.findQueryInput.Focus()
 }
 
-// updateFindQuery drives the free-text prompt: Enter runs the search, Esc closes.
+// updateFindQuery drives the free-text prompt: Enter runs the search, ^i toggles
+// case sensitivity, Esc closes.
 func (m *Model) updateFindQuery(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		m.findQueryActive = false
 		m.findQueryInput.Blur()
+		return m, nil
+	case "ctrl+i":
+		m.findQueryCase = !m.findQueryCase
 		return m, nil
 	case "enter":
 		q := m.queryForText(strings.TrimSpace(m.findQueryInput.Value()))
@@ -124,7 +129,7 @@ func (m *Model) queryForText(s string) findQuery {
 			return findQuery{label: s, addr: a, hasAddr: true}
 		}
 	}
-	return findQuery{label: s, text: s}
+	return findQuery{label: s, text: s, caseSensitive: m.findQueryCase}
 }
 
 // startFindSearchQuery runs the global search for an already-built query (the
@@ -133,9 +138,11 @@ func (m *Model) startFindSearchQuery(q findQuery) tea.Cmd {
 	return m.launchFindSearch(q)
 }
 
-// queryForSeed resolves a chosen seed into a search query.
+// queryForSeed resolves a chosen seed into a search query. Seed searches are
+// case-sensitive: a seed is an exact value taken from the binary (a symbol name,
+// a string), so its case is meaningful.
 func (m *Model) queryForSeed(s findSeed) findQuery {
-	q := findQuery{label: s.preview}
+	q := findQuery{label: s.preview, caseSensitive: true}
 	switch s.scope {
 	case gsAddr:
 		if a, err := parseAddr(s.value); err == nil {
@@ -221,18 +228,39 @@ type findPartialMsg struct {
 	hits  []findHit
 }
 
+// bytesContains reports whether b contains sub (exact bytes) — case-sensitive
+// string matching without allocating a string.
+func bytesContains(b, sub []byte) bool {
+	return bytesearch.FindBytes(b, sub, 0, true) >= 0
+}
+
+// textMatcher returns a predicate testing whether a string contains the query's
+// text, honouring its case-sensitivity flag (case-insensitive folds against a
+// pre-lowered needle with no per-call allocation). Empty text never matches.
+func textMatcher(q findQuery) func(string) bool {
+	if q.text == "" {
+		return func(string) bool { return false }
+	}
+	if q.caseSensitive {
+		needle := q.text
+		return func(s string) bool { return strings.Contains(s, needle) }
+	}
+	lower := strings.ToLower(q.text)
+	return func(s string) bool { return layout.ContainsFold(s, lower) }
+}
+
 // findDisasmCmd scans the executable image for instructions matching the query:
 // operand references to the address (an address query) and/or instruction text
 // containing the search text (a free-text query). The slowest source.
 func (m *Model) findDisasmCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd {
 	scan := m.scanDisasmMatching
-	needle := strings.ToLower(q.text)
+	textMatch := textMatcher(q)
 	return func() tea.Msg {
 		match := func(text string) bool {
 			if q.hasAddr && instReferences(text, q.addr) {
 				return true
 			}
-			return needle != "" && layout.ContainsFold(text, needle)
+			return textMatch(text)
 		}
 		var hits []findHit
 		for _, h := range scan(match, done) {
@@ -271,15 +299,19 @@ func (m *Model) findDataCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd 
 		if q.text != "" {
 			pats = append(pats, pat{[]byte(q.text), "bytes"})
 		}
+		// The text pattern folds ASCII case unless the query is case-sensitive; the
+		// pointer-word pattern is binary and always matches exactly.
+		fold := !q.caseSensitive
 		for _, p := range pats {
 			if len(p.bytes) == 0 {
 				continue
 			}
+			patFold := fold && p.note == "bytes"
 			for pos, n := 0, 0; n < findMaxPerFacet; n++ {
 				if scanCancelled(done) {
 					break
 				}
-				idx := bytesearch.FindBytes(raw, p.bytes, pos, true)
+				idx := bytesearch.FindBytesFold(raw, p.bytes, pos, true, patFold)
 				if idx < 0 {
 					break
 				}
@@ -319,11 +351,17 @@ func (m *Model) findStringsCmd(q findQuery, seq int, done <-chan struct{}) tea.C
 		}
 		if q.text != "" {
 			needle := strings.ToLower(q.text)
+			raw := []byte(q.text)
 			for _, e := range file.Strings() {
 				if len(hits) >= findMaxPerFacet || scanCancelled(done) {
 					break
 				}
-				if !layout.ContainsFoldBytes(file.StringBytes(e), needle) {
+				b := file.StringBytes(e)
+				match := layout.ContainsFoldBytes(b, needle)
+				if q.caseSensitive {
+					match = bytesContains(b, raw)
+				}
+				if !match {
 					continue
 				}
 				hits = append(hits, mk(e, e.Section))
@@ -581,6 +619,12 @@ func (m *Model) renderFindQueryModal() string {
 	sb.WriteByte('\n')
 	sb.WriteString(" " + m.findQueryInput.View())
 	sb.WriteByte('\n')
+	sb.WriteByte('\n')
+	caseTag := m.theme.modalHint("case-insensitive")
+	if m.findQueryCase {
+		caseTag = m.theme.warnStyle.Render("case-sensitive")
+	}
+	sb.WriteString(" " + caseTag + m.theme.modalHint("  (^i)") + "\n")
 	sb.WriteByte('\n')
 	sb.WriteString(" " + m.theme.modalHint("↵ search disasm · data · strings · relocs   ·   Esc cancel"))
 	return m.theme.modalStyle.Render(layout.PadRight(sb.String(), rowW))

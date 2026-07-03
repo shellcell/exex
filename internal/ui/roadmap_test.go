@@ -574,23 +574,28 @@ func TestSearchPopupClickTogglesSwitches(t *testing.T) {
 	// shared searchSwitches() layout so the test can't drift from the renderer.
 	rowY := top + 2 + searchSwitchLine
 	sepW := lipgloss.Width(searchSwitchSep)
-	centers := make([]int, 0, 3)
-	pos := 0
-	for _, sw := range m.searchSwitches() {
-		w := lipgloss.Width(sw.label())
-		centers = append(centers, left+3+pos+w/2)
+	sw := m.searchSwitches()
+	center := map[string]int{}
+	pos := 1 // the switch strip is indented one column
+	for _, s := range sw {
+		w := lipgloss.Width(s.label())
+		center[s.name] = left + 3 + pos + w/2
 		pos += w + sepW
 	}
 
-	m.handleSearchPopupClick(centers[0], rowY)
+	m.handleSearchPopupClick(center["mode"], rowY)
 	if m.searchMode != searchModeText {
 		t.Fatalf("mode click set mode = %s, want text", searchModeName(m.searchMode))
 	}
-	m.handleSearchPopupClick(centers[1], rowY)
+	m.handleSearchPopupClick(center["case"], rowY)
+	if !m.searchCaseSensitive {
+		t.Fatal("case click did not toggle searchCaseSensitive")
+	}
+	m.handleSearchPopupClick(center["dir"], rowY)
 	if m.searchForward {
 		t.Fatal("direction click did not toggle searchForward")
 	}
-	m.handleSearchPopupClick(centers[2], rowY)
+	m.handleSearchPopupClick(center["origin"], rowY)
 	if m.searchFromCursor {
 		t.Fatal("origin click did not toggle searchFromCursor")
 	}

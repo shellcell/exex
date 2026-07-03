@@ -469,7 +469,7 @@ func (m *Model) handleSearchPopupClick(x, y int) {
 	if cy != searchSwitchLine || cx < 0 {
 		return
 	}
-	pos := 0
+	pos := 1 // the switch strip is indented one column (see renderSearchModal)
 	sepW := lipgloss.Width(searchSwitchSep)
 	for _, sw := range m.searchSwitches() {
 		w := lipgloss.Width(sw.label())

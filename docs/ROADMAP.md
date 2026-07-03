@@ -644,3 +644,36 @@ source pane) and `o` (open as primary). Shell-side (`internal/ui/jumpto.go`),
 reusing the existing jump actions plus small
 `CaretAddr`/`SelectByAddr`/`SelectByOffset`/`StringAt`/`StringAtOffset` accessors
 on each view; the `d`/`h`/`m` shortcuts stay as fast paths.
+
+## 41. `f` global value search + modal polish  ✅ (done)
+
+Three distinct navigations, now clearly separated: **goto (`g`)** is a *directory*
+(jump to a named symbol/section/string/lib or a typed address); **open-in
+(space)** takes the caret's *position* to another view; **`f`** searches the
+binary's *content* for the *value* under the caret. goto can't do the third — it
+only indexes named entities — so `f` has its own results engine.
+
+`f` opens a seed picker of the searchable things at the caret — the covering
+**Symbol**, a **String**, the containing **Section**, the **Address**, and the
+**Pointer** the bytes hold (read by address, or straight from the raw bytes at a
+file offset, so a Raw caret over an unmapped header still works), plus the
+**Library**/**Path** in the Libs/Sources views. Choosing one runs a **global
+value search** across four sources, each a concurrent command (`tea.Batch`) whose
+hits **stream** into one list as it finishes: **disasm** operand references
+(reusing the parallel xref scanner — the slow one), **data** words holding the
+address (pointer-width byte scan), **strings** containing the text, and **relocs**
+targeting it. Matching is by *value*, not text, so the `0x` prefix is irrelevant;
+disasm covers compact/RIP-relative x86 refs via the disassembler's resolution,
+the data scan finds pointer-width absolute pointers. Results are tagged with the
+view they belong to and **filterable by view** (a facet bar with per-source
+counts, `⇥`/`⇧⇥` to cycle), with a `/` text filter and Enter-to-jump; a facet
+still scanning shows "searching…", not "no occurrences". `c` in the picker copies
+the seed's value. (`internal/ui/findsearch.go` + `findto.go`.)
+
+Modal polish landed across goto, the find results, and the syscalls modal: all
+three now reserve a **fixed body height** (responsive to terminal resize, but no
+vertical bounce as results stream in or the filter narrows), gained a **title↔tabs
+gap** and consistent indentation, and **centre their empty/searching message**
+horizontally and vertically. Goto results show a **view badge**; the syscalls
+modal cycles scope on **`⇥`** (not just `t`). The find modal shows a live
+**"● searching N sources"** indicator while the concurrent scans complete.

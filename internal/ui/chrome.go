@@ -46,6 +46,10 @@ func (m *Model) View() tea.View {
 		out = m.overlayCenter(out, m.renderCPUFeatModal())
 	case m.jumpActive:
 		out = m.overlayCenter(out, m.renderJumpModal())
+	case m.findActive:
+		out = m.overlayCenter(out, m.renderFindModal())
+	case m.findResultsActive:
+		out = m.overlayCenter(out, m.renderFindResultsModal())
 	}
 	m.viewCache = out
 	m.viewDirty = false
@@ -88,6 +92,7 @@ func (m *Model) renderHelpModal() string {
 		row("w", "toggle long-line wrap"),
 		row("d/h/m", "go to addr in disasm / hex / raw"),
 		row("␣ / >", "open caret address in another view (menu)"),
+		row("f", "find the value under the caret across the binary"),
 		row("⇧a/⇧s/⇧l", "copy address / name / line"),
 		row("t / ⇥", "switch view"),
 		row("/  n/N", "search · next/prev"),
@@ -259,6 +264,17 @@ func (t Theme) modalTitle(s string) string { return t.titleStyle.Render(" " + s 
 func (t Theme) modalHint(s string) string  { return t.footerStyle.Padding(0).Render(s) }
 func modalListWidth(termW int) int         { return layout.Clamp(termW-8, 40, 120) }
 
+// centeredModalLine horizontally centres a (possibly styled) line within width w,
+// padding both sides — for a modal's empty/status message.
+func centeredModalLine(s string, w int) string {
+	sw := lipgloss.Width(s)
+	if sw >= w {
+		return layout.FitANSIWidth(s, w)
+	}
+	left := (w - sw) / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", w-sw-left)
+}
+
 // overlayCenter draws a pre-rendered modal centred over bg.
 func (m *Model) overlayCenter(bg, modal string) string {
 	mw := lipgloss.Width(modal)
@@ -268,54 +284,75 @@ func (m *Model) overlayCenter(bg, modal string) string {
 	return layout.Overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
 }
 
+// gotoVisibleRows is the fixed number of result rows the goto modal reserves, so
+// its total height never changes with the result count — otherwise the centred
+// overlay would bounce up and down as the user types.
+func (m *Model) gotoVisibleRows() int {
+	return layout.Clamp(m.height-12, 4, 40)
+}
+
 func (m *Model) renderGotoModal() string {
 	var sb strings.Builder
 	rowW := modalListWidth(m.width)
+	visible := m.gotoVisibleRows()
+
+	// Header: title, a blank line for breathing room, the scope tabs, and the input
+	// — each indented one column to line up with the result rows below.
 	sb.WriteString(m.theme.modalTitle("Jump to"))
-	sb.WriteString("\n")
-	sb.WriteString(layout.FitANSIWidth(m.gotoScopeBar(), rowW))
-	sb.WriteString("\n")
-	sb.WriteString(m.gotoInput.View())
-	sb.WriteString("\n")
-	m.modalListRow = 4 // title + scope bar + input + blank → list at row 4
+	sb.WriteByte('\n')
+	sb.WriteByte('\n')
+	sb.WriteString(" " + layout.FitANSIWidth(m.gotoScopeBar(), rowW-1))
+	sb.WriteByte('\n')
+	sb.WriteString(" " + m.gotoInput.View())
+	sb.WriteByte('\n')
+	sb.WriteByte('\n')
+	m.modalListRow = 5 // title + blank + scope bar + input + blank → list at row 5
+
+	// Body: exactly `visible` lines, always — result rows padded out with blanks (or
+	// a centred empty hint), so the modal keeps a constant height.
+	blank := layout.PadRight("", rowW)
 	if len(m.gotoResults) == 0 {
-		sb.WriteString("\n")
-		sb.WriteString(m.theme.modalHint("type to search · ⇥ scope · " + m.gotoEmptyHint()))
-		sb.WriteString("\n")
+		for i := 0; i < visible; i++ {
+			if i == visible/2 {
+				hint := m.theme.modalHint("type to search — " + m.gotoEmptyHint())
+				sb.WriteString(centeredModalLine(hint, rowW) + "\n")
+			} else {
+				sb.WriteString(blank + "\n")
+			}
+		}
 	} else {
-		sb.WriteString("\n")
 		addrW := m.file.AddrHexWidth()
-		visible := layout.Clamp(m.height-11, 3, 40)
 		gotoTop := layout.VisualTop(m.gotoSel, m.gotoTop, len(m.gotoResults), visible, func(int) int { return 1 })
 		m.gotoTop = gotoTop
-		end := min(gotoTop+visible, len(m.gotoResults))
-		labelW := rowW - addrW - 9
-		for i := gotoTop; i < end; i++ {
+		const badgeW = 9
+		labelW := max(4, rowW-badgeW-3-addrW-3)
+		for row := 0; row < visible; row++ {
+			i := gotoTop + row
+			if i >= len(m.gotoResults) {
+				sb.WriteString(blank + "\n")
+				continue
+			}
 			t := m.gotoResults[i]
 			loc := strings.Repeat(" ", 2+addrW)
 			if t.hasAddr || t.kind == gkAddr {
 				loc = m.theme.addrStyle.Render(fmt.Sprintf("0x%0*x", addrW, t.addr))
-			} else if t.kind == gkLib {
-				loc = layout.PadVisual("", 2+addrW)
 			}
-			// Colour the kind tag and label by kind so mixed results (the All scope)
-			// are distinguishable at a glance.
+			badge := m.gotoTagStyle(t.kind).Render(layout.PadVisual(t.kind.viewLabel(), badgeW))
 			label := m.gotoKindStyle(t).Render(layout.TruncateMiddle(t.label, labelW))
-			line := fmt.Sprintf(" %s  %s %s",
-				m.gotoTagStyle(t.kind).Render(t.kind.tag()), loc, label)
-			line = layout.PadRight(line, rowW)
+			line := layout.PadRight(fmt.Sprintf(" %s  %s  %s", badge, loc, label), rowW)
 			if i == m.gotoSel {
 				line = m.theme.tableSelStyle.Render(ansi.Strip(line))
 			}
 			sb.WriteString(line + "\n")
 		}
 	}
+
 	count := ""
 	if n := len(m.gotoResults); n > 0 {
 		count = fmt.Sprintf("  (%d/%d)", m.gotoSel+1, n)
 	}
-	sb.WriteString("\n")
-	sb.WriteString(m.theme.modalHint("↑/↓ select · ↵ jump · ⇥ scope · Esc cancel" + count))
+	sb.WriteByte('\n')
+	sb.WriteString(" " + m.theme.modalHint("↑/↓ select · ↵ jump · ⇥ scope · Esc cancel"+count))
 	return m.theme.modalStyle.Render(sb.String())
 }
 

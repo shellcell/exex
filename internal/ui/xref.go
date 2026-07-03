@@ -161,87 +161,89 @@ func (m *Model) xrefLabelForTarget(target uint64) string {
 
 // xrefScanCmd decodes the whole executable image in chunks (reusing the decode
 // cache) off the UI goroutine and collects instructions that reference target.
-func (m *Model) xrefScanCmd(target uint64, seq int, done <-chan struct{}) tea.Cmd {
+// scanDisasmRefs decodes the executable image in parallel chunks and collects
+// every instruction whose resolved operand address equals target. Shared by the
+// xref scan and the global value search; the caller captures svc/img/file/chunk
+// outside its goroutine so the scan never touches the Model.
+func (m *Model) scanDisasmRefs(target uint64, done <-chan struct{}) []xrefHit {
 	svc := m.disasmService()
 	img := m.file.ExecImage()
 	file := m.file
 	chunk := m.disasmSearchChunkBytes()
-	// A one-shot full-image scan can use every core (unlike interactive search,
-	// which caps workers to stay responsive). Honour an explicit config override.
 	maxWorkers := runtime.GOMAXPROCS(0)
 	if m.disasmSearchWorkers > 0 {
 		maxWorkers = m.disasmSearchWorkers
 	}
-	return func() tea.Msg {
-		// Split the executable image into chunks and decode + scan them in
-		// parallel — decoding dominates the cost, so this scales with cores. (The
-		// old scan decoded the whole image on one goroutine.)
-		var starts []int
-		for pos := 0; pos < img.Len(); {
-			win := img.Window(pos, chunk)
-			if len(win.Data) == 0 || win.End <= pos {
-				break
-			}
-			starts = append(starts, pos)
-			pos = win.End
+	var starts []int
+	for pos := 0; pos < img.Len(); {
+		win := img.Window(pos, chunk)
+		if len(win.Data) == 0 || win.End <= pos {
+			break
 		}
-
-		results := make([][]xrefHit, len(starts))
-		workers := max(min(maxWorkers, len(starts)), 1)
-		sem := make(chan struct{}, workers)
-		var wg sync.WaitGroup
-		for i, start := range starts {
+		starts = append(starts, pos)
+		pos = win.End
+	}
+	results := make([][]xrefHit, len(starts))
+	workers := max(min(maxWorkers, len(starts)), 1)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, start := range starts {
+		if scanCancelled(done) {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i, start int) {
+			defer wg.Done()
+			defer func() { <-sem }()
 			if scanCancelled(done) {
-				break
+				return
 			}
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(i, start int) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				var hits []xrefHit
+			var hits []xrefHit
+			for _, inst := range svc.DecodeRange(start, chunk, xrefLead) {
 				if scanCancelled(done) {
 					return
 				}
-				for _, inst := range svc.DecodeRange(start, chunk, xrefLead) {
-					if scanCancelled(done) {
-						return
-					}
-					if !instReferences(inst.Text, target) {
-						continue
-					}
-					sym := ""
-					if s, ok := file.SymbolAt(inst.Addr); ok {
-						sym = s.Display()
-					}
-					hits = append(hits, xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym})
-				}
-				results[i] = hits
-			}(i, start)
-		}
-		wg.Wait()
-
-		// Merge in address order, de-duplicating instructions that straddle a
-		// chunk edge (decoded in two windows), and cap the total.
-		seen := map[uint64]bool{}
-		var hits []xrefHit
-		for _, rs := range results {
-			for _, h := range rs {
-				if seen[h.addr] {
+				if !instReferences(inst.Text, target) {
 					continue
 				}
-				seen[h.addr] = true
-				hits = append(hits, h)
+				sym := ""
+				if s, ok := file.SymbolAt(inst.Addr); ok {
+					sym = s.Display()
+				}
+				hits = append(hits, xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym})
 			}
-			if len(hits) >= xrefMaxHits {
-				break
+			results[i] = hits
+		}(i, start)
+	}
+	wg.Wait()
+
+	seen := map[uint64]bool{}
+	var hits []xrefHit
+	for _, rs := range results {
+		for _, h := range rs {
+			if seen[h.addr] {
+				continue
 			}
+			seen[h.addr] = true
+			hits = append(hits, h)
 		}
-		sort.Slice(hits, func(i, j int) bool { return hits[i].addr < hits[j].addr })
-		if len(hits) > xrefMaxHits {
-			hits = hits[:xrefMaxHits]
+		if len(hits) >= xrefMaxHits {
+			break
 		}
-		return xrefDoneMsg{file: file, seq: seq, target: target, hits: hits}
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].addr < hits[j].addr })
+	if len(hits) > xrefMaxHits {
+		hits = hits[:xrefMaxHits]
+	}
+	return hits
+}
+
+func (m *Model) xrefScanCmd(target uint64, seq int, done <-chan struct{}) tea.Cmd {
+	file := m.file
+	scan := m.scanDisasmRefs
+	return func() tea.Msg {
+		return xrefDoneMsg{file: file, seq: seq, target: target, hits: scan(target, done)}
 	}
 }
 

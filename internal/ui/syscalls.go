@@ -701,9 +701,13 @@ func (m *Model) updateSyscallModal(msg tea.KeyMsg, key string) (tea.Model, tea.C
 	case "/":
 		m.syscallFiltering = true
 		return m, m.syscallFilter.Focus()
-	case "t":
+	case "t", "tab", "shift+tab":
 		oldScope := m.syscallScope
-		m.syscallScope = (m.syscallScope + 1) % sysScopeCount
+		if key == "shift+tab" {
+			m.syscallScope = (m.syscallScope + sysScopeCount - 1) % sysScopeCount
+		} else {
+			m.syscallScope = (m.syscallScope + 1) % sysScopeCount
+		}
 		if oldScope == sysScopeFull && m.syscallScope != sysScopeFull {
 			m.cancelSyscallFullScan()
 		}
@@ -774,12 +778,30 @@ func (m *Model) clearSyscallFilter() {
 	m.rebuildSyscallRows()
 }
 
+// syscallNoteLines is how many lines the unresolved-libraries note will occupy,
+// so the row area can be shrunk to keep the whole modal within the terminal.
+func (m *Model) syscallNoteLines() int {
+	if m.syscallScope != sysScopeFull || len(m.syscallFullNotes) == 0 {
+		return 0
+	}
+	n := 2 + min(len(m.syscallFullNotes), 4) // blank + header + up to 4 libs
+	if len(m.syscallFullNotes) > 4 {
+		n++ // "… and N more"
+	}
+	return n
+}
+
 func (m *Model) renderSyscallModal() string {
 	m.ensureSyscallFilter()
 	var sb strings.Builder
 	addrW := m.file.AddrHexWidth()
 	rowW := modalListWidth(m.width)
-	visible := layout.Clamp(m.height-10, 3, 40) // 2 extra header lines (scope bar + legend)
+	// Size the row area so the whole modal fits the terminal height. Chrome is:
+	// border(2) + padding(2) + title + blank + scope + filter + legend + blank
+	// (6 header) + blank + footer (2) = 14 lines, plus the unresolved-library notes
+	// when shown — subtract all of it so the modal shrinks instead of overflowing.
+	noteLines := m.syscallNoteLines()
+	visible := layout.Clamp(m.height-14-noteLines, 3, 40)
 	rows := m.syscallShown
 	if m.syscallSel >= len(rows) {
 		m.syscallSel = max(0, len(rows)-1)
@@ -796,23 +818,51 @@ func (m *Model) renderSyscallModal() string {
 	// Header: title, scope segmented control, filter box (with shown/total count),
 	// and the colour/sort legend — then a blank line before the rows.
 	sb.WriteString(m.theme.modalTitle("System calls"))
-	sb.WriteString("\n")
-	sb.WriteString(layout.FitANSIWidth(m.syscallScopeBar(), rowW))
+	sb.WriteString("\n\n")
+	sb.WriteString(" " + layout.FitANSIWidth(m.syscallScopeBar(), rowW-1))
 	sb.WriteString("\n")
 	countStr := fmt.Sprintf("  %d", len(rows))
 	if m.syscallTotal != len(rows) {
 		countStr = fmt.Sprintf("  %d of %d", len(rows), m.syscallTotal)
 	}
 	m.syscallFilter.SetWidth(layout.Clamp(rowW-len(countStr)-4, 12, 60))
-	sb.WriteString(layout.FitANSIWidth(m.syscallFilter.View()+m.theme.modalHint(countStr), rowW))
+	sb.WriteString(" " + layout.FitANSIWidth(m.syscallFilter.View()+m.theme.modalHint(countStr), rowW-1))
 	sb.WriteString("\n")
-	sb.WriteString(layout.FitANSIWidth(m.syscallLegend(), rowW))
+	sb.WriteString(" " + layout.FitANSIWidth(m.syscallLegend(), rowW-1))
 	sb.WriteString("\n\n")
-	m.modalListRow = 5 // title + scope + filter + legend + blank
+	m.modalListRow = 6 // title + blank + scope + filter + legend + blank
 	top := layout.VisualTop(m.syscallSel, m.syscallTop, len(rows), visible, func(int) int { return 1 })
 	m.syscallTop = top
-	end := min(top+visible, len(rows))
-	for i := top; i < end; i++ {
+	// Always emit exactly `visible` rows (padding with blanks past the last hit) so
+	// the modal keeps a constant height and doesn't bounce vertically as the filter
+	// narrows the list.
+	blankRow := layout.PadVisual("", rowW)
+	// No rows (an over-narrow filter, or a still-running full scan): a single
+	// centred message in the middle of the reserved row area.
+	emptyMsg := ""
+	if len(rows) == 0 {
+		switch {
+		case full && m.syscallFullRunning:
+			emptyMsg = "scanning binary + libraries…"
+		case full && m.syscallFullDone:
+			emptyMsg = "no syscalls found in the binary or its libraries"
+		case m.syscallFilter.Value() != "":
+			emptyMsg = "no syscalls match the filter"
+		default:
+			emptyMsg = "no syscalls"
+		}
+	}
+	for row := 0; row < visible; row++ {
+		i := top + row
+		if i >= len(rows) {
+			if emptyMsg != "" && row == visible/2 {
+				sb.WriteString(centeredModalLine(m.theme.srcShadowStyle.Render(emptyMsg), rowW))
+			} else {
+				sb.WriteString(blankRow)
+			}
+			sb.WriteString("\n")
+			continue
+		}
 		h := rows[i].site
 		loc := h.Sym
 		if full { // in the full scope the originating object is more useful than the symbol
@@ -858,14 +908,6 @@ func (m *Model) renderSyscallModal() string {
 		}
 		sb.WriteString(line)
 		sb.WriteString("\n")
-	}
-	// Full scope: while the library scan runs, or if it found nothing, say so.
-	if full && len(rows) == 0 {
-		msg := "scanning binary + libraries…"
-		if m.syscallFullDone {
-			msg = "no syscalls found in the binary or its libraries"
-		}
-		sb.WriteString(" " + m.theme.srcShadowStyle.Render(msg) + "\n")
 	}
 	// Full scope: list libraries that couldn't be scanned, mirroring the dump.
 	if full && len(m.syscallFullNotes) > 0 {

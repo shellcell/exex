@@ -100,6 +100,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.jumpActive {
 		return m.updateJumpModal(key)
 	}
+	if m.findActive {
+		return m.updateFindModal(key)
+	}
+	if m.findResultsActive {
+		return m.updateFindResultsModal(msg, key)
+	}
 	if m.settingsActive {
 		return m.updateSettings(key)
 	}
@@ -487,6 +493,9 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	case actionJumpCaret:
 		m.openJumpModal()
+		return m, nil, true
+	case actionFindCaret:
+		m.openFindModal()
 		return m, nil, true
 	}
 	return m, nil, false

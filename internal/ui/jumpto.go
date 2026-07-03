@@ -330,28 +330,67 @@ func (m *Model) caretContextLine(c caret) string {
 	return strings.Join(parts, "  ·  ")
 }
 
-// caretPointer, when the pointer-sized word at addr is itself a mapped address
-// (a GOT slot, a vtable entry, a relocated pointer), describes where it points —
-// the most useful single fact about a data slot. Empty otherwise.
-func (m *Model) caretPointer(addr uint64) string {
+// caretPointerValue reads the pointer-sized little-endian word at addr, returning
+// it when it is itself a mapped address (a GOT slot, a vtable entry, a relocated
+// pointer). ok is false when there are no bytes there or the word isn't a mapped
+// address.
+func (m *Model) caretPointerValue(addr uint64) (uint64, bool) {
 	img := m.file.VAImage()
 	if img == nil {
-		return ""
+		return 0, false
 	}
 	pos, ok := img.PosForAddr(addr)
 	if !ok {
-		return ""
+		return 0, false
 	}
 	ps := m.file.PointerBytes()
 	b := img.Bytes(pos, pos+ps)
 	if len(b) < ps {
-		return ""
+		return 0, false
 	}
 	var v uint64
 	for i := ps - 1; i >= 0; i-- { // little-endian word
 		v = v<<8 | uint64(b[i])
 	}
 	if v == 0 || !m.file.IsMapped(v) {
+		return 0, false
+	}
+	return v, true
+}
+
+// caretPointerAt reads the pointer-width little-endian word at the caret — by
+// virtual address when it has one, else straight from the raw bytes at its file
+// offset — returning it when it is itself a mapped address. This lets a Raw caret
+// over an unmapped region (a header, padding) still search for the pointer it
+// holds.
+func (m *Model) caretPointerAt(c caret) (uint64, bool) {
+	if c.hasAddr {
+		if v, ok := m.caretPointerValue(c.addr); ok {
+			return v, true
+		}
+	}
+	if c.hasOff {
+		raw := m.file.Raw()
+		ps := m.file.PointerBytes()
+		if c.off+uint64(ps) <= uint64(len(raw)) {
+			var v uint64
+			for i := ps - 1; i >= 0; i-- {
+				v = v<<8 | uint64(raw[c.off+uint64(i)])
+			}
+			if v != 0 && m.file.IsMapped(v) {
+				return v, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// caretPointer describes where the pointer at addr points, for the jump modal's
+// header — the most useful single fact about a data slot. Empty when there is no
+// mapped pointer there.
+func (m *Model) caretPointer(addr uint64) string {
+	v, ok := m.caretPointerValue(addr)
+	if !ok {
 		return ""
 	}
 	if ann := m.targetAnnotation(v); ann != "" {

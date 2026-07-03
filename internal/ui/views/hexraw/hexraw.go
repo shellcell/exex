@@ -157,6 +157,25 @@ func (st *State) HexCaretAddr() (uint64, bool) {
 // file bytes directly).
 func (st *State) RawCaretOffset() uint64 { return uint64(st.RawCur) }
 
+// CaretPointer returns the pointer-width word under the caret of the given mode,
+// aligned to the pointer-word boundary exactly like the follow-pointer action —
+// so pressing f mid-pointer searches for the same value Enter would follow. ok is
+// false when the word is out of range (the value need not be a mapped address:
+// any word is searchable).
+func (st *State) CaretPointer(ctx *view.Context, md Mode) (uint64, bool) {
+	data, cur, ok := st.activeData(ctx, md)
+	if !ok || data.Len() == 0 {
+		return 0, false
+	}
+	var addr uint64
+	if md == Hex {
+		addr = st.HexImg.AddrAt(cur)
+	} else {
+		addr = uint64(cur)
+	}
+	return st.readPointer(ctx, data, st.pointerWordStart(ctx, addr, cur))
+}
+
 // Update handles keys local to the Hex/Raw byte views. Shell-owned search keys
 // and symbol-name abbreviation are intercepted by the shell adapter.
 func (st *State) Update(ctx *view.Context, host view.Host, md Mode, key string) {

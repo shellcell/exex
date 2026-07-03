@@ -94,6 +94,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syscallFullDoneMsg:
 		return m.handleSyscallFullDone(msg)
 
+	case findPartialMsg:
+		return m.handleFindPartial(msg)
+
 	case disasmPrefetchMsg:
 		return m, nil
 

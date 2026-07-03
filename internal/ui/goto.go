@@ -22,18 +22,20 @@ const (
 	gkLib
 )
 
-func (k gotoKind) tag() string {
+// viewLabel names the view a result of this kind opens in, shown as a badge so a
+// mixed (All-scope) result list reads as "found in <view>".
+func (k gotoKind) viewLabel() string {
 	switch k {
 	case gkSymbol:
-		return "sym"
+		return "Symbols"
 	case gkSection:
-		return "sec"
+		return "Sections"
 	case gkString:
-		return "str"
+		return "Strings"
 	case gkLib:
-		return "lib"
+		return "Libs"
 	default:
-		return "addr"
+		return "Address"
 	}
 }
 

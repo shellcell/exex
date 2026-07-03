@@ -305,6 +305,34 @@ type jumpState struct {
 	jumpSel     int
 }
 
+// findState stores the "Find from here" flow: a seed picker (candidate searches
+// derived from the caret) feeding a global value search whose results — disasm
+// operand references, data-word occurrences, string matches and reloc targets —
+// are listed in one modal, tagged and filterable by the view they belong to.
+type findState struct {
+	// Seed picker.
+	findActive bool
+	findSeeds  []findSeed
+	findSel    int
+
+	// Global-search results modal.
+	findResultsActive bool
+	findRunning       bool
+	findSeq           int
+	findCancel        chan struct{}
+	findQuery         findQuery
+	findHits          []findHit
+	findShown         []int // indices into findHits after facet + text filter
+	findResSel        int
+	findResTop        int
+	findFacet         findFacet // which view's hits to show (all / disasm / data / …)
+	findFilter        textinput.Model
+	findFiltering     bool
+	findTotal         int     // hits in the active facet before the text filter
+	findPending       int     // source scans still running (0 = done)
+	findFacetPending  [5]bool // per-facet: is that source still scanning? (index by findFacet)
+}
+
 // searchState stores modal and async state for view searches.
 type searchState struct {
 	searchInput      textinput.Model
@@ -393,6 +421,7 @@ type Model struct {
 	interactionState
 	gotoState
 	jumpState
+	findState
 	searchState
 	settingsState
 	xrefState

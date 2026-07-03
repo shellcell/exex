@@ -1,8 +1,9 @@
 package ui
 
-// Shell-side Info view adapter. The normal overview page lives in
-// internal/ui/views/info; archive-member browsing and fat-arch switching stay
-// here because they replace the whole Model.
+// Shell-side Info actions. The overview page itself lives in
+// internal/ui/views/info; archive-member browsing (archive.go) and fat-arch
+// switching stay in the shell because they replace the whole Model — the same
+// boundary as libopen.go's open-as-primary.
 
 import (
 	tea "charm.land/bubbletea/v2"

@@ -462,22 +462,24 @@ func (st *State) row(ctx view.Context, i int, selected bool) string {
 	indent := strings.Repeat(" ", row.Depth*layout.TreeIndent)
 	lib := ctx.File.Info.DynamicLibs[n.Leaf]
 	display := n.Label // basename in tree mode, full path in flat mode
-	// Mark libs that aren't openable on disk: dim them and tag the reason.
-	tag := ""
+	// Tag a library's provenance. Cache libraries are openable (extracted from
+	// the dyld shared cache), so they keep their path colour; only libraries we
+	// can't locate at all are dimmed.
+	tag, dim := "", false
 	switch st.libAvail(ctx, lib) {
 	case libInCache:
 		tag = "  ·cache"
 	case libMissing:
-		tag = "  ·missing"
+		tag, dim = "  ·missing", true
 	}
 	if !ctx.Wrap {
 		display = layout.TruncateMiddle(display, max(1, ctx.Width-len(indent)-2-len(tag)))
 	}
 	var line string
-	if tag != "" {
+	if dim {
 		line = " " + indent + ctx.ShadowStyle.Render(display+tag)
 	} else {
-		line = " " + indent + ctx.PathStyle(lib, display)
+		line = " " + indent + ctx.PathStyle(lib, display) + ctx.ShadowStyle.Render(tag)
 	}
 	if selected {
 		return ctx.SelStyle.Render(ansi.Strip(line))

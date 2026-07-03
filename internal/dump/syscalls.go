@@ -356,17 +356,9 @@ func SyscallsFull(f *binfile.File) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "binary + %d libraries scanned\n", objs-1)
 	writeSyscallsUniqueOrigin(&b, sites)
-	// On macOS the system libraries (including libsystem_kernel, which holds the
-	// actual svc instructions) live in the dyld shared cache rather than as files,
-	// so they can't be opened and scanned — and app/framework code itself almost
-	// never makes direct syscalls. Collapse the per-library spam into one note.
-	if f.Format == binfile.FormatMachO && len(notes) > 0 {
-		fmt.Fprintf(&b, "· %d system libraries are in the dyld shared cache (not standalone files) — their syscalls can't be scanned\n", len(notes))
-	} else {
-		for _, n := range notes {
-			b.WriteString(n)
-			b.WriteByte('\n')
-		}
+	for _, n := range notes {
+		b.WriteString(n)
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
@@ -392,14 +384,72 @@ func CollectSyscallsFullCancel(f *binfile.File, done <-chan struct{}) (sites []S
 	if f.Info == nil || scanCancelled(done) {
 		return sites, objects, notes
 	}
-	seen := map[string]bool{}
+
+	// The dependency graph is walked breadth-first. On-disk libraries are scanned
+	// but not followed (their own libc dependency is the same one already in the
+	// binary's direct list). Cache-resident libraries — macOS system dylibs — are
+	// extracted from the shared cache and *are* followed, because the library that
+	// holds the svc instructions (libsystem_kernel) is reached only transitively
+	// through the libSystem.B re-export umbrella.
+	cache := newCacheScanner(f.Arch().String())
+	defer cache.close()
+
+	type ref struct {
+		lib   string
+		depth int
+	}
+	queue := make([]ref, 0, len(f.Info.DynamicLibs))
 	for _, lib := range f.Info.DynamicLibs {
+		queue = append(queue, ref{lib, 1})
+	}
+	seen := map[string]bool{}
+	cacheObjects := 0
+	var cacheNotified bool
+
+	for i := 0; i < len(queue); i++ {
 		if scanCancelled(done) {
 			break
 		}
-		path, ok := explorer.ResolveLibPath(lib, f.Path, f.Info, nil)
+		r := queue[i]
+		if seen[r.lib] {
+			continue
+		}
+		seen[r.lib] = true
+
+		// Cache-resident system libraries (/usr/lib/*, /System/Library/*) take the
+		// cache path first: macOS leaves stub files at those paths that `stat`
+		// succeeds on but that carry no code, so resolving them "on disk" would
+		// scan an empty shell and — worse — never follow the LC_REEXPORT chain that
+		// reaches libsystem_kernel. Extract them from the shared cache instead and
+		// follow their dependencies so the transitive syscall surface is covered.
+		if explorer.IsDyldSharedCacheLib(r.lib) {
+			if cacheObjects >= maxCacheScanObjects || r.depth > maxCacheScanDepth {
+				continue
+			}
+			lf, ok := cache.file(r.lib)
+			if !ok {
+				if !cache.available() && !cacheNotified {
+					notes = append(notes, "· dyld shared cache not available — system-library syscalls can't be scanned")
+					cacheNotified = true
+				}
+				continue
+			}
+			sites = append(sites, scanObjectCancel(lf, baseLibName(r.lib), done)...)
+			objects++
+			cacheObjects++
+			for _, dep := range cache.deps(lf) {
+				if !seen[dep] {
+					queue = append(queue, ref{dep, r.depth + 1})
+				}
+			}
+			continue
+		}
+
+		// Ordinary on-disk dependency (bundled or third-party): scan it, but don't
+		// follow its deps — its own libc is the same system one handled above.
+		path, ok := explorer.ResolveLibPath(r.lib, f.Path, f.Info, nil)
 		if !ok {
-			notes = append(notes, "· "+lib+" — not resolved on disk")
+			notes = append(notes, "· "+r.lib+" — not resolved on disk")
 			continue
 		}
 		if seen[path] {
@@ -408,14 +458,30 @@ func CollectSyscallsFullCancel(f *binfile.File, done <-chan struct{}) (sites []S
 		seen[path] = true
 		lf, err := binfile.Open(path)
 		if err != nil {
-			notes = append(notes, "· "+lib+" — open failed: "+err.Error())
+			notes = append(notes, "· "+r.lib+" — open failed: "+err.Error())
 			continue
 		}
-		sites = append(sites, scanObjectCancel(lf, lib, done)...)
+		sites = append(sites, scanObjectCancel(lf, r.lib, done)...)
 		objects++
 		lf.Close()
 	}
 	return sites, objects, notes
+}
+
+// Bounds on the cache-resident dependency walk: deep enough to reach
+// libsystem_kernel through libSystem.B (app→umbrella→kernel is depth 2) with
+// headroom, and capped so a pathological graph can't extract the whole cache.
+const (
+	maxCacheScanDepth   = 4
+	maxCacheScanObjects = 256
+)
+
+// baseLibName trims a library install path to its basename for the origin tag.
+func baseLibName(lib string) string {
+	if i := strings.LastIndexByte(lib, '/'); i >= 0 {
+		return lib[i+1:]
+	}
+	return lib
 }
 
 // SyscallsArchive summarises the system calls provided by a static-library (ar)

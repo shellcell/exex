@@ -287,9 +287,10 @@ The shell keeps one field per converted view on `Model` (`m.relocs`,
 `(m.viewContext(), m)`. Cross-view routing that needs shell internals stays in
 the shell: `openSymbol`/`canDisasmAt`/`displaySymbolName` live in
 `symbolopen.go`, the `-s` flag's `openStringSearch` (which switches modes) in
-`stringsearch.go`, byte-view address/offset opens in `byteopen.go`, and the Libs
+`stringsearch.go`, byte-view address/offset opens in `byteopen.go`, the Libs
 view's model-swapping `openLibAsPrimary` + mode-switching `openSymbolsForLib` in
-`libopen.go`; views reach such actions via `view.Host`.
+`libopen.go`, and the Info view's fat-arch/archive-member model swaps in
+`infoopen.go` + `archive.go`; views reach such actions via `view.Host`.
 
 Views not yet converted (disasm) still live as `Model` methods in `view_*.go`
 files with their state embedded in `Model`; the `modeView` interface already

@@ -278,7 +278,14 @@ func (f *File) loadMachO() error {
 				symNames[i] = mf.Symtab.Syms[i].Name
 			}
 		}
-		f.relocBuild = func() []Reloc { return machoRelocs(mf, base, symNames) }
+		raw := f.raw
+		f.relocBuild = func() []Reloc {
+			out := machoRelocs(mf, base, symNames)
+			// A linked image carries its relocations as dyld bind/rebase or chained
+			// fixups rather than per-section relocs; decode those too so the view is
+			// populated for real executables and dylibs, not just object files.
+			return append(out, machoDynamicFixups(mf, raw, base)...)
+		}
 	}
 
 	// Defer the DWARF decode (abbrev/section parse — a big slice of Open for debug
@@ -614,7 +621,7 @@ func machoHasRelocs(mf *macho.File) bool {
 			return true
 		}
 	}
-	return false
+	return machoHasDynamicFixups(mf)
 }
 
 // machoHasDWARF reports whether DWARF is available without parsing it: an

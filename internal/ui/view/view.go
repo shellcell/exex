@@ -93,6 +93,10 @@ type Styles struct {
 	PathStyle func(keyPath, display string) string
 	// SymbolDisplay returns the shell-wide display spelling for a symbol name.
 	SymbolDisplay func(binfile.Symbol) string
+	// SymNameDisplay returns the display spelling for a bare symbol name (no
+	// Symbol record), demangled per the current settings — used by the relocs view
+	// for its bind targets, which carry only the raw linker name.
+	SymNameDisplay func(name string) string
 	// TargetAnnotation labels a mapped address with a symbol or section name.
 	TargetAnnotation func(addr uint64) string
 	// LMANote formats a section's physical/load address as a banner suffix.

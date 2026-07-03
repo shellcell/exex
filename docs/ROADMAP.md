@@ -495,7 +495,8 @@ Then:
 Both delivered: `internal/dyldcache` (reader + `ExtractImage` un-sharer),
 wired into `libopen.go` (open as primary) and `dump/syscalls.go` (transitive
 cache-resident scan). Not attempted: reconstructing chained fixups for a cache
-dylib (its relocs stay empty — see the Mach-O dynamic-fixups item).
+dylib (its relocs stay empty — the cache pre-applies them; see item #38 for the
+on-disk Mach-O fixups decoder).
 
 ## 34. CPU-feature detection  ✅ (done)
 
@@ -542,3 +543,63 @@ Reduce duplication and the cache-invalidation bug surface in `internal/ui`:
 - **UX consistency pass**: a uniform address vocabulary (`synthetic` / `load`
   (LMA) / physical) across disasm/hex/sections/Info, and group the `?` help by
   the same role order as the footer hints.
+
+## 38. Mach-O dynamic fixups decoder (relocs)  ✅ (done)
+
+The Relocations view was empty for essentially every real macOS binary: a linked
+Mach-O carries its relocations not as the per-section relocs `debug/macho` parses
+(those exist only in object files) but as dyld metadata, in one of two shapes —
+`LC_DYLD_INFO(_ONLY)` compact bind/rebase opcode streams (the classic format, and
+what the Go linker still emits) or `LC_DYLD_CHAINED_FIXUPS` in-place pointer
+chains (the modern system-toolchain format, e.g. `/bin/ls`).
+
+`internal/binfile/macho_fixups.go` decodes both into the neutral `Reloc` model:
+binds become named entries resolved to their imported symbol + library (the
+useful part — the image's import table), rebases record the slid pointer slots;
+arm64e authenticated pointers surface as `AUTH_BIND` / `AUTH_REBASE`. Wired into
+the lazy `relocBuild` hook so it costs nothing until the relocs view/`-o relocs`
+is opened, and `machoHasRelocs` reports true off a cheap load-command scan.
+Validated byte-for-byte against the system `dyld_info` (exact bind/rebase counts
+and addresses for `/bin/ls` chained and a Go binary's DYLD_INFO). Note: dylibs
+un-shared from the dyld cache still show empty relocs — the cache already applied
+the fixups and un-sharing drops the (now meaningless) fixup commands.
+
+Follow-ups landed with it: reloc bind targets are now demangled (Itanium/Rust
+in-process, in both the TUI and `-o relocs`), and the relocs view gained the
+shared row-navigation surface — `d`/`h`/`m` jump to the patched address in
+disasm/hex/raw, `e` toggles argument abbreviation, double-click follows to hex,
+and the text filter matches the demangled spelling.
+
+## 39. Performance / footprint review  (plan)
+
+A whole-binary pass on size, startup, CPU and RAM — recording where things stand
+and where the real (vs imagined) headroom is, so future work targets measured
+costs, not guesses. Baseline (arm64, Go 1.26, this tree):
+
+- **Binary size** — 15.2 MB dev build; **11.5 MB stripped** (`-s -w`, the default
+  release) ; **9.9 MB lite** (drops Chroma). Composition: runtime ~4 MB, reflection
+  type metadata ~3.7 MB, `golang.org/x/arch` disassembler 1.25 MB, Chroma +
+  regexp2 ~0.8 MB (already `lite`-gated), `uax29` 0.32 MB (terminal width, via
+  `x/ansi`/`go-runewidth` — unavoidable), `yaml.v3` 0.32 MB (config), exex ~1 MB.
+- **Startup** — ~1 ms warm (`ui.New` 455 KB alloc); parse (cold open) ~7 ms.
+- **RAM** — retained-after-load heap **2.9 MB** (excellent); peak-heap-in-use
+  ~138 MB and peak RSS ~204 MB, but that is the perfreport *render/decode
+  benchmark* churning, not steady state.
+
+So the headline levers (strip, Chroma-gating) are **already done**. Genuine,
+ranked opportunities remaining:
+
+1. **Render/decode allocation churn** (highest value): the ~138 MB transient peak
+   vs 2.9 MB retained says the disasm decode + full-frame render paths allocate
+   heavily per pass. Profile (`-o disasm-all` and the TUI warm-render bench), then
+   pool/reuse the per-row and per-instruction buffers. Pure win, no UX change.
+2. **Per-host-arch disasm build** — `x/arch` (1.25 MB) links every arch; an
+   opt-in single-arch tag (host only) would shave ~0.5–0.8 MB for distro builds.
+   Marginal, and complicates the matrix — low priority.
+3. **`yaml.v3` → a smaller config decoder** (~0.3 MB). Config is user-facing, so
+   low ROI and some churn risk; only if a hand-rolled reader is otherwise wanted.
+4. **Reflection type metadata (~3.7 MB)** is the largest reducible block but the
+   hardest — it tracks the reflect/encoding usage across deps; not worth chasing
+   without a specific offender identified by `-gcflags=-m`/deadcode analysis.
+
+Not a concern (measured, left alone): startup time, retained heap, `uax29`.

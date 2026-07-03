@@ -81,6 +81,7 @@ type layoutState struct {
 // colour cache is keyed by raw instruction text, which carries no symbol name.)
 func (m *Model) clearSymbolNameCaches() {
 	m.disasmHeightCache = nil
+	m.relocs.DropCaches() // reloc bind targets render demangled/abbreviated names
 }
 
 // clearAllViewCaches drops all row caches affected by global layout toggles.

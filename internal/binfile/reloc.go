@@ -28,9 +28,9 @@ type Reloc struct {
 }
 
 // Relocations returns the binary's relocation entries, building them on first
-// call. The slice may be empty (e.g. a fully-resolved static binary, or a
-// Mach-O that uses dyld chained fixups, which the standard library does not
-// decode).
+// call. The slice may be empty (e.g. a fully-resolved static binary). A linked
+// Mach-O's dyld bind/rebase and chained fixups are decoded (machoDynamicFixups),
+// not just the object-file per-section relocs the standard library exposes.
 func (f *File) Relocations() []Reloc {
 	f.relocOnce.Do(func() {
 		if f.relocBuild != nil {
@@ -215,7 +215,7 @@ func elfRelocTypeNamer(m elf.Machine) func(uint32) string {
 
 // machoRelocs collects the per-section relocations the standard library parses
 // (chiefly object files; linked images use dyld bind/rebase or chained fixups,
-// which it does not decode). symNames is indexed like the original Mach-O symtab;
+// decoded separately by machoDynamicFixups). symNames is indexed like the original Mach-O symtab;
 // only names are retained so the bulky parsed symtab can be dropped after load.
 // base is the slice's virtual-address base.
 func machoRelocs(mf *macho.File, base uint64, symNames []string) []Reloc {

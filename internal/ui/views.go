@@ -224,7 +224,7 @@ func (v libsView) hints() []footerHint {
 }
 
 func (v relocsView) hints() []footerHint {
-	return []footerHint{{"↵", "go to patched addr"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "s"), "type/section"}, {"/", "filter"}}
+	return []footerHint{{"↵", "hex"}, {"d/h/m", "go to"}, {"e", "args"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "s"), "type/section"}, {"/", "filter"}, {"⇧a/⇧s", "copy"}}
 }
 
 // lineText: plain text of the current row, for the copy-line (⇧L) action. Only
@@ -355,6 +355,13 @@ func (v libsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	return v.Model, nil
 }
 func (v relocsView) handleKey(_ tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
+	// Reloc bind targets are demangled symbol names, so the global argument-
+	// abbreviation toggle (`e`, shared with the disasm/symbols views) applies here
+	// too — it flips the state and drops the reloc row cache via SymbolNamesChanged.
+	if key == "e" {
+		v.symbols.ToggleAbbrevAll(v.Model)
+		return v.Model, nil
+	}
 	v.relocs.Update(v.viewContext(), v.Model, key)
 	return v.Model, nil
 }

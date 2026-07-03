@@ -84,6 +84,7 @@ func (m *Model) viewStyles() *view.Styles {
 		SectionAtOffset:  m.sectionAtOffset,
 		PathStyle:        func(keyPath, display string) string { return m.theme.colorPathByPrefix(keyPath, display) },
 		SymbolDisplay:    func(sym binfile.Symbol) string { return m.displaySymbolName(sym) },
+		SymNameDisplay:   func(name string) string { return m.displaySymName(name) },
 		TargetAnnotation: func(addr uint64) string { return m.targetAnnotation(addr) },
 		LMANote:          func(phys uint64) string { return m.lmaNote(phys) },
 		AddrForOffset:    func(off uint64) (uint64, bool) { return m.addrForOffset(off) },

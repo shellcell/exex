@@ -80,6 +80,7 @@ func (st *State) Recompute(ctx view.Context) {
 		}
 		if needle == "" ||
 			layout.ContainsFold(rels[i].Sym, needle) ||
+			(rels[i].Sym != "" && ctx.SymNameDisplay != nil && layout.ContainsFold(ctx.SymNameDisplay(rels[i].Sym), needle)) ||
 			layout.ContainsFold(rels[i].Type, needle) ||
 			layout.ContainsFold(rels[i].Section, needle) {
 			st.Filtered = append(st.Filtered, i)
@@ -207,6 +208,14 @@ func (st *State) Update(ctx view.Context, host view.Host, key string) {
 		if r, ok := st.current(ctx); ok && r.Offset != 0 {
 			host.JumpHexAtAddr(r.Offset)
 		}
+	case "d": // disassemble at the patched address (falls back to hex if it's data)
+		if r, ok := st.current(ctx); ok && r.Offset != 0 {
+			host.JumpDisasmAtAddr(r.Offset)
+		}
+	case "m": // raw bytes at the patched address
+		if r, ok := st.current(ctx); ok && r.Offset != 0 {
+			host.JumpRawAtAddr(r.Offset)
+		}
 	case "S":
 		if r, ok := st.current(ctx); ok && r.Sym != "" {
 			host.CopyToClipboard(r.Sym, "symbol")
@@ -333,6 +342,9 @@ func (st *State) row(ctx view.Context, ri, addrW int) string {
 func (st *State) rowText(ctx view.Context, ri, addrW int) string {
 	r := ctx.File.Relocations()[ri]
 	target := r.Sym
+	if target != "" && ctx.SymNameDisplay != nil {
+		target = ctx.SymNameDisplay(target)
+	}
 	if r.HasAddend {
 		add := fmt.Sprintf("0x%x", uint64(r.Addend))
 		if target != "" {
@@ -359,7 +371,7 @@ func (st *State) rowText(ctx view.Context, ri, addrW int) string {
 func emptyHint(f binfile.Format) string {
 	switch f {
 	case binfile.FormatMachO:
-		return "No relocations to show — this Mach-O uses dyld chained fixups, which aren't decoded yet."
+		return "No relocations — this Mach-O has no dyld bind/rebase, chained fixups, or per-section relocations."
 	case binfile.FormatPE:
 		return "No relocations — this PE has no base-relocation directory (it loads at a fixed address)."
 	}

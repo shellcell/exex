@@ -83,6 +83,38 @@ func TestLibsRelocsMode(t *testing.T) {
 	}
 }
 
+// TestRelocsViewKeys exercises the relocs view's shared navigation surface: the
+// `e` argument-abbreviation toggle (its bind targets are demangled symbol names,
+// like Symbols/disasm) and the d/h/m jumps to the patched address.
+func TestRelocsViewKeys(t *testing.T) {
+	h := newKeyHarness(t, systemBinary(t))
+	h.goView(modeRelocs, "0")
+	if len(h.m().file.Relocations()) == 0 {
+		t.Skip("no decoded relocations to navigate")
+	}
+
+	// `e` flips the global argument-abbreviation state (shared with Symbols/disasm)
+	// and must not leave the relocs view.
+	abbrev0 := h.m().symbols.Abbrev
+	h.press("e")
+	if h.m().symbols.Abbrev == abbrev0 {
+		t.Error("e did not toggle argument abbreviation from the relocs view")
+	}
+	if h.m().mode != modeRelocs {
+		t.Errorf("e left the relocs view: mode = %v", h.m().mode)
+	}
+	h.press("e") // toggle back
+
+	// d/h/m jump to the patched address in the disasm/hex/raw views.
+	for key, want := range map[string]mode{"h": modeHex, "m": modeRaw} {
+		h.goView(modeRelocs, "0")
+		h.press(key)
+		if h.m().mode != want {
+			t.Errorf("relocs %q: mode = %v, want %v", key, h.m().mode, want)
+		}
+	}
+}
+
 // TestSyscallRowsScopes checks the modal's scope views: function, whole binary
 // and unique (with counts).
 func TestSyscallRowsScopes(t *testing.T) {

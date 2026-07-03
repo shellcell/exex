@@ -64,3 +64,22 @@ func (m *Model) displaySymbolName(s binfile.Symbol) string {
 	}
 	return s.Display()
 }
+
+// displaySymName is displaySymbolName for a bare linker name (a reloc bind target
+// has no Symbol record): demangle it in-process unless the "Demangle symbols"
+// setting is off, then apply the same argument-abbreviation collapse, so a reloc
+// target reads like the same symbol does in the Symbols/disasm views. An
+// unrecognised mangling (or an already-plain C name) is returned unchanged.
+func (m *Model) displaySymName(name string) string {
+	if name == "" || m.cfg.Behavior.NoDemangle {
+		return name
+	}
+	d := binfile.DemangleName(name)
+	if d == "" {
+		return name
+	}
+	if m.symbols.Abbrev {
+		return symbols.AbbrevBrackets(d)
+	}
+	return d
+}

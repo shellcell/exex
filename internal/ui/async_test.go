@@ -56,6 +56,27 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 	}
 }
 
+// TestSyscallEmptyFallsBackToFullScope: a direct scan that finds nothing (e.g. a
+// macOS executable, whose syscalls all live in libsystem_kernel via the cache)
+// must still open the modal — in full (+libs) scope, with the transitive scan
+// kicked off — instead of a bare "no syscalls found".
+func TestSyscallEmptyFallsBackToFullScope(t *testing.T) {
+	f := &binfile.File{}
+	m := &Model{file: f}
+	m.syscallRunning = true
+	m.syscallSeq = 3
+	_, cmd := m.handleSyscallDone(syscallDoneMsg{file: f, seq: 3, sites: nil})
+	if !m.syscallActive {
+		t.Fatal("modal did not open on an empty direct scan")
+	}
+	if m.syscallScope != sysScopeFull {
+		t.Fatalf("scope = %d, want full (%d)", m.syscallScope, sysScopeFull)
+	}
+	if !m.syscallFullRunning || cmd == nil {
+		t.Fatalf("full (+libs) scan was not started: running=%v cmd=%v", m.syscallFullRunning, cmd != nil)
+	}
+}
+
 func TestCancelSyscallFullScanClosesChannelAndIgnoresLateResult(t *testing.T) {
 	f := &binfile.File{}
 	done := make(chan struct{})

@@ -470,7 +470,7 @@ func (m *Model) handleDoubleClick() {
 	switch m.mode {
 	case modeDisasm:
 		m.followCurrentDisasm()
-	case modeSections, modeSymbols, modeStrings, modeSources, modeLibs:
+	case modeSections, modeSymbols, modeStrings, modeSources, modeLibs, modeRelocs:
 		m.dispatchViewKey(nil, "enter")
 	}
 }

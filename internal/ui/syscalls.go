@@ -374,8 +374,7 @@ func (m *Model) startSyscallScan() tea.Cmd {
 	all := m.file.DisasmAll()
 	if sites, ok := m.syscallCached[all]; ok {
 		if len(sites) == 0 {
-			m.setStatus("no syscalls found (cached)", true)
-			return nil
+			return m.openSyscallFullFallback()
 		}
 		m.openSyscallResults(sites)
 		m.setSyscallStatus(sites)
@@ -507,12 +506,37 @@ func (m *Model) handleSyscallDone(msg syscallDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.syscallCached[m.file.DisasmAll()] = msg.sites
 	if len(msg.sites) == 0 {
-		m.setStatus("no syscalls found", true)
-		return m, nil
+		return m, m.openSyscallFullFallback()
 	}
 	m.openSyscallResults(msg.sites)
 	m.setSyscallStatus(msg.sites)
 	return m, nil
+}
+
+// openSyscallFullFallback opens the modal straight in full (binary + libs) scope
+// when the image itself has no direct syscall sites. A macOS executable never
+// traps to the kernel itself — its syscalls live in libsystem_kernel, reached
+// through the dyld shared cache — so rather than a bare "none found" that hides
+// where the syscalls actually are, we surface the transitive scan (a statically
+// linked ELF with none of its own works the same way against its libraries).
+func (m *Model) openSyscallFullFallback() tea.Cmd {
+	m.syscallResults = nil
+	m.syscallSel, m.syscallTop = 0, 0
+	m.syscallFilter.SetValue("")
+	m.syscallFilter.Blur()
+	m.syscallFiltering = false
+	m.syscallScope = sysScopeFull
+	m.rebuildSyscallRows()
+	m.syscallActive = true
+	if m.syscallFullDone {
+		m.setStatus("no direct syscalls — showing libraries · "+m.scopeLabel(), false)
+		return nil
+	}
+	m.setStatus("no direct syscalls — scanning libraries … (Esc cancels)", false)
+	if !m.syscallFullRunning {
+		return m.startSyscallFullScan()
+	}
+	return nil
 }
 
 func (m *Model) openSyscallResults(sites []dump.SyscallSite) {

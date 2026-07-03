@@ -281,6 +281,9 @@ scripts via `-o`.
 | `addr2line` | address → source `file:line` via DWARF | live in the source pane and Sources view — address ↔ source, both directions |
 | `size` | section/segment sizes | Info, Sections and Segments views |
 | `otool` (macOS) / `dumpbin` (Windows) | the Mach-O / PE counterparts of the above | a single tool across ELF, Mach-O and PE |
+| `dyld_info` (macOS) | inspect a Mach-O's dyld metadata: bind/rebase & chained fixups, dependent dylibs, exports | Relocs view decodes both dyld bind/rebase opcodes and chained fixups into a neutral table (`-o relocs`); Libs view lists dependent dylibs, including the re-export/weak/upward variants |
+| `dyld_shared_cache_util` (macOS) | list / extract dylibs from the dyld shared cache | opens a cache-resident system dylib straight from the Libs view (`o`), un-sharing it into a standalone, browsable Mach-O — no separate extraction step |
+| `dyld_usage` (macOS) | live-trace a process's dyld / shared-cache activity | exex resolves the shared cache *statically*: it follows a macOS binary's imports through the cache (e.g. libSystem → libsystem_kernel) to surface the transitive syscall surface — `-o syscalls-full` — without running the program |
 
 In one line: those tools each answer one question, print, and exit; exex answers
 all of them in one place, lets you **navigate** between them (follow a call into

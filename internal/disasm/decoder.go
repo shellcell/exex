@@ -87,8 +87,6 @@ type Inst struct {
 	Class InstClass
 }
 
-// Classify maps a rendered instruction's mnemonic to an InstClass. Exported so
-// callers that already hold an Inst.Text (e.g. after Range) can re-classify.
 // Mnemonic returns the instruction's first whitespace-delimited token, lowered.
 func Mnemonic(text string) string {
 	text = strings.TrimSpace(text)
@@ -108,6 +106,8 @@ func IsAddrLoad(op string) bool {
 	return false
 }
 
+// Classify maps a rendered instruction's mnemonic to an InstClass. Exported so
+// callers that already hold an Inst.Text (e.g. after Range) can re-classify.
 func Classify(text string) InstClass {
 	text = strings.TrimSpace(text)
 	sp := strings.IndexAny(text, " \t")

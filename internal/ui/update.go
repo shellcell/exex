@@ -176,9 +176,8 @@ func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	if (msg.file != nil && msg.file != m.file) || !m.disasmDecoding || msg.addr != m.disasmPendingAddr {
 		return m, nil
 	}
-	m.disasmInst = msg.insts
-	m.disasmPosLo = m.posLoFor(msg.posLo, msg.insts)
-	m.disasmPosHi = msg.posHi
+	m.disasmInst = msg.span.Insts
+	m.disasmPosLo, m.disasmPosHi = msg.span.PosLo, msg.span.PosHi
 	m.sourceAsmRowCache = nil
 	m.disasmHeightCache = nil
 	m.disasmBuilt = true
@@ -211,7 +210,7 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		m.searchCancelable = false
 		m.searchCancel = nil
 		if msg.hit != nil {
-			m.setDisasmWindow(msg.hit.win, msg.hit.insts)
+			m.setDisasmSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
 			m.disasmCur = msg.hit.idx
 			m.disasmTop = msg.hit.idx
 			m.disasmPositioned = true

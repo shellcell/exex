@@ -110,11 +110,7 @@ func newKeyHarness(t *testing.T, path string) *keyHarness {
 func (h *keyHarness) pump(msg tea.Msg) {
 	h.t.Helper()
 	h.model, _ = h.model.Update(msg)
-	if mm, ok := h.model.(*Model); ok && mm.disasmDecoding {
-		addr := mm.disasmPendingAddr
-		win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-		h.model, _ = h.model.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
-	}
+	h.model = settleDisasmDecode(h.model)
 	// Render every frame, exactly as the program loop does, so list/tree rows are
 	// always rebuilt before the next key (and any render panic is caught here).
 	if strings.TrimSpace(h.model.View().Content) == "" {

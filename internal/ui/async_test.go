@@ -6,6 +6,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/explorer"
 	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
@@ -23,7 +24,7 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 
 	m.disasmDecoding = true
 	m.disasmPendingAddr = 0x1000
-	if _, _ = m.handleDisasmReady(disasmReadyMsg{file: oldFile, addr: 0x1000, insts: []disasm.Inst{{Addr: 0x1000}}}); !m.disasmDecoding || len(m.disasmInst) != 0 {
+	if _, _ = m.handleDisasmReady(disasmReadyMsg{file: oldFile, addr: 0x1000, span: explorer.Span{Insts: []disasm.Inst{{Addr: 0x1000}}}}); !m.disasmDecoding || len(m.disasmInst) != 0 {
 		t.Fatalf("stale disasm ready was applied: decoding=%v insts=%d", m.disasmDecoding, len(m.disasmInst))
 	}
 

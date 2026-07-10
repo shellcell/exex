@@ -59,8 +59,7 @@ func RenderViewStats(f *binfile.File, w, h, runs int) []PerfStat {
 		// measured fully rendered, not mid-"decoding…".
 		for mm.disasmDecoding {
 			addr := mm.disasmPendingAddr
-			win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-			m, _ = mm.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
+			m, _ = mm.Update(disasmReadyMsg{addr: addr, span: mm.decodeDisasmAt(addr, mm.disasmLeadBytes())})
 			mm = m.(*Model)
 		}
 

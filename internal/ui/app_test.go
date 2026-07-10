@@ -41,11 +41,7 @@ func TestRenderAllViews(t *testing.T) {
 	pump := func(msg tea.Msg) {
 		t.Helper()
 		model, _ = model.Update(msg)
-		if mm, ok := model.(*Model); ok && mm.disasmDecoding {
-			addr := mm.disasmPendingAddr
-			win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-			model, _ = model.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
-		}
+		model = settleDisasmDecode(model)
 	}
 
 	pump(tea.WindowSizeMsg{Width: 120, Height: 40})

@@ -29,12 +29,8 @@ func benchView(b *testing.B, md mode) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 48})
 	mm := m.(*Model)
 	mm.switchMode(md)
-	for mm.disasmDecoding {
-		addr := mm.disasmPendingAddr
-		win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-		m, _ = mm.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
-		mm = m.(*Model)
-	}
+	m = settleDisasmDecode(m)
+	mm = m.(*Model)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

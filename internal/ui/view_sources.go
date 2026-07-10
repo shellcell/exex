@@ -271,12 +271,11 @@ func (m *Model) syncSourceAsm() {
 		return
 	}
 	// The disasm is windowed; load the span around this line's address if it
-	// isn't already loaded. setDisasmWindow leaves m.mode alone (we're in the
+	// isn't already loaded. setDisasmSpan leaves m.mode alone (we're in the
 	// Sources view), it just refreshes the instruction window the right pane
 	// renders.
 	if !m.disasmLoadedAddr(addr) {
-		win, insts := m.decodeDisasmAt(addr, m.disasmLeadBytes())
-		m.setDisasmWindow(win, insts)
+		m.setDisasmSpan(m.decodeDisasmAt(addr, m.disasmLeadBytes()))
 	}
 	m.disasmCur = m.instIndexAtOrAfterAddr(addr)
 	m.scrollDisasmContext(4)

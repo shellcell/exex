@@ -16,6 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/dump"
 	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 )
 
 // renderInstText colours an instruction's assembly text, caching the result.
@@ -312,54 +313,27 @@ func (m *Model) disasmInstVisualHeight(i, w int) int {
 	})
 }
 
-// instByteWidth is the number of instruction bytes the byte column is sized for:
-// the arch's longest encoding, so fixed-length RISC ISAs get a tight column
-// instead of x86's wide one.
-func (m *Model) instByteWidth() int {
-	return disasm.MaxInstLen(m.file.Arch())
-}
-
-// disasmByteColWidth is the printed width of the instruction-byte column, or 0
-// when it is hidden (behavior.hide_disasm_bytes). Compact is 2 hex chars per
-// byte; spaced inserts a space between bytes (3 per byte, less the trailing one).
-func (m *Model) disasmByteColWidth() int {
-	if m.cfg.Behavior.HideDisasmBytes {
-		return 0
-	}
-	n := m.instByteWidth()
-	if m.cfg.Behavior.SpacedDisasmBytes {
-		return n*3 - 1
-	}
-	return n * 2
+// disasmColumns is the row geometry for the current file and byte-column
+// settings. Cheap to build (a switch and a few adds), so it is computed where it
+// is used rather than cached on the Model, where a missed invalidation on a
+// settings toggle would silently misalign every row.
+func (m *Model) disasmColumns() disasmview.Columns {
+	return disasmview.NewColumns(
+		m.file.AddrHexWidth(),
+		disasm.MaxInstLen(m.file.Arch()),
+		m.cfg.Behavior.HideDisasmBytes,
+		m.cfg.Behavior.SpacedDisasmBytes,
+	)
 }
 
 // disasmBytes renders an instruction's bytes for the byte column, compact or
-// spaced per the setting, padded to disasmByteColWidth.
+// spaced per the setting, padded to the column width.
 func (m *Model) disasmBytes(b []byte) string {
+	n := disasm.MaxInstLen(m.file.Arch())
 	if m.cfg.Behavior.SpacedDisasmBytes {
-		return bytesHexSpaced(b, m.instByteWidth())
+		return bytesHexSpaced(b, n)
 	}
-	return bytesHex(b, m.instByteWidth())
-}
-
-func (m *Model) disasmAsmColumn() int {
-	col := 1 + 2 + m.file.AddrHexWidth() + 2 // lead space + "0x" + addr + gap
-	if bw := m.disasmByteColWidth(); bw > 0 {
-		col += bw + 2 // byte column + gap
-	}
-	return col
-}
-
-func (m *Model) disasmAnnotationColumn(w int) int {
-	// Keep annotations a short, fixed distance after the assembly column so they
-	// sit close to the code instead of drifting out to mid-pane on a wide,
-	// source-off disasm view. A long instruction pushes its own annotation
-	// further right (see disasmInstRows), so this is only the preferred column.
-	col := m.disasmAsmColumn() + 22
-	if hi := w - 12; col > hi {
-		col = max(m.disasmAsmColumn()+8, hi)
-	}
-	return col
+	return bytesHex(b, n)
 }
 
 func (m *Model) disasmLabelRows(name string, w int) []string {
@@ -385,8 +359,9 @@ func (m *Model) disasmLabelRows(name string, w int) []string {
 // disasmInstRows' row-splitting decisions exactly; TestDisasmInstRowCountMatches
 // pins the two together so they can't drift.
 func (m *Model) disasmInstRowCount(inst disasm.Inst, w int) int {
-	asmCol := m.disasmAsmColumn()
-	annCol := m.disasmAnnotationColumn(w)
+	cols := m.disasmColumns()
+	asmCol := cols.Asm
+	annCol := cols.Annotation(w)
 	// Syntax highlighting adds no visible width, so the plain aligned text's width
 	// matches the styled row's — no need to render (or cache-warm) the colours here.
 	asmEnd := asmCol + min(lipgloss.Width(dump.AlignAsm(inst.Text)), max(1, w-asmCol))
@@ -433,8 +408,9 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	if targetStyle != nil {
 		addrCol = targetStyle.Render(addrText)
 	}
-	asmCol := m.disasmAsmColumn()
-	annCol := m.disasmAnnotationColumn(w)
+	cols := m.disasmColumns()
+	asmCol := cols.Asm
+	annCol := cols.Annotation(w)
 	asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
 	note := ""
 	if !m.cfg.Behavior.HideAnnotations {
@@ -454,7 +430,7 @@ func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetSty
 	asmEnd := asmCol + lipgloss.Width(asmFit)
 
 	var asmRow string
-	if m.disasmByteColWidth() > 0 {
+	if cols.ByteColW > 0 {
 		asmRow = fmt.Sprintf(" %s  %s  ", addrCol, m.disasmBytes(inst.Bytes)) + asmFit
 	} else {
 		asmRow = fmt.Sprintf(" %s  ", addrCol) + asmFit

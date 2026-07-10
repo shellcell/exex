@@ -600,7 +600,7 @@ func (m *Model) sourceAsmRow(i, addrW, w int) string {
 		addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
 		asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
 		var line string
-		if m.disasmByteColWidth() > 0 {
+		if m.disasmColumns().ByteColW > 0 {
 			line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
 		} else {
 			line = fmt.Sprintf(" %s  %s", addr, asm)

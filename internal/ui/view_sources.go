@@ -16,6 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/dump"
 	sourceutil "github.com/rabarbra/exex/internal/sourcefiles"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 )
 
 // srcMatch is one hit from a cross-source grep.
@@ -600,10 +601,11 @@ func (m *Model) sourceAsmRow(i, addrW, w int) string {
 		// real disassembly.
 		addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
 		addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
-		asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
+		ctx := m.viewContextPtr()
+		asm := m.dasm.RenderInstText(ctx, dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
 		var line string
 		if m.disasmColumns().ByteColW > 0 {
-			line = fmt.Sprintf(" %s  %s  %s", addr, m.disasmBytes(inst.Bytes), asm)
+			line = fmt.Sprintf(" %s  %s  %s", addr, disasmview.InstBytes(ctx, inst.Bytes), asm)
 		} else {
 			line = fmt.Sprintf(" %s  %s", addr, asm)
 		}

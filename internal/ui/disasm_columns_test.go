@@ -8,6 +8,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/dump"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 )
 
 // TestAsmColumnMatchesTheRenderedPrefix ties Columns.Asm to the row format.
@@ -39,7 +40,7 @@ func TestAsmColumnMatchesTheRenderedPrefix(t *testing.T) {
 
 			cols := m.disasmColumns()
 			inst := m.dasm.Inst[0]
-			rows := m.disasmInstRows(inst, m.width, false, nil)
+			rows := m.dasm.InstRows(m.viewContextPtr(), inst, m.width, false, nil)
 			if len(rows) == 0 {
 				t.Fatal("disasmInstRows returned nothing")
 			}
@@ -81,7 +82,7 @@ func TestByteColumnWidthMatchesTheRenderedBytes(t *testing.T) {
 		// The longest encoding the column is sized for; a shorter instruction pads
 		// to the same width, which is what keeps the assembly column straight.
 		for _, inst := range m.dasm.Inst {
-			if got := ansi.StringWidth(m.disasmBytes(inst.Bytes)); got != cols.ByteColW {
+			if got := ansi.StringWidth(disasmview.InstBytes(m.viewContextPtr(), inst.Bytes)); got != cols.ByteColW {
 				t.Fatalf("spaced=%v: disasmBytes(%d bytes) printed width %d, ByteColW = %d",
 					spaced, len(inst.Bytes), got, cols.ByteColW)
 			}

@@ -1,135 +1,18 @@
 package ui
 
-// Disassembly rendering: instruction text colouring + annotations, the scroller
-// with its sticky symbol banner, column layout, and the side-by-side source
-// pane.
+// Disassembly rendering, shell side: composing the scroller (which lives in
+// internal/ui/views/disasm) with the side-by-side source pane, plus the
+// annotation vocabulary (targetAnnotation, lmaNote) shared with other views
+// through view.Styles.
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/layout"
 	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 )
-
-// renderInstText colours an instruction's assembly text, caching the result.
-func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
-	return m.dasm.AsmCache.Get(disasmview.AsmKey{Text: text, Addr: instAddr, Cls: class}, func() string {
-		return m.asmHighlighter().Render(text, class, m.disasmAddrSpans(text, instAddr))
-	})
-}
-
-// asmHighlighter returns the assembly highlighter for the current theme and
-// architecture, building it on first use. Which implementation that is depends on
-// the build tag, and internal/ui deliberately doesn't know: see internal/ui/asmhl.
-// Dropped (set nil) by clearColorCaches, so a theme change rebuilds it rather
-// than leaving its token-style cache stale.
-func (m *Model) asmHighlighter() asmhl.Highlighter {
-	if m.dasm.AsmHL == nil {
-		m.dasm.AsmHL = asmhl.New(sourceSyntaxTheme(m.cfg), sourceSyntaxForeground(m.cfg), m.file.Arch(), asmhl.Styles{
-			Class:    m.theme.styleForClass,
-			Plain:    m.theme.whiteStyle,
-			Register: m.theme.asmRegisterStyle,
-			Number:   m.theme.asmNumberStyle,
-		})
-	}
-	return m.dasm.AsmHL
-}
-
-// disasmAddrSpans finds the followable (mapped) address literals in text and the
-// link style each should use (intra- vs inter-function).
-func (m *Model) disasmAddrSpans(text string, instAddr uint64) []asmhl.Span {
-	if m.file == nil {
-		return nil
-	}
-	curSym, hasCur := m.file.SymbolAt(instAddr)
-	from := 0
-	var spans []asmhl.Span
-	for {
-		addr, start, end, ok := disasm.FindAddrOperand(text, from)
-		if !ok {
-			return spans
-		}
-		if m.file.IsMapped(addr) {
-			isIntra := hasCur && curSym.Size > 0 && addr >= curSym.Addr && addr < curSym.Addr+curSym.Size
-			linkSt := m.theme.linkAddrInterStyle
-			if isIntra {
-				linkSt = m.theme.linkAddrIntraStyle
-			}
-			spans = append(spans, asmhl.Span{Start: start, End: end, Style: linkSt})
-		}
-		from = end
-	}
-}
-
-func (m *Model) instAnnotation(text string, class disasm.InstClass) string {
-	annotate := class == disasm.ClassCall || class == disasm.ClassJumpUnc ||
-		class == disasm.ClassJumpCond || disasm.IsAddrLoad(disasm.Mnemonic(text))
-	from := 0
-	var notes []string
-	seen := map[string]bool{}
-	add := func(note string) {
-		if note == "" || seen[note] {
-			return
-		}
-		seen[note] = true
-		notes = append(notes, note)
-	}
-	for {
-		addr, _, end, ok := disasm.FindAddrOperand(text, from)
-		if !ok {
-			break
-		}
-		if m.file.IsMapped(addr) {
-			if annotate {
-				add(m.targetAnnotation(addr))
-			} else if sym, ok := m.file.SymbolAt(addr); ok && (sym.Kind == binfile.SymObject || sym.Kind == binfile.SymTLS || sym.Kind == binfile.SymCommon) {
-				add(m.targetAnnotation(addr))
-			}
-		}
-		from = end
-	}
-	return strings.Join(notes, ", ")
-}
-
-// relocNote describes any relocation whose patched address lies within the
-// instruction's bytes [addr, addr+n) — the resolved target of a placeholder
-// operand. "" when the instruction carries no relocation.
-func (m *Model) relocNote(addr uint64, n int) string {
-	// Only relocatable objects have relocs against code operands; gating on this
-	// (a cheap flag) keeps the lazy reloc build from ever firing for a linked
-	// binary that never needs it.
-	if n <= 0 || !m.file.IsRelocatable() || !m.file.HasRelocs() {
-		return ""
-	}
-	rs := m.file.RelocsInRange(addr, addr+uint64(n))
-	if len(rs) == 0 {
-		return ""
-	}
-	var parts []string
-	for _, r := range rs {
-		target := r.Sym
-		if target == "" {
-			target = r.Type // no symbol (e.g. a section-relative reloc): name the type
-		}
-		if r.HasAddend && r.Addend != 0 {
-			if r.Addend > 0 {
-				target += fmt.Sprintf("+0x%x", r.Addend)
-			} else {
-				target += fmt.Sprintf("-0x%x", -r.Addend)
-			}
-		}
-		parts = append(parts, "→ "+target)
-	}
-	return strings.Join(parts, ", ")
-}
 
 // targetAnnotation labels a follow-able address with whatever the reader is
 // most likely to want as context: the symbol name (with offset when not at
@@ -177,7 +60,7 @@ func (m *Model) renderDisasm() string {
 		rightW = m.width - leftW
 	}
 
-	sticky := m.renderStickySymbol(leftW)
+	sticky := m.dasm.RenderSticky(m.viewContextPtr(), leftW)
 	left := sticky + "\n" + m.renderDisasmScroll(leftW, bodyH-1)
 
 	if rightW == 0 {
@@ -187,102 +70,28 @@ func (m *Model) renderDisasm() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-// renderStickySymbol always shows which symbol (and offset within it) the
-// disasm cursor is currently parked on. Stays pinned regardless of scroll.
-func (m *Model) renderStickySymbol(w int) string {
-	if len(m.dasm.Inst) == 0 {
-		return layout.PadRight("", w)
-	}
-	addr := m.dasm.Inst[m.dasm.Cur].Addr
-	var text string
-	if sym, ok := m.file.SymbolAt(addr); ok {
-		off := addr - sym.Addr
-		if off == 0 {
-			text = fmt.Sprintf(" %s   @  0x%0*x", m.displaySymbolName(sym), m.file.AddrHexWidth(), addr)
-		} else {
-			text = fmt.Sprintf(" %s + 0x%x   @  0x%0*x", m.displaySymbolName(sym), off, m.file.AddrHexWidth(), addr)
-		}
-	} else {
-		text = fmt.Sprintf(" (no symbol)   @  0x%0*x", m.file.AddrHexWidth(), addr)
-	}
-	// Relocatable object: the address is synthetic — flag it and show the real
-	// (section-relative) position.
-	if m.file.SyntheticAddrs() {
-		if sec := m.file.SectionAt(addr); sec != nil {
-			text += fmt.Sprintf("   ~synthetic · %s+0x%x", sec.Name, addr-sec.Addr)
-		} else {
-			text += "   ~synthetic"
+// renderDisasmScroll renders the instruction scroller, choosing the per-row
+// address colouring: when the source pane is open (disasm-first), addresses
+// are coloured by their source mapping — identical to the source-first disasm
+// pane — instead of the intra-function jump-target highlight used in the pure
+// disasm view (the view still gives the jump targets priority).
+func (m *Model) renderDisasmScroll(w, h int) string {
+	var addrMap func(addr uint64) *lipgloss.Style
+	if m.rightPaneActive() && !m.sourceFirst && len(m.dasm.Inst) > 0 {
+		curFile, curLine, _ := m.file.LookupAddrCol(m.dasm.Inst[m.dasm.Cur].Addr)
+		addrMap = func(addr uint64) *lipgloss.Style {
+			st := m.addrMapStyle(addr, curFile, curLine)
+			return &st
 		}
 	}
-	return m.theme.stickyTitleLine(text, w)
+	return m.dasm.RenderScroll(m.viewContextPtr(), w, h, addrMap)
 }
 
 // disasmRowHeight returns the per-instruction rendered-height function for the
-// disasm scroller at render width w (a symbol-start instruction is taller by its
-// "<name>:" label rows). Shared by every place that runs the scroll math.
+// disasm scroller at render width w. Shared by every place that runs the
+// scroll math.
 func (m *Model) disasmRowHeight(w int) func(int) int {
-	return func(i int) int { return m.disasmInstVisualHeight(i, w) }
-}
-
-func (m *Model) renderDisasmScroll(w, h int) string {
-	if h < 1 {
-		h = 1
-	}
-	rowHeight := m.disasmRowHeight(w)
-	top := m.visualTopForView(m.dasm.Cur, m.dasm.Top, len(m.dasm.Inst), h, rowHeight)
-	m.dasm.Top = top
-	m.dasm.RenderedTop = top
-
-	jumpTargets := m.currentIntraJumpTargets()
-	// When the source pane is open (disasm-first), addresses are coloured by
-	// their source mapping — identical to the source-first disasm pane — instead
-	// of the intra-function jump-target highlight used in the pure disasm view.
-	sourceActive := m.rightPaneActive() && !m.sourceFirst && len(m.dasm.Inst) > 0
-	var curFile string
-	var curLine int
-	if sourceActive {
-		curFile, curLine, _ = m.file.LookupAddrCol(m.dasm.Inst[m.dasm.Cur].Addr)
-	}
-	var rows []string
-	for i := top; i < len(m.dasm.Inst) && len(rows) < h; i++ {
-		inst := m.dasm.Inst[i]
-		// A "═══ .section ═══" banner where an executable section begins (like the
-		// hex view). Emitted before the symbol label; its row is accounted for in
-		// disasmInstVisualHeight so scroll/click math stays correct.
-		if name, ok := m.disasmSectionStart(i); ok {
-			rows = append(rows, m.disasmSectionBanner(name, w))
-			if len(rows) >= h {
-				break
-			}
-		}
-		if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-			for _, row := range m.disasmLabelRows(m.displaySymbolName(sym), w) {
-				if len(rows) >= h {
-					break
-				}
-				rows = append(rows, row)
-			}
-			if len(rows) >= h {
-				break
-			}
-		}
-		// The intra-function jump-target highlight takes priority; only addresses
-		// that aren't a jump target fall back to the source-mapping colour.
-		var targetStyle *lipgloss.Style
-		if st, ok := jumpTargets[inst.Addr]; ok {
-			targetStyle = &st
-		} else if sourceActive {
-			st := m.addrMapStyle(inst.Addr, curFile, curLine)
-			targetStyle = &st
-		}
-		for _, row := range m.disasmInstRows(inst, w, i == m.dasm.Cur, targetStyle) {
-			if len(rows) >= h {
-				break
-			}
-			rows = append(rows, row)
-		}
-	}
-	return layout.PadBodyRows(rows, w, h)
+	return m.dasm.RowHeight(m.viewContextPtr(), w)
 }
 
 func (m *Model) disasmRenderWidth() int {
@@ -292,244 +101,10 @@ func (m *Model) disasmRenderWidth() int {
 	return m.width
 }
 
-func (m *Model) disasmInstVisualHeight(i, w int) int {
-	if i < 0 || i >= len(m.dasm.Inst) {
-		return 1
-	}
-	return m.dasm.HeightCache.Get(disasmview.HeightKey{I: i, W: w, Wrap: m.wrap}, func() int {
-		inst := m.dasm.Inst[i]
-		h := m.disasmInstRowCount(inst, w)
-		if _, ok := m.disasmSectionStart(i); ok {
-			h++ // the "═══ .section ═══" separator row
-		}
-		if m.disasmIsSymbolStart(i) {
-			if sym, ok := m.file.SymbolAt(inst.Addr); ok && sym.Addr == inst.Addr {
-				h += len(m.disasmLabelRows(m.displaySymbolName(sym), w))
-			} else {
-				h++
-			}
-		}
-		return h
-	})
-}
-
 // disasmColumns is the row geometry for the current file and byte-column
-// settings. Cheap to build (a switch and a few adds), so it is computed where it
-// is used rather than cached on the Model, where a missed invalidation on a
-// settings toggle would silently misalign every row.
+// settings.
 func (m *Model) disasmColumns() disasmview.Columns {
-	return disasmview.NewColumns(
-		m.file.AddrHexWidth(),
-		disasm.MaxInstLen(m.file.Arch()),
-		m.cfg.Behavior.HideDisasmBytes,
-		m.cfg.Behavior.SpacedDisasmBytes,
-	)
-}
-
-// disasmBytes renders an instruction's bytes for the byte column, compact or
-// spaced per the setting, padded to the column width.
-func (m *Model) disasmBytes(b []byte) string {
-	n := disasm.MaxInstLen(m.file.Arch())
-	if m.cfg.Behavior.SpacedDisasmBytes {
-		return bytesHexSpaced(b, n)
-	}
-	return bytesHex(b, n)
-}
-
-func (m *Model) disasmLabelRows(name string, w int) []string {
-	label := "<" + name + ">:"
-	if !m.wrap {
-		return []string{layout.PadRight(" "+m.theme.symbolNameStyle.Render(layout.TruncateANSI(label, max(1, w-1))), w)}
-	}
-	parts := strings.Split(strings.TrimRight(ansi.Wrap(label, max(1, w-1), " \t/.-_:$@<>"), "\n"), "\n")
-	if len(parts) == 0 {
-		parts = []string{""}
-	}
-	rows := make([]string, 0, len(parts))
-	for _, part := range parts {
-		rows = append(rows, layout.PadRight(" "+m.theme.symbolNameStyle.Render(part), w))
-	}
-	return rows
-}
-
-// disasmInstRowCount returns the number of rows disasmInstRows would emit for
-// inst at width w, WITHOUT building any of the styled strings — the height cache
-// only needs the count, and computing it drives first-paint and every resize/
-// wrap-toggle over the whole (possibly huge) instruction list. It mirrors
-// disasmInstRows' row-splitting decisions exactly; TestDisasmInstRowCountMatches
-// pins the two together so they can't drift.
-func (m *Model) disasmInstRowCount(inst disasm.Inst, w int) int {
-	cols := m.disasmColumns()
-	asmCol := cols.Asm
-	annCol := cols.Annotation(w)
-	// Syntax highlighting adds no visible width, so the plain aligned text's width
-	// matches the styled row's — no need to render (or cache-warm) the colours here.
-	asmEnd := asmCol + min(lipgloss.Width(dump.AlignAsm(inst.Text)), max(1, w-asmCol))
-
-	note := ""
-	if !m.cfg.Behavior.HideAnnotations {
-		note = m.instAnnotation(inst.Text, inst.Class)
-		if rn := m.relocNote(inst.Addr, len(inst.Bytes)); rn != "" {
-			if note != "" {
-				note = rn + ", " + note
-			} else {
-				note = rn
-			}
-		}
-	}
-	if note == "" {
-		return 1
-	}
-	inlineStart := max(annCol, asmEnd+2)
-	if inlineAvail := w - inlineStart; inlineAvail > 0 {
-		if first, rest := splitPlainWidth(note, inlineAvail); first != "" {
-			if rest == "" || !m.wrap {
-				return 1
-			}
-			return 1 + m.disasmAnnotationContinuationRowCount(rest, annCol, w)
-		}
-	}
-	return 1 + m.disasmAnnotationContinuationRowCount(note, annCol, w)
-}
-
-// disasmAnnotationContinuationRowCount counts the rows
-// disasmAnnotationContinuationRows would emit, without building them.
-func (m *Model) disasmAnnotationContinuationRowCount(note string, annCol, w int) int {
-	if !m.wrap {
-		return 1
-	}
-	belowW := max(1, w-annCol)
-	return len(strings.Split(strings.TrimRight(ansi.Wrap(strings.TrimLeft(note, " "), belowW, " \t/.-_:$@<>,"), "\n"), "\n"))
-}
-
-func (m *Model) disasmInstRows(inst disasm.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {
-	addrText := fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), inst.Addr)
-	addrCol := m.theme.addrStyle.Render(addrText)
-	if targetStyle != nil {
-		addrCol = targetStyle.Render(addrText)
-	}
-	cols := m.disasmColumns()
-	asmCol := cols.Asm
-	annCol := cols.Annotation(w)
-	asm := m.renderInstText(dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
-	note := ""
-	if !m.cfg.Behavior.HideAnnotations {
-		note = m.instAnnotation(inst.Text, inst.Class)
-		// A relocation landing in this instruction resolves a placeholder operand
-		// (`call 0x0` → printf) — the key context for object files. Show it first.
-		if rn := m.relocNote(inst.Addr, len(inst.Bytes)); rn != "" {
-			if note != "" {
-				note = rn + ", " + note
-			} else {
-				note = rn
-			}
-		}
-	}
-
-	asmFit := layout.FitANSIWidth(asm, max(1, w-asmCol))
-	asmEnd := asmCol + lipgloss.Width(asmFit)
-
-	var asmRow string
-	if cols.ByteColW > 0 {
-		asmRow = fmt.Sprintf(" %s  %s  ", addrCol, m.disasmBytes(inst.Bytes)) + asmFit
-	} else {
-		asmRow = fmt.Sprintf(" %s  ", addrCol) + asmFit
-	}
-	// Highlight only the assembly (prefix + code) of the selected line; the gap,
-	// the annotation, and any continuation rows stay uncoloured.
-	if selected {
-		asmRow = m.selectedDisasmSegment(asmRow)
-	}
-
-	if note == "" {
-		return []string{layout.PadRight(asmRow, w)}
-	}
-
-	inlineStart := max(annCol, asmEnd+2)
-	inlineAvail := w - inlineStart
-	if inlineAvail > 0 {
-		first, rest := splitPlainWidth(note, inlineAvail)
-		if first != "" {
-			line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + m.theme.addrStyle.Render(first)
-			rows := []string{layout.PadRight(line, w)}
-			if rest == "" || !m.wrap {
-				return rows
-			}
-			return append(rows, m.disasmAnnotationContinuationRows(rest, annCol, w)...)
-		}
-	}
-
-	// No usable room remains beside the assembly; fall back to continuation rows.
-	rows := []string{layout.PadRight(asmRow, w)}
-	return append(rows, m.disasmAnnotationContinuationRows(note, annCol, w)...)
-}
-
-func (m *Model) disasmAnnotationContinuationRows(note string, annCol, w int) []string {
-	belowW := max(1, w-annCol)
-	var parts []string
-	if m.wrap {
-		parts = strings.Split(strings.TrimRight(ansi.Wrap(strings.TrimLeft(note, " "), belowW, " \t/.-_:$@<>,"), "\n"), "\n")
-	} else {
-		parts = []string{layout.TruncateANSI(note, belowW)}
-	}
-	indent := strings.Repeat(" ", annCol)
-	rows := make([]string, 0, len(parts))
-	for _, p := range parts {
-		rows = append(rows, layout.PadRight(indent+m.theme.addrStyle.Render(p), w))
-	}
-	return rows
-}
-
-func splitPlainWidth(s string, w int) (string, string) {
-	if w <= 0 {
-		return "", s
-	}
-	if lipgloss.Width(s) <= w {
-		return s, ""
-	}
-	used := 0
-	for i, r := range s {
-		rw := lipgloss.Width(string(r))
-		if used+rw > w {
-			return s[:i], s[i:]
-		}
-		used += rw
-	}
-	return s, ""
-}
-
-func (m *Model) selectedDisasmSegment(s string) string {
-	sel := m.theme.disasmSelSeq
-	if sel == "" {
-		sel = "\x1b[1;48;5;63m" // fallback if the theme didn't derive a sequence
-	}
-	return sel + strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+sel) + "\x1b[0m"
-}
-
-func (m *Model) currentIntraJumpTargets() map[uint64]lipgloss.Style {
-	out := map[uint64]lipgloss.Style{}
-	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
-		return out
-	}
-	cur := m.dasm.Inst[m.dasm.Cur]
-	if cur.Class != disasm.ClassJumpUnc && cur.Class != disasm.ClassJumpCond {
-		return out
-	}
-	curSym, ok := m.file.SymbolAt(cur.Addr)
-	if !ok || curSym.Size == 0 {
-		return out
-	}
-	from := 0
-	for {
-		addr, _, end, ok := disasm.FindAddrOperand(cur.Text, from)
-		if !ok {
-			return out
-		}
-		if addr >= curSym.Addr && addr < curSym.Addr+curSym.Size {
-			out[addr] = m.theme.linkAddrIntraStyle
-		}
-		from = end
-	}
+	return disasmview.ColumnsFor(m.viewContextPtr())
 }
 
 func (m *Model) ensureSourceForDisasmCursor() bool {
@@ -559,43 +134,6 @@ func (m *Model) hasOpenSourceFile() bool {
 	return m.srcFile != "" && m.file.SourceLines(m.srcFile) != nil
 }
 
-// disasmIsSymbolStart reports whether instruction i begins a symbol (and so is
-// preceded by a "<name>:" label line in the scroller).
-func (m *Model) disasmIsSymbolStart(i int) bool {
-	if i < 0 || i >= len(m.dasm.Inst) {
-		return false
-	}
-	sym, ok := m.file.SymbolAt(m.dasm.Inst[i].Addr)
-	return ok && sym.Addr == m.dasm.Inst[i].Addr
-}
-
-// disasmSectionStart reports whether instruction i begins an executable section
-// (and so is preceded by a "═══ name ═══" separator in the scroller). The
-// exec-section start addresses are indexed once so this is an O(1) lookup per
-// row, not a scan over all sections on every render.
-func (m *Model) disasmSectionStart(i int) (string, bool) {
-	if i < 0 || i >= len(m.dasm.Inst) {
-		return "", false
-	}
-	if m.dasm.ExecSecStarts == nil {
-		// Derive banners from the active disasm image's regions, so all-sections
-		// mode labels data/object-file sections too (not just executable ones). When
-		// a section's load address (LMA) differs from its virtual address — a
-		// higher-half kernel, say — note it once here (it's a constant per-section
-		// offset) rather than on every instruction row.
-		m.dasm.ExecSecStarts = make(map[uint64]string)
-		for _, r := range m.file.ExecImage().Regions {
-			label := r.Name
-			if sec := m.file.SectionAt(r.Addr); sec != nil {
-				label += m.lmaNote(sec.PhysAddr)
-			}
-			m.dasm.ExecSecStarts[r.Addr] = label
-		}
-	}
-	name, ok := m.dasm.ExecSecStarts[m.dasm.Inst[i].Addr]
-	return name, ok
-}
-
 // lmaNote formats a section's load address (LMA) as a banner suffix, or "" when
 // it matches the virtual address. Shown once per section (the offset is constant
 // across the section) in the disasm and hex/raw section banners.
@@ -604,14 +142,6 @@ func (m *Model) lmaNote(phys uint64) string {
 		return ""
 	}
 	return fmt.Sprintf("   LMA 0x%0*x", m.file.AddrHexWidth(), phys)
-}
-
-// disasmSectionBanner renders the centred section separator row (matching the
-// hex view's "═══ name ═══" banner) to width w.
-func (m *Model) disasmSectionBanner(name string, w int) string {
-	banner := lipgloss.PlaceHorizontal(max(1, w-1), lipgloss.Center, " "+name+" ",
-		lipgloss.WithWhitespaceChars("="))
-	return layout.PadRight(m.theme.sectionStyle.Render(banner), w)
 }
 
 func (m *Model) renderSourcePane(w, h int) string {

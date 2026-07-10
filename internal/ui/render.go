@@ -34,27 +34,6 @@ func bytesHex(b []byte, maxN int) string {
 	return sb.String()
 }
 
-// bytesHexSpaced is bytesHex with a space between bytes ("01 00 00 14"), padded
-// to the maxN-byte column width (maxN*3-1). Used when behavior.spaced_disasm_bytes
-// is on, matching the `-o disasm` dump.
-func bytesHexSpaced(b []byte, maxN int) string {
-	if len(b) > maxN {
-		b = b[:maxN]
-	}
-	var sb strings.Builder
-	for i, x := range b {
-		if i > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString(byteHex[x])
-	}
-	want := max(0, maxN*3-1)
-	if visible := max(0, len(b)*3-1); visible < want {
-		sb.WriteString(strings.Repeat(" ", want-visible))
-	}
-	return sb.String()
-}
-
 // emptyBody centres a dim message in the whole body area, for a view that has no
 // entries at all (no filter/header rows to keep).
 func (m *Model) emptyBody(msg string) string {

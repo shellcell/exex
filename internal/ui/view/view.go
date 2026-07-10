@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
@@ -70,13 +71,21 @@ type Styles struct {
 	StickyStyle lipgloss.Style // sticky title/banner rows
 	BannerStyle lipgloss.Style // section separator banners
 	PtrStyle    lipgloss.Style // mapped pointer words in hex/raw
-	LinkStyle   lipgloss.Style // active/followable pointer words
+	LinkStyle   lipgloss.Style // active/followable pointer words (inter-function in disasm)
+	LinkIntra   lipgloss.Style // followable addresses inside the current function
 
-	DisassemblerName string // empty when this architecture has no decoder
-	HexBytesPerRow   int
-	HideAnnotations  bool
-	ByteHex          *[256]string
-	ByteASCII        *[256]string
+	// DisasmSelSeq is the raw SGR prefix the disasm view re-arms after every
+	// reset inside a selected row, so the selection bar survives the embedded
+	// per-token colour resets. "" when the theme didn't derive one.
+	DisasmSelSeq string
+
+	DisassemblerName  string // empty when this architecture has no decoder
+	HexBytesPerRow    int
+	HideAnnotations   bool
+	HideDisasmBytes   bool
+	SpacedDisasmBytes bool
+	ByteHex           *[256]string
+	ByteASCII         *[256]string
 
 	// Classifying styles the shell derives from its full theme; kept as
 	// functions so the theme's colour tables stay private to it.
@@ -106,6 +115,14 @@ type Styles struct {
 
 	// CanDisasmAt reports whether addr can be decoded by the current shell.
 	CanDisasmAt func(addr uint64) bool
+
+	// StickyTitle renders the pinned title row above a scroller (the disasm
+	// view's "symbol @ addr" line), theme-styled and padded to w.
+	StickyTitle func(text string, w int) string
+	// NewAsmHighlighter builds the assembly highlighter for the current theme
+	// and architecture. The disasm view caches the result (the shell drops that
+	// cache on a theme change), so this runs once per theme, not per frame.
+	NewAsmHighlighter func() asmhl.Highlighter
 }
 
 // AvailFilter is the availability lens applied to the Sources and Libs lists.

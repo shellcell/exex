@@ -698,7 +698,7 @@ func TestDisasmAnnotationWrapsSeparatelyAndAddressLinks(t *testing.T) {
 		},
 	}
 	inst := disasm.Inst{Addr: 0x1000, Text: "call 0x2000", Class: disasm.ClassCall, Bytes: []byte{0xe8}}
-	rows := m.disasmInstRows(inst, 64, false, nil)
+	rows := m.dasm.InstRows(m.viewContextPtr(), inst, 64, false, nil)
 	if len(rows) < 2 {
 		t.Fatalf("annotation did not wrap into separate rows: %q", rows)
 	}

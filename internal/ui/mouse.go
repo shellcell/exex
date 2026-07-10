@@ -467,8 +467,7 @@ func (m *Model) loadDisasmWindowAboveForScroll(delta, visible int) bool {
 	if idx, found := m.dasm.IndexForAddr(oldFirst); found {
 		top = idx + delta
 	}
-	w := m.disasmRenderWidth()
-	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
+	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
 	m.dasm.Top = layout.ViewportTop(top, len(m.dasm.Inst), visible, rowHeight)
 	return true
 }

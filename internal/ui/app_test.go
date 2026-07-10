@@ -218,7 +218,7 @@ func TestCtrlENavigatesDisasmToEnd(t *testing.T) {
 		t.Fatalf("ctrl+e disasm cursor = %d, want %d", got, want)
 	}
 	_ = m.View()
-	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, m.disasmRenderWidth()) }
+	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
 	if got, want := m.dasm.Top, layout.MaxViewportTop(len(m.dasm.Inst), m.disasmViewportHeight(), rowHeight); got != want {
 		t.Fatalf("ctrl+e disasm top = %d, want bottom-aligned %d", got, want)
 	}

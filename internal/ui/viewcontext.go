@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/view"
 )
 
@@ -66,12 +67,17 @@ func (m *Model) viewStyles() *view.Styles {
 		BannerStyle: m.theme.sectionStyle,
 		PtrStyle:    m.theme.hexPointerStyle,
 		LinkStyle:   m.theme.linkAddrInterStyle,
+		LinkIntra:   m.theme.linkAddrIntraStyle,
 
-		DisassemblerName: disName,
-		HexBytesPerRow:   m.cfg.Behavior.HexBytesPerRow,
-		HideAnnotations:  m.cfg.Behavior.HideAnnotations,
-		ByteHex:          &byteHex,
-		ByteASCII:        &byteASCII,
+		DisasmSelSeq: m.theme.disasmSelSeq,
+
+		DisassemblerName:  disName,
+		HexBytesPerRow:    m.cfg.Behavior.HexBytesPerRow,
+		HideAnnotations:   m.cfg.Behavior.HideAnnotations,
+		HideDisasmBytes:   m.cfg.Behavior.HideDisasmBytes,
+		SpacedDisasmBytes: m.cfg.Behavior.SpacedDisasmBytes,
+		ByteHex:           &byteHex,
+		ByteASCII:         &byteASCII,
 
 		// Bound as m-capturing closures, not method values: a method value on the
 		// Theme field would copy the whole (large) Theme to the heap per call. They
@@ -89,6 +95,15 @@ func (m *Model) viewStyles() *view.Styles {
 		LMANote:          func(phys uint64) string { return m.lmaNote(phys) },
 		AddrForOffset:    func(off uint64) (uint64, bool) { return m.addrForOffset(off) },
 		CanDisasmAt:      func(addr uint64) bool { return m.canDisasmAt(addr) },
+		StickyTitle:      func(text string, w int) string { return m.theme.stickyTitleLine(text, w) },
+		NewAsmHighlighter: func() asmhl.Highlighter {
+			return asmhl.New(sourceSyntaxTheme(m.cfg), sourceSyntaxForeground(m.cfg), m.file.Arch(), asmhl.Styles{
+				Class:    m.theme.styleForClass,
+				Plain:    m.theme.whiteStyle,
+				Register: m.theme.asmRegisterStyle,
+				Number:   m.theme.asmNumberStyle,
+			})
+		},
 	}
 	return m.viewStylesCache
 }

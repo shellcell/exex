@@ -10,11 +10,12 @@ import (
 func BenchmarkDisasmInstRows(b *testing.B) {
 	m := benchmarkDisasmModel()
 	insts := benchmarkDisasmInsts()
+	ctx := m.viewContextPtr()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		inst := insts[i%len(insts)]
-		_ = m.disasmInstRows(inst, 120, i%17 == 0, nil)
+		_ = m.dasm.InstRows(ctx, inst, 120, i%17 == 0, nil)
 	}
 }
 
@@ -52,9 +53,11 @@ func TestDisasmInstRowCountMatches(t *testing.T) {
 		m.wrap = wrap
 		for _, w := range widths {
 			m.width = w
+			// The context snapshots wrap at build time, so rebuild it per setting.
+			ctx := m.viewContextPtr()
 			for _, inst := range insts {
-				want := len(m.disasmInstRows(inst, w, false, nil))
-				got := m.disasmInstRowCount(inst, w)
+				want := len(m.dasm.InstRows(ctx, inst, w, false, nil))
+				got := m.dasm.InstRowCount(ctx, inst, w)
 				if got != want {
 					t.Errorf("wrap=%v w=%d %q: rowCount=%d, rendered %d rows", wrap, w, inst.Text, got, want)
 				}

@@ -120,14 +120,6 @@ func (m *Model) disasmLoadedAddr(addr uint64) bool {
 	return ok
 }
 
-// setDisasmSpan installs a freshly decoded span as the visible window. The
-// source pane's row cache maps source lines to the decoded instructions, so it
-// falls with the window; the view's own caches are dropped by SetSpan.
-func (m *Model) setDisasmSpan(span explorer.Span) bool {
-	m.DisasmWindowSwapped()
-	return m.dasm.SetSpan(span)
-}
-
 func (m *Model) loadDisasmWindow(addr uint64, before int) bool {
 	return m.dasm.LoadWindow(m.dasmEnv(), addr, before)
 }
@@ -139,12 +131,6 @@ func (m *Model) loadDisasmWindowEnding(end int) bool {
 // dasmEnv bundles what the disasm view's navigation needs from the shell.
 func (m *Model) dasmEnv() disasmview.Env {
 	return disasmview.Env{File: m.file, Svc: m.disasmService(), Host: m}
-}
-
-// DisasmWindowSwapped implements disasmview.Host: the source pane's asm-row
-// cache is keyed to instruction indices, which a new window invalidates.
-func (m *Model) DisasmWindowSwapped() {
-	m.sourceAsmRowCache = nil
 }
 
 // ShowDisasmView implements disasmview.Host.

@@ -28,15 +28,15 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	m.rightScroll = 0
+	m.dasm.RightScroll = 0
 
-	if m.sourceFirst && m.srcFile != "" {
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
 		switch key {
 		case "esc", "backspace":
-			m.sourceFirst = false
+			m.dasm.SourceFirst = false
 			return m, nil
 		case "tab":
-			m.sourceFirst = false
+			m.dasm.SourceFirst = false
 			return m, nil
 		}
 		return m.updateSourceOpenSrc(key)

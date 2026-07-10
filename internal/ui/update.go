@@ -169,9 +169,6 @@ func (m *Model) resize(width, height int) {
 		m.clearAllViewCaches()
 	}
 	m.width, m.height = width, height
-	bodyH := m.bodyHeight()
-	m.srcVP.SetWidth(m.width / 2)
-	m.srcVP.SetHeight(bodyH)
 }
 
 func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
@@ -181,7 +178,7 @@ func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.dasm.Inst = msg.span.Insts
 	m.dasm.PosLo, m.dasm.PosHi = msg.span.PosLo, msg.span.PosHi
-	m.sourceAsmRowCache = nil
+	m.dasm.SourceAsmRowCache = nil
 	m.dasm.HeightCache = nil
 	m.dasm.Built = true
 	m.dasm.Decoding = false
@@ -214,7 +211,7 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		m.searchCancel = nil
 		if msg.hit != nil {
 			if len(msg.hit.insts) > 0 {
-				m.setDisasmSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
+				m.dasm.SetSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
 				m.dasm.Cur = msg.hit.idx
 				m.dasm.Top = msg.hit.idx
 			} else {

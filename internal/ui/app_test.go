@@ -278,11 +278,11 @@ func TestMouseWheelOverRightDisasmPaneScrollsRightPane(t *testing.T) {
 	if !m.rightPaneActive() {
 		t.Skip("right pane is not active")
 	}
-	m.rightScroll = 9
+	m.dasm.RightScroll = 9
 
 	model, _ := m.handleMouse(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: m.width - 2, Y: 10}))
 	m = model.(*Model)
-	if got := m.rightScroll; got != 6 {
+	if got := m.dasm.RightScroll; got != 6 {
 		t.Fatalf("rightScroll after wheel up = %d, want 6", got)
 	}
 }

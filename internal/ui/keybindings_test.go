@@ -718,8 +718,8 @@ func TestKeysSources(t *testing.T) {
 	// Enter opens the file in the disasm source-first view.
 	selectSourceLeaf(t, h)
 	h.press("enter")
-	if h.m().mode != modeDisasm || !h.m().sourceFirst {
-		t.Fatalf("enter did not open source-first disasm (mode=%v sourceFirst=%v)", h.m().mode, h.m().sourceFirst)
+	if h.m().mode != modeDisasm || !h.m().dasm.SourceFirst {
+		t.Fatalf("enter did not open source-first disasm (mode=%v sourceFirst=%v)", h.m().mode, h.m().dasm.SourceFirst)
 	}
 }
 
@@ -1042,12 +1042,12 @@ func TestKeysTabTogglesMode(t *testing.T) {
 	// it reports unavailable; with DWARF it toggles showSource. Either way the
 	// view stays disasm and nothing panics.
 	h.goView(modeDisasm, "4")
-	show0 := h.m().showSource
+	show0 := h.m().dasm.ShowSource
 	h.press("tab")
 	if h.m().mode != modeDisasm {
 		t.Fatal("tab in disasm changed the view")
 	}
-	if h.m().file.HasDWARF() && h.m().showSource == show0 {
+	if h.m().file.HasDWARF() && h.m().dasm.ShowSource == show0 {
 		t.Fatal("tab in disasm did not toggle the source pane")
 	}
 }

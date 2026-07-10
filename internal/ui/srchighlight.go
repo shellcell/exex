@@ -45,7 +45,7 @@ func (m *Model) addrMapStyle(addr uint64, curFile string, curLine int) lipgloss.
 	case f == "" || l == 0:
 		return m.theme.srcShadowStyle
 	case curFile != "" && f == curFile && l == curLine:
-		if st, ok := m.theme.columnStyle(m.sourceLineColumns(curFile, curLine), c); ok {
+		if st, ok := m.theme.columnStyle(m.dasm.SourceLineColumns(m.viewContextPtr(), curFile, curLine), c); ok {
 			return st.Bold(true)
 		}
 		return m.theme.srcMappedStyle
@@ -57,11 +57,11 @@ func (m *Model) addrMapStyle(addr uint64, curFile string, curLine int) lipgloss.
 // rightPaneActive reports whether the disasm view is currently showing a second
 // (follower) pane that the independent-scroll controls apply to.
 func (m *Model) rightPaneActive() bool {
-	return m.mode == modeDisasm && m.showSource && m.file.HasDWARF()
+	return m.mode == modeDisasm && m.dasm.ShowSource && m.file.HasDWARF()
 }
 
 // scrollRightPane nudges the follower pane's independent scroll offset; the
 // renderers clamp it to the pane bounds.
 func (m *Model) scrollRightPane(delta int) {
-	m.rightScroll += delta
+	m.dasm.RightScroll += delta
 }

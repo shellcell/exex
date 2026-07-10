@@ -104,7 +104,7 @@ func (m *Model) CycleSetting(i, dir int) {
 // hex view is rendered uncached, so it needs no clear.
 func (m *Model) clearDisasmDisplayCaches() {
 	m.dasm.HeightCache = nil
-	m.sourceAsmRowCache = nil
+	m.dasm.SourceAsmRowCache = nil
 }
 
 // applyThemeChange rebuilds the theme (and source highlighter) from the live

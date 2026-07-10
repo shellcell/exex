@@ -5,13 +5,13 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 	infoview "github.com/rabarbra/exex/internal/ui/views/info"
 	"github.com/rabarbra/exex/internal/ui/views/libs"
@@ -64,10 +64,11 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 			Abbrev: cfg.Behavior.AbbrevArgs,
 		},
 		disasmState: disasmState{
+			dasm: disasmview.State{
+				SourceState: disasmview.SourceState{ShowSource: true},
+			},
 			disasmMaxBytes:      defaultDisasmMaxBytes,
 			disasmSearchWorkers: 0,
-			showSource:          true,
-			srcVP:               viewport.New(),
 			srcHighlighter:      syntax.NewHighlighter(sourceSyntaxTheme(cfg)),
 		},
 		strs: strs.State{

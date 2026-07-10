@@ -59,7 +59,7 @@ func (m *Model) runSearchWithOrigin(forward, inclusive bool, fromCursor bool) te
 }
 
 func (m *Model) runDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
-	if m.sourceFirst && m.srcFile != "" {
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
 		m.searchInSourceFile(forward, inclusive)
 		return nil
 	}

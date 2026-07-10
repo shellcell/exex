@@ -44,41 +44,6 @@ func (t *Theme) columnStyle(cols []int, col int) (lipgloss.Style, bool) {
 	return lipgloss.Style{}, false
 }
 
-func (m *Model) mappedSourceLines(file string) map[int]bool {
-	if file == "" {
-		return nil
-	}
-	if m.srcCodeLineCache != nil {
-		if lines, ok := m.srcCodeLineCache[file]; ok {
-			return lines
-		}
-	}
-	lines := m.file.MappedLines(file)
-	if m.srcCodeLineCache == nil {
-		m.srcCodeLineCache = make(map[string]map[int]bool)
-	}
-	m.srcCodeLineCache[file] = lines
-	return lines
-}
-
-func (m *Model) sourceLineColumns(file string, line int) []int {
-	if file == "" || line <= 0 {
-		return nil
-	}
-	key := sourceLineCacheKey{file: file, line: line}
-	if m.srcColumnCache != nil {
-		if cols, ok := m.srcColumnCache[key]; ok {
-			return cols
-		}
-	}
-	cols := m.file.LineColumns(file, line)
-	if m.srcColumnCache == nil {
-		m.srcColumnCache = make(map[sourceLineCacheKey][]int)
-	}
-	m.srcColumnCache[key] = cols
-	return cols
-}
-
 func (m *Model) ensureSourceBelowDisasmCursor() bool {
 	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
 		return false
@@ -109,12 +74,12 @@ func (m *Model) selectSourceFromInstRange(start int, inRange func(uint64) bool) 
 		if file == "" || line == 0 || m.file.SourceLines(file) == nil {
 			continue
 		}
-		if m.srcFile != file {
-			m.srcFile = file
-			m.srcCodeLines = m.mappedSourceLines(file)
+		if m.dasm.SrcFile != file {
+			m.dasm.SrcFile = file
+			m.dasm.SrcCodeLines = m.dasm.MappedLines(m.viewContextPtr(), file)
 		}
-		m.srcCur = line
-		m.srcTop = 0
+		m.dasm.SrcCur = line
+		m.dasm.SrcTop = 0
 		m.syncSourceAsm()
 		return true
 	}
@@ -144,10 +109,10 @@ func (m *Model) updateSources(key string) (tea.Model, tea.Cmd) {
 // and the disasm pane follows via syncSourceAsm. Used by the disasm view when
 // sourceFirst is active.
 func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
-	n := len(m.file.SourceLines(m.srcFile))
+	n := len(m.file.SourceLines(m.dasm.SrcFile))
 	switch key {
 	case "esc", "backspace":
-		m.srcFile = "" // back to the file list
+		m.dasm.SrcFile = "" // back to the file list
 		return m, nil
 	case "/":
 		m.srcSearchAll = false
@@ -158,7 +123,7 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 		m.openSearch()
 		return m, nil
 	case "S":
-		m.copyToClipboard(m.srcFile, "source path")
+		m.copyToClipboard(m.dasm.SrcFile, "source path")
 		return m, nil
 	case "w":
 		m.toggleWrap()
@@ -172,32 +137,32 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 	case "[":
 		m.gotoMappedLine(false)
 	case "up", "k":
-		if m.srcCur > 1 {
-			m.srcCur--
+		if m.dasm.SrcCur > 1 {
+			m.dasm.SrcCur--
 			m.syncSourceAsm()
 		}
 	case "down", "j":
-		if m.srcCur < n {
-			m.srcCur++
+		if m.dasm.SrcCur < n {
+			m.dasm.SrcCur++
 			m.syncSourceAsm()
 		}
 	case "pgup":
-		m.srcCur = max(1, m.srcCur-m.listPage())
+		m.dasm.SrcCur = max(1, m.dasm.SrcCur-m.listPage())
 		m.syncSourceAsm()
 	case "pgdown":
-		m.srcCur = min(n, m.srcCur+m.listPage())
+		m.dasm.SrcCur = min(n, m.dasm.SrcCur+m.listPage())
 		m.syncSourceAsm()
 	case "home":
-		m.srcCur = 1
+		m.dasm.SrcCur = 1
 		m.syncSourceAsm()
 	case "end", "G":
-		m.srcCur = n
+		m.dasm.SrcCur = n
 		m.syncSourceAsm()
 	case "enter":
 		// Jump into the main disasm view at the mapped address.
-		if addr, ok := m.file.LineToAddr(m.srcFile, m.srcCur); ok {
+		if addr, ok := m.file.LineToAddr(m.dasm.SrcFile, m.dasm.SrcCur); ok {
 			m.loadDisasmAt(addr)
-			m.sourceFirst = false
+			m.dasm.SourceFirst = false
 		} else {
 			m.setStatus("no code maps to this line", true)
 		}
@@ -208,19 +173,19 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 // gotoMappedLine moves the cursor to the next/previous source line that has
 // machine code mapped to it, skipping the shadowed (unmapped) lines.
 func (m *Model) gotoMappedLine(forward bool) {
-	n := len(m.file.SourceLines(m.srcFile))
+	n := len(m.file.SourceLines(m.dasm.SrcFile))
 	if forward {
-		for ln := m.srcCur + 1; ln <= n; ln++ {
-			if m.srcCodeLines[ln] {
-				m.srcCur = ln
+		for ln := m.dasm.SrcCur + 1; ln <= n; ln++ {
+			if m.dasm.SrcCodeLines[ln] {
+				m.dasm.SrcCur = ln
 				m.syncSourceAsm()
 				return
 			}
 		}
 	} else {
-		for ln := m.srcCur - 1; ln >= 1; ln-- {
-			if m.srcCodeLines[ln] {
-				m.srcCur = ln
+		for ln := m.dasm.SrcCur - 1; ln >= 1; ln-- {
+			if m.dasm.SrcCodeLines[ln] {
+				m.dasm.SrcCur = ln
 				m.syncSourceAsm()
 				return
 			}
@@ -237,16 +202,16 @@ func (m *Model) openSourceFile(file string, line int) bool {
 		m.setStatus("source file not found: "+filepath.Base(file), true)
 		return false
 	}
-	m.srcFile = file
-	m.srcCodeLines = m.mappedSourceLines(file)
+	m.dasm.SrcFile = file
+	m.dasm.SrcCodeLines = m.dasm.MappedLines(m.viewContextPtr(), file)
 	if line < 1 {
 		line = 1
 	}
 	if line > len(src) {
 		line = len(src)
 	}
-	m.srcCur = line
-	m.srcTop = 0
+	m.dasm.SrcCur = line
+	m.dasm.SrcTop = 0
 	m.syncSourceAsm()
 	return true
 }
@@ -254,8 +219,8 @@ func (m *Model) openSourceFile(file string, line int) bool {
 func (m *Model) openSourceFileInDisasm(file string, line int) {
 	m.openSourceFile(file, line)
 	m.setMode(modeDisasm)
-	m.showSource = true
-	m.sourceFirst = true
+	m.dasm.ShowSource = true
+	m.dasm.SourceFirst = true
 }
 
 // syncSourceAsm points the disasm cursor at the address mapped from the current
@@ -264,7 +229,7 @@ func (m *Model) syncSourceAsm() {
 	if m.dis == nil {
 		return
 	}
-	addr, ok := m.file.LineToAddr(m.srcFile, m.srcCur)
+	addr, ok := m.file.LineToAddr(m.dasm.SrcFile, m.dasm.SrcCur)
 	if !ok {
 		return
 	}
@@ -276,7 +241,7 @@ func (m *Model) syncSourceAsm() {
 	// Sources view), it just refreshes the instruction window the right pane
 	// renders.
 	if !m.disasmLoadedAddr(addr) {
-		m.setDisasmSpan(m.decodeDisasmAt(addr, m.disasmLeadBytes()))
+		m.dasm.SetSpan(m.decodeDisasmAt(addr, m.disasmLeadBytes()))
 	}
 	m.dasm.Cur = m.dasm.IndexAtOrAfter(addr)
 	m.scrollDisasmContext(4)
@@ -285,11 +250,11 @@ func (m *Model) syncSourceAsm() {
 // ---- cross-source / in-file search (called from runSearch) ----
 
 func (m *Model) searchInSourceFile(forward, inclusive bool) {
-	if m.srcFile == "" {
+	if m.dasm.SrcFile == "" {
 		return
 	}
-	src := m.file.SourceLines(m.srcFile)
-	start := m.srcCur
+	src := m.file.SourceLines(m.dasm.SrcFile)
+	start := m.dasm.SrcCur
 	if !inclusive {
 		if forward {
 			start++
@@ -298,7 +263,7 @@ func (m *Model) searchInSourceFile(forward, inclusive bool) {
 		}
 	}
 	if i := sourceutil.FindInLines(src, m.searchQuery, start, forward); i > 0 {
-		m.srcCur = i
+		m.dasm.SrcCur = i
 		m.syncSourceAsm()
 		return
 	}
@@ -364,25 +329,25 @@ func (t Theme) leftBorderPane(content string) string {
 const gutterWidth = 8
 
 func (m *Model) renderSourceText(w, h int) string {
-	src := m.file.SourceLines(m.srcFile)
+	src := m.file.SourceLines(m.dasm.SrcFile)
 	if len(src) == 0 {
 		return layout.PadBody("(source file not found on disk)\n", w, h)
 	}
-	hl := m.highlightedSource(m.srcFile, src)
+	hl := m.highlightedSource(m.dasm.SrcFile, src)
 
 	contentH := h - 1
 	if contentH < 1 {
 		contentH = 1
 	}
-	top := max(0, m.srcTop-1)
-	top = m.visualTopForView(m.srcCur-1, top, len(src), contentH, m.sourceRowHeight(w))
-	m.srcTop = top + 1
-	m.renderedSrcTop = top
+	top := max(0, m.dasm.SrcTop-1)
+	top = m.visualTopForView(m.dasm.SrcCur-1, top, len(src), contentH, m.sourceRowHeight(w))
+	m.dasm.SrcTop = top + 1
+	m.dasm.RenderedSrcTop = top
 	m.pageRows = layout.PageStep(top, len(src), contentH, m.sourceRowHeight(w))
 
 	var b strings.Builder
-	suffix := fmt.Sprintf(":%d", m.srcCur)
-	b.WriteString(m.theme.viewTitleLine(layout.TruncateMiddle(m.srcFile, max(1, w-lipgloss.Width(suffix)))+suffix, w))
+	suffix := fmt.Sprintf(":%d", m.dasm.SrcCur)
+	b.WriteString(m.theme.viewTitleLine(layout.TruncateMiddle(m.dasm.SrcFile, max(1, w-lipgloss.Width(suffix)))+suffix, w))
 	b.WriteString("\n")
 
 	rows := 0
@@ -394,7 +359,7 @@ func (m *Model) renderSourceText(w, h int) string {
 			content = hl[ln-1]
 		}
 
-		prefix := m.srcGutter(ln, m.srcCur, m.srcCodeLines, 5)
+		prefix := m.srcGutter(ln, m.dasm.SrcCur, m.dasm.SrcCodeLines, 5)
 		avail := w - lipgloss.Width(prefix)
 		line := prefix + layout.FitANSIWidth(content, avail)
 		if m.wrap {
@@ -411,8 +376,8 @@ func (m *Model) renderSourceText(w, h int) string {
 
 		// Beneath the cursor line, point carets at the exact columns code maps
 		// to (a source line can map at several positions).
-		if ln == m.srcCur && rows < contentH {
-			if caret := m.theme.coloredCaretRow(m.sourceLineColumns(m.srcFile, ln), gutterWidth, w); caret != "" {
+		if ln == m.dasm.SrcCur && rows < contentH {
+			if caret := m.theme.coloredCaretRow(m.dasm.SourceLineColumns(m.viewContextPtr(), m.dasm.SrcFile, ln), gutterWidth, w); caret != "" {
 				b.WriteString(caret)
 				b.WriteString("\n")
 				rows++
@@ -429,7 +394,7 @@ func (m *Model) sourceRowHeight(w int) func(int) int {
 	return func(i int) int {
 		ln := i + 1
 		h := m.sourceLineHeight(ln, w)
-		if ln == m.srcCur && len(m.sourceLineColumns(m.srcFile, ln)) > 0 {
+		if ln == m.dasm.SrcCur && len(m.dasm.SourceLineColumns(m.viewContextPtr(), m.dasm.SrcFile, ln)) > 0 {
 			h++
 		}
 		return h
@@ -437,28 +402,28 @@ func (m *Model) sourceRowHeight(w int) func(int) int {
 }
 
 func (m *Model) sourceTextTop(w, contentH int) int {
-	src := m.file.SourceLines(m.srcFile)
-	return m.visualTopForView(m.srcCur-1, max(0, m.srcTop-1), len(src), contentH, m.sourceRowHeight(w))
+	src := m.file.SourceLines(m.dasm.SrcFile)
+	return m.visualTopForView(m.dasm.SrcCur-1, max(0, m.dasm.SrcTop-1), len(src), contentH, m.sourceRowHeight(w))
 }
 
 func (m *Model) sourceLineHeight(line, w int) int {
 	if !m.wrap {
 		return 1
 	}
-	src := m.file.SourceLines(m.srcFile)
+	src := m.file.SourceLines(m.dasm.SrcFile)
 	if line < 1 || line > len(src) {
 		return 1
 	}
-	key := sourceLineHeightKey{file: m.srcFile, line: line, w: w}
-	if h, ok := m.srcLineHeightCache[key]; ok {
+	key := disasmview.SourceLineHeightKey{File: m.dasm.SrcFile, Line: line, W: w}
+	if h, ok := m.dasm.SrcLineHeightCache[key]; ok {
 		return h
 	}
 	plainPrefix := fmt.Sprintf("%5d   ", line)
 	h := len(layout.RenderLineRowsIndented(plainPrefix+src[line-1], w, true, gutterWidth))
-	if m.srcLineHeightCache == nil {
-		m.srcLineHeightCache = make(map[sourceLineHeightKey]int)
+	if m.dasm.SrcLineHeightCache == nil {
+		m.dasm.SrcLineHeightCache = make(map[disasmview.SourceLineHeightKey]int)
 	}
-	m.srcLineHeightCache[key] = h
+	m.dasm.SrcLineHeightCache[key] = h
 	return h
 }
 
@@ -495,14 +460,14 @@ func (m *Model) renderSourceAsm(w, h int) string {
 	}
 
 	anchor := m.sourceAsmAnchorIndex()
-	cols := m.sourceLineColumns(m.srcFile, m.srcCur)
+	cols := m.dasm.SourceLineColumns(m.viewContextPtr(), m.dasm.SrcFile, m.dasm.SrcCur)
 	head := m.sourceAsmHeader(anchor, cols, w)
 
 	contentH := h - 1
 	if contentH < 1 {
 		contentH = 1
 	}
-	top := clampScroll(anchor-4+m.rightScroll, len(m.dasm.Inst), contentH)
+	top := clampScroll(anchor-4+m.dasm.RightScroll, len(m.dasm.Inst), contentH)
 	end := top + contentH
 	if end > len(m.dasm.Inst) {
 		end = len(m.dasm.Inst)
@@ -523,7 +488,7 @@ func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
 	const minSymbolHeaderWidth = 12
 	sep := "  ·  "
 	sepW := lipgloss.Width(sep)
-	linePlain := fmt.Sprintf("line %d", m.srcCur)
+	linePlain := fmt.Sprintf("line %d", m.dasm.SrcCur)
 	colsPlain := ""
 	if len(cols) > 0 {
 		colsPlain = "cols " + intsString(cols)
@@ -578,7 +543,7 @@ func (m *Model) sourceAsmAnchorIndex() int {
 	if len(m.dasm.Inst) == 0 {
 		return 0
 	}
-	if addr, ok := m.file.LineToAddr(m.srcFile, m.srcCur); ok {
+	if addr, ok := m.file.LineToAddr(m.dasm.SrcFile, m.dasm.SrcCur); ok {
 		idx := m.dasm.IndexAtOrAfter(addr)
 		if idx >= 0 && idx < len(m.dasm.Inst) {
 			return idx
@@ -594,13 +559,13 @@ func (m *Model) sourceAsmAnchorIndex() int {
 }
 
 func (m *Model) sourceAsmRow(i, addrW, w int) string {
-	return m.sourceAsmRowCache.Get(sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}, func() string {
+	return m.dasm.SourceAsmRowCache.Get(disasmview.SourceAsmRowKey{I: i, W: w, File: m.dasm.SrcFile, Line: m.dasm.SrcCur}, func() string {
 		inst := m.dasm.Inst[i]
 		// Colour only the address by mapping (shared addrMapStyle policy); the
 		// instruction text keeps its normal class colours so the pane reads like
 		// real disassembly.
 		addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
-		addr := m.addrMapStyle(inst.Addr, m.srcFile, m.srcCur).Render(addrText)
+		addr := m.addrMapStyle(inst.Addr, m.dasm.SrcFile, m.dasm.SrcCur).Render(addrText)
 		ctx := m.viewContextPtr()
 		asm := m.dasm.RenderInstText(ctx, dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
 		var line string

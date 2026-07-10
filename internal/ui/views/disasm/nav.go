@@ -15,10 +15,6 @@ import (
 // Host is what navigation needs back from the shell.
 type Host interface {
 	SetStatus(msg string, isErr bool)
-	// DisasmWindowSwapped tells the shell a new decode window replaced the old
-	// one, so shell-side caches keyed to instruction indices (the source pane's
-	// asm rows) must drop.
-	DisasmWindowSwapped()
 	// ShowDisasmView makes the disasm view the active one. Every successful
 	// window install implies it: navigation that decoded a window must also be
 	// looking at it (jumps can arrive from any view).
@@ -34,10 +30,9 @@ type Env struct {
 	Host Host
 }
 
-// installSpan is SetSpan plus the shell notifications.
+// installSpan is SetSpan plus the shell notification.
 func (st *State) installSpan(env Env, span explorer.Span) bool {
 	ok := st.SetSpan(span)
-	env.Host.DisasmWindowSwapped()
 	if ok {
 		env.Host.ShowDisasmView()
 	}

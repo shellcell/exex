@@ -12,13 +12,11 @@ import (
 type fakeHost struct {
 	status   string
 	isErr    bool
-	swaps    int
 	shows    int
 	statuses int
 }
 
 func (h *fakeHost) SetStatus(msg string, isErr bool) { h.status, h.isErr = msg, isErr; h.statuses++ }
-func (h *fakeHost) DisasmWindowSwapped()             { h.swaps++ }
 func (h *fakeHost) ShowDisasmView()                  { h.shows++ }
 
 func fixtureEnv(t *testing.T) (Env, *fakeHost) {
@@ -50,9 +48,6 @@ func TestLoadWindowShowsTheViewOnlyOnAUsableInstall(t *testing.T) {
 	}
 	if h.shows != 1 {
 		t.Errorf("ShowDisasmView called %d times, want 1", h.shows)
-	}
-	if h.swaps != 1 {
-		t.Errorf("DisasmWindowSwapped called %d times, want 1", h.swaps)
 	}
 	if len(st.Inst) == 0 {
 		t.Fatal("no window installed")

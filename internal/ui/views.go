@@ -184,10 +184,10 @@ func (v disasmView) hints() []footerHint {
 	switch {
 	case v.searchRunning:
 		return []footerHint{{"esc", "cancel"}, {"[ ]", "sym"}, {"←/→", "history"}, {"/", "search"}}
-	case v.sourceFirst && v.srcFile != "":
+	case v.dasm.SourceFirst && v.dasm.SrcFile != "":
 		// Source navigation leads: no disasm history, and [ ] steps mapped lines.
 		return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
-	case v.showSource && dwarf:
+	case v.dasm.ShowSource && dwarf:
 		// Disasm-first with the source pane open.
 		return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"␣", "open in…"}, {"f", "find"}, {"a", v.disasmAllHint()}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
 	default:
@@ -248,8 +248,8 @@ func (v libsView) lineText() (string, bool) {
 }
 
 func (v sourcesView) lineText() (string, bool) {
-	if v.srcFile != "" {
-		return v.srcFile, true // open file: copy its path
+	if v.dasm.SrcFile != "" {
+		return v.dasm.SrcFile, true // open file: copy its path
 	}
 	return v.sources.RowText(), true
 }
@@ -389,7 +389,7 @@ func (v relocsView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
 	return filterCapture(&v.relocs.Filter, key, msg, func() { v.relocs.Recompute(ctx) })
 }
 func (v sourcesView) captureFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
-	if v.srcFile == "" {
+	if v.dasm.SrcFile == "" {
 		ctx := v.viewContext()
 		return filterCapture(&v.sources.Filter, key, msg, func() { v.sources.Recompute(ctx) })
 	}

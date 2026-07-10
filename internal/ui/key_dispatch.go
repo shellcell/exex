@@ -288,8 +288,8 @@ func (m *Model) activeCursorState() cursorState {
 		sourcesCur:  m.sources.Cur,
 		libsCur:     m.libs.Cur,
 		memberSel:   m.memberSel,
-		srcFile:     m.srcFile,
-		srcCur:      m.srcCur,
+		srcFile:     m.dasm.SrcFile,
+		srcCur:      m.dasm.SrcCur,
 	}
 }
 
@@ -403,8 +403,8 @@ func (m *Model) toggleSourcePane() {
 		m.setStatus("no debug info — source pane unavailable", true)
 		return
 	}
-	m.showSource = !m.showSource
-	m.rightScroll = 0
+	m.dasm.ShowSource = !m.dasm.ShowSource
+	m.dasm.RightScroll = 0
 }
 
 func (m *Model) switchSourcePane() {
@@ -415,14 +415,14 @@ func (m *Model) switchSourcePane() {
 		m.setStatus("no debug info — source pane unavailable", true)
 		return
 	}
-	if m.sourceFirst {
-		m.sourceFirst = false
-		m.rightScroll = 0
+	if m.dasm.SourceFirst {
+		m.dasm.SourceFirst = false
+		m.dasm.RightScroll = 0
 		return
 	}
 	if m.ensureSourcePaneAvailable() {
-		m.sourceFirst = true
-		m.rightScroll = 0
+		m.dasm.SourceFirst = true
+		m.dasm.RightScroll = 0
 		return
 	}
 	m.setStatus("no source mapping for current instruction", true)

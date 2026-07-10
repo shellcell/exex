@@ -60,6 +60,9 @@ type State struct {
 	// so the scroller's per-row section-separator check is an O(1) lookup
 	// instead of a scan over all sections. Built once (sections are immutable).
 	ExecSecStarts map[uint64]string
+
+	// SourceState is the source split pane (see source.go).
+	SourceState
 }
 
 // HeightKey identifies a cached instruction height for one layout.
@@ -105,6 +108,7 @@ func (st *State) SetSpan(span explorer.Span) bool {
 	st.Decoding = false
 	st.PendingAddr = 0
 	st.HeightCache = nil
+	st.SourceAsmRowCache = nil // keyed by instruction index into the old window
 	return !span.Empty()
 }
 

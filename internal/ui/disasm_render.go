@@ -42,11 +42,11 @@ func (m *Model) renderDisasm() string {
 	// The source pane only makes sense when the binary actually carries debug
 	// info; otherwise keep the disasm full-width instead of opening an empty
 	// "no source" pane.
-	showSrc := m.showSource && m.file.HasDWARF()
-	if !showSrc && m.sourceFirst && m.hasOpenSourceFile() {
+	showSrc := m.dasm.ShowSource && m.file.HasDWARF()
+	if !showSrc && m.dasm.SourceFirst && m.hasOpenSourceFile() {
 		return m.renderSourceText(m.width, bodyH)
 	}
-	if showSrc && m.sourceFirst && m.hasOpenSourceFile() {
+	if showSrc && m.dasm.SourceFirst && m.hasOpenSourceFile() {
 		leftW := m.width / 2
 		rightW := m.width - leftW
 		left := m.renderSourceText(leftW, bodyH)
@@ -77,7 +77,7 @@ func (m *Model) renderDisasm() string {
 // disasm view (the view still gives the jump targets priority).
 func (m *Model) renderDisasmScroll(w, h int) string {
 	var addrMap func(addr uint64) *lipgloss.Style
-	if m.rightPaneActive() && !m.sourceFirst && len(m.dasm.Inst) > 0 {
+	if m.rightPaneActive() && !m.dasm.SourceFirst && len(m.dasm.Inst) > 0 {
 		curFile, curLine, _ := m.file.LookupAddrCol(m.dasm.Inst[m.dasm.Cur].Addr)
 		addrMap = func(addr uint64) *lipgloss.Style {
 			st := m.addrMapStyle(addr, curFile, curLine)
@@ -95,7 +95,7 @@ func (m *Model) disasmRowHeight(w int) func(int) int {
 }
 
 func (m *Model) disasmRenderWidth() int {
-	if m.mode == modeDisasm && m.showSource && m.file.HasDWARF() && !m.sourceFirst {
+	if m.mode == modeDisasm && m.dasm.ShowSource && m.file.HasDWARF() && !m.dasm.SourceFirst {
 		return m.width / 2
 	}
 	return m.width
@@ -112,7 +112,7 @@ func (m *Model) ensureSourceForDisasmCursor() bool {
 	// follows it via syncSourceAsm. Re-deriving srcCur from the disasm cursor
 	// here would snap the cursor back whenever it moved onto an unmapped
 	// (shadow) line, which is why "up" sometimes appeared stuck.
-	if m.sourceFirst && m.srcFile != "" && m.file.SourceLines(m.srcFile) != nil {
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" && m.file.SourceLines(m.dasm.SrcFile) != nil {
 		return true
 	}
 	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
@@ -122,16 +122,16 @@ func (m *Model) ensureSourceForDisasmCursor() bool {
 	if file == "" || line == 0 || m.file.SourceLines(file) == nil {
 		return false
 	}
-	if m.srcFile != file {
-		m.srcFile = file
-		m.srcCodeLines = m.mappedSourceLines(file)
+	if m.dasm.SrcFile != file {
+		m.dasm.SrcFile = file
+		m.dasm.SrcCodeLines = m.dasm.MappedLines(m.viewContextPtr(), file)
 	}
-	m.srcCur = line
+	m.dasm.SrcCur = line
 	return true
 }
 
 func (m *Model) hasOpenSourceFile() bool {
-	return m.srcFile != "" && m.file.SourceLines(m.srcFile) != nil
+	return m.dasm.SrcFile != "" && m.file.SourceLines(m.dasm.SrcFile) != nil
 }
 
 // lmaNote formats a section's load address (LMA) as a banner suffix, or "" when
@@ -168,7 +168,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 	}
 
 	hl := m.highlightedSource(file, src)
-	mapped := m.mappedSourceLines(file)
+	mapped := m.dasm.MappedLines(m.viewContextPtr(), file)
 
 	suffix := fmt.Sprintf(":%d", line)
 	if col > 0 {
@@ -177,7 +177,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 	loc := layout.TruncateMiddle(file, max(1, inner-lipgloss.Width(suffix))) + suffix
 	half := (h - 1) / 2
 	base := line - half
-	from := base + m.rightScroll
+	from := base + m.dasm.RightScroll
 	if from < 1 {
 		from = 1
 	}
@@ -211,7 +211,7 @@ func (m *Model) renderSourcePane(w, h int) string {
 		// at several positions), each in its column colour — same as the
 		// source-first pane.
 		if i == line {
-			if cols := m.sourceLineColumns(file, line); len(cols) > 0 {
+			if cols := m.dasm.SourceLineColumns(m.viewContextPtr(), file, line); len(cols) > 0 {
 				rows = append(rows, m.theme.coloredCaretRow(cols, gutterW, inner))
 			}
 		}

@@ -3,14 +3,11 @@ package ui
 import (
 	"time"
 
-	"charm.land/bubbles/v2/viewport"
-
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
-	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
 	findquerymodal "github.com/rabarbra/exex/internal/ui/modals/findquery"
@@ -103,7 +100,7 @@ func (m *Model) clearAllViewCaches() {
 	m.symbols.DropCaches()
 	m.sections.DropCaches()
 	m.strs.DropCaches()
-	m.srcLineHeightCache = nil
+	m.dasm.SrcLineHeightCache = nil
 }
 
 // clearColorCaches drops every cache whose entries bake in theme colours, so a
@@ -115,15 +112,15 @@ func (m *Model) clearColorCaches() {
 	m.clearAllViewCaches()
 	m.dasm.AsmCache = nil
 	m.dasm.AsmHL = nil
-	m.sourceAsmRowCache = nil
+	m.dasm.SourceAsmRowCache = nil
 	m.relocs.DropCaches()
 	m.info.DropCaches() // restyle the Info page on the next render
 }
 
 // disasmState holds the shell's side of the disassembly view: the decode
-// engine and its budget/strategy settings, plus the source split pane. The
-// view's own state — the decoded window, cursor, history, render caches —
-// lives in views/disasm.State (the dasm field).
+// engine and its budget/strategy settings. The view's own state — the decoded
+// window, cursor, history, source split pane, render caches — lives in
+// views/disasm.State (the dasm field).
 type disasmState struct {
 	dasm                disasmview.State
 	disasmMaxBytes      int
@@ -131,50 +128,16 @@ type disasmState struct {
 	disasmInitAddr      uint64
 	disasmTarget        string // configured landing/redirect strategy
 	disasmSvc           *explorer.DisasmService
-	showSource          bool
-	sourceFirst         bool
-	rightScroll         int // extra scroll offset for the follower (right) pane; 0 = auto-follow
-	srcVP               viewport.Model
 	srcHighlighter      *syntax.Highlighter
-	sourceAsmRowCache   layout.RowMemo[sourceAsmRowCacheKey, string]
 }
 
-// sourceAsmRowCacheKey identifies a cached source/assembly mapping row.
-type sourceAsmRowCacheKey struct {
-	i    int
-	w    int
-	file string
-	line int
-}
-
-// sourcePaneState stores the source-first disasm pane state. The Sources file
-// list itself lives in views/sources.State; the split pane stays in the shell
-// because it drives the disasm window and syntax highlighter.
+// sourcePaneState stores the shell's search state for the source pane: the
+// cross-source grep results and the scope of the next search. The pane itself
+// (open file, cursors, caches) lives in views/disasm.SourceState.
 type sourcePaneState struct {
-	srcFile            string // open source file ("" = no source-first pane)
-	srcCur             int    // 1-based current line in the open file
-	srcTop             int
-	srcCodeLines       map[int]bool // lines in srcFile that have machine code
-	srcCodeLineCache   map[string]map[int]bool
-	srcColumnCache     map[sourceLineCacheKey][]int
-	srcLineHeightCache map[sourceLineHeightKey]int
-	srcMatches         []srcMatch // last cross-source grep
-	srcMatchIdx        int
-	srcSearchAll       bool // scope of the next search in this view
-}
-
-// sourceLineCacheKey identifies cached line-column metadata.
-type sourceLineCacheKey struct {
-	file string
-	line int
-}
-
-// sourceLineHeightKey identifies a cached wrapped source-line height. Source
-// content is immutable once loaded, so width is the only layout input.
-type sourceLineHeightKey struct {
-	file string
-	line int
-	w    int
+	srcMatches   []srcMatch // last cross-source grep
+	srcMatchIdx  int
+	srcSearchAll bool // scope of the next search in this view
 }
 
 // interactionState stores cross-view input and viewport state.
@@ -214,7 +177,6 @@ type interactionState struct {
 	// input starts from these screen snapshots so queued key/mouse events cannot
 	// snap the first wheel step back to the caret-derived top.
 	renderedDisasmTop int
-	renderedSrcTop    int
 
 	// pageRows is the active view's page size (items per screen) recorded at the
 	// last render, so pgup/pgdown ([ / ]) advance by exactly one screen instead

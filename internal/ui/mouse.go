@@ -406,14 +406,14 @@ func (m *Model) captureViewportTop() {
 }
 
 func (m *Model) captureDisasmViewportTop() {
-	if m.sourceFirst && m.srcFile != "" {
-		src := m.file.SourceLines(m.srcFile)
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
+		src := m.file.SourceLines(m.dasm.SrcFile)
 		if len(src) == 0 {
 			return
 		}
 		contentH := max(1, m.bodyHeight()-1)
-		top := layout.ViewportTop(m.renderedSrcTop, len(src), contentH, m.sourceRowHeight(m.sourcePaneWidth()))
-		m.srcTop = top + 1
+		top := layout.ViewportTop(m.dasm.RenderedSrcTop, len(src), contentH, m.sourceRowHeight(m.sourcePaneWidth()))
+		m.dasm.SrcTop = top + 1
 		return
 	}
 	if len(m.dasm.Inst) == 0 {
@@ -427,14 +427,14 @@ func (m *Model) scrollDisasmViewport(delta int) {
 	if delta == 0 {
 		return
 	}
-	if m.sourceFirst && m.srcFile != "" {
-		src := m.file.SourceLines(m.srcFile)
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
+		src := m.file.SourceLines(m.dasm.SrcFile)
 		if len(src) == 0 {
 			return
 		}
 		contentH := max(1, m.bodyHeight()-1)
-		top := scrollViewportTop(max(0, m.srcTop-1), len(src), contentH, delta, m.sourceRowHeight(m.sourcePaneWidth()))
-		m.srcTop = top + 1
+		top := scrollViewportTop(max(0, m.dasm.SrcTop-1), len(src), contentH, delta, m.sourceRowHeight(m.sourcePaneWidth()))
+		m.dasm.SrcTop = top + 1
 		return
 	}
 	if len(m.dasm.Inst) == 0 {
@@ -568,9 +568,9 @@ func (m *Model) handleClick(x, y int) bool {
 	case modeRaw:
 		m.byteViews.Click(m.viewContextPtr(), hexraw.Raw, x, bodyRow)
 	case modeDisasm:
-		if m.sourceFirst && m.srcFile != "" && m.clickInSourcePane(x) {
+		if m.dasm.SourceFirst && m.dasm.SrcFile != "" && m.clickInSourcePane(x) {
 			if ln, ok := m.sourceLineAtBodyRow(bodyRow, m.sourcePaneWidth()); ok {
-				m.srcCur = ln
+				m.dasm.SrcCur = ln
 				m.syncSourceAsm()
 			}
 		} else if i, ok := m.instAtBodyRow(bodyRow); ok {
@@ -597,7 +597,7 @@ func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
 	if r < 0 {
 		return 0, false
 	}
-	src := m.file.SourceLines(m.srcFile)
+	src := m.file.SourceLines(m.dasm.SrcFile)
 	contentH := max(1, m.bodyHeight()-1)
 	idx, ok := layout.VisualItemAtRow(m.sourceTextTop(paneW, contentH), len(src), r, m.sourceRowHeight(paneW))
 	return idx + 1, ok

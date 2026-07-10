@@ -4,8 +4,15 @@ A fast terminal UI for exploring **ELF, Mach-O and PE** binaries. exex shows the
 file header, sections, segments, symbols, disassembly, hex/raw bytes, printable
 strings, dynamic libraries, relocations, syscall sites and DWARF-driven source
 mapping in one keyboard- and mouse-driven interface.
+A fast terminal UI for exploring **ELF, Mach-O and PE** binaries. exex shows the
+file header, sections, segments, symbols, disassembly, hex/raw bytes, printable
+strings, dynamic libraries, relocations, syscall sites and DWARF-driven source
+mapping in one keyboard- and mouse-driven interface.
 
 Its standout feature: when a binary has debug info (DWARF, or a Mach-O `.dSYM`),
+exex shows the **original source side by side with the exact disassembly it maps
+to**. It is interactive, navigable both ways, and entirely **static**: no
+debugger, no running process, no decompiler.
 exex shows the **original source side by side with the exact disassembly it maps
 to**. It is interactive, navigable both ways, and entirely **static**: no
 debugger, no running process, no decompiler.
@@ -15,6 +22,21 @@ exex [-debug PATH] [-s STRING] [-o [VIEW]] <binary> [goto]
 ```
 ![ExEx usage animation](/resources/exex.svg)
 
+## Highlights
+
+- **One explorer for three formats:** ELF, Mach-O, PE and universal/fat Mach-O
+  slices.
+- **Source ↔ disassembly:** original source beside machine code when DWARF or a
+  `.dSYM` is available.
+- **Fast first look:** read-only, no project database, no debugger session.
+- **Useful binary views:** symbols, sections, segments, strings, relocations,
+  libraries, syscall sites, CPU features, hex/raw bytes and disassembly.
+- **Scriptable output:** `-o` emits plain text views for pipes and automation.
+- **Text script mode:** readable shell/Python/etc. scripts open in a linked text
+  viewer instead of failing as “not a binary”.
+
+See [How exex compares to other tools](#how-exex-compares-to-other-tools) for the
+tradeoffs against binutils, debuggers and RE platforms.
 ## Highlights
 
 - **One explorer for three formats:** ELF, Mach-O, PE and universal/fat Mach-O
@@ -44,6 +66,8 @@ brew install shellcell/tap/exex
 Download the asset for your OS/arch from the
 [Releases](../../releases) page. Add `-lite` to the filename for the smaller
 build.
+[Releases](../../releases) page. Add `-lite` to the filename for the smaller
+build.
 
 ```sh
 # macOS / Linux
@@ -56,8 +80,10 @@ shasum -a 256 -c checksums.txt
 ```
 
 ### Go install
+### Go install
 
 ```sh
+go install github.com/rabarbra/exex@latest              # full build
 go install github.com/rabarbra/exex@latest              # full build
 go install -tags lite github.com/rabarbra/exex@latest   # lite build
 ```
@@ -65,6 +91,29 @@ go install -tags lite github.com/rabarbra/exex@latest   # lite build
 ### Build from source
 
 ```sh
+make build       # full  -> ./exex
+make lite        # lite  -> ./exex
+make test        # go test + lite vet
+make test-cross  # cross-compile and parse/disassemble readable targets; needs Go + Zig
+```
+
+## Full vs Lite Build
+
+There are two builds. They are identical except for syntax highlighting:
+
+| Build | Size | Syntax highlighting |
+|-------|------|---------------------|
+| **full** | larger | [Chroma](https://github.com/alecthomas/chroma) — full multi-language source highlighting and assembly highlighting |
+| **lite** | smaller | a small built-in highlighter (categorized source keywords/function names; categorized asm mnemonics plus registers / immediates / links) |
+
+The lite build drops Chroma and its embedded lexer/style data. Exact binary and
+archive sizes vary by platform and Go/dependency versions, but lite is the
+smaller download. Both builds honour the same themes and `colors:` config; the
+built-in highlighter follows your theme too.
+
+Pick **lite** if you want the smaller binary, **full** for the richest colouring.
+
+## Man Page and Shell Completions
 make build       # full  -> ./exex
 make lite        # lite  -> ./exex
 make test        # go test + lite vet
@@ -276,6 +325,23 @@ So exex is not trying to replace a disassembler-platform or the binutils suite �
 it's the fast first look: open any ELF/Mach-O/PE, read its layout and code, follow
 references and source mappings interactively, and drop to plain text when you need
 to script.
+
+## Acknowledgements
+
+exex builds on the work of the Go toolchain and standard library authors, plus
+the authors and maintainers of these projects:
+
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles) and [Lip Gloss](https://github.com/charmbracelet/lipgloss) for the terminal UI foundation.
+- [Chroma](https://github.com/alecthomas/chroma) for full-build syntax highlighting.
+- [`golang.org/x/arch`](https://pkg.go.dev/golang.org/x/arch) and [`golang.org/x/sys`](https://pkg.go.dev/golang.org/x/sys) for architecture decoders and system interfaces.
+- [`github.com/ianlancetaylor/demangle`](https://pkg.go.dev/github.com/ianlancetaylor/demangle) for C++/Rust symbol demangling.
+- [`github.com/atotto/clipboard`](https://github.com/atotto/clipboard) for clipboard integration.
+- [`gopkg.in/yaml.v3`](https://pkg.go.dev/gopkg.in/yaml.v3) for configuration parsing.
+
+See [`go.mod`](go.mod) for the full dependency list, including transitive
+packages.
+
+ChatGPT was used as a development and documentation assistant.
 
 ## Acknowledgements
 

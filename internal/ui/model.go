@@ -322,8 +322,8 @@ type searchState struct {
 	searchCancel     chan struct{}
 	searchRunning    bool
 	searchCancelable bool
-	searchResults    disasmSearchCache
-	searchCursorMode int
+	searchResults    explorer.SearchCache
+	searchCursorMode explorer.CursorMode
 	searchCursorAddr uint64
 }
 

@@ -19,7 +19,7 @@ func (m *Model) openSearch() { m.search.Open() }
 
 // SearchCaseChanged drops the disasm search cache, whose hits were computed
 // under the previous case setting. It satisfies search.Host.
-func (m *Model) SearchCaseChanged() { m.searchResults = disasmSearchCache{} }
+func (m *Model) SearchCaseChanged() { m.searchResults.Reset("") }
 
 // SearchHint describes what the active view searches. It satisfies search.Host.
 func (m *Model) SearchHint() string { return m.current().searchHint() }

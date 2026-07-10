@@ -220,11 +220,10 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 			m.setStatus("match: "+strings.TrimSpace(msg.hit.text), false)
 			return m, m.prefetchDisasmAroundCmd(msg.hit.addr)
 		}
+		m.searchResults.SetExhausted(msg.next.forward)
 		if msg.next.forward {
-			m.searchResults.forwardExhausted = true
 			m.searchCursorMode = searchCursorAfterEnd
 		} else {
-			m.searchResults.backwardExhausted = true
 			m.searchCursorMode = searchCursorBeforeStart
 		}
 		m.searchCursorAddr = 0

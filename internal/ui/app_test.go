@@ -372,8 +372,8 @@ func TestSearchMovsblOnChromiumBinary(t *testing.T) {
 		t.Fatalf("disasm window = %d bytes, budget = %d", got, m.disasmMaxBytes)
 	}
 	first := m.disasmInst[m.disasmCur].Addr
-	if len(m.searchResults.hits) < 2 {
-		t.Fatalf("expected cached movsbl hits, got %d", len(m.searchResults.hits))
+	if len(m.searchResults.Hits()) < 2 {
+		t.Fatalf("expected cached movsbl hits, got %d", len(m.searchResults.Hits()))
 	}
 	cmd := m.runSearch(true, false)
 	if m.searchRunning {
@@ -387,8 +387,8 @@ func TestSearchMovsblOnChromiumBinary(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		runModelCmd(t, m, m.runSearch(true, false))
 	}
-	if len(m.searchResults.hits) < 6 {
-		t.Fatalf("expected several cached movsbl hits, got %d", len(m.searchResults.hits))
+	if len(m.searchResults.Hits()) < 6 {
+		t.Fatalf("expected several cached movsbl hits, got %d", len(m.searchResults.Hits()))
 	}
 	for i := 0; i < 4; i++ {
 		cmd = m.runSearch(false, false)
@@ -428,7 +428,7 @@ func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
 		t.Fatalf("second hit 0x%x should be after first 0x%x", second, first)
 	}
 	runModelCmd(t, m, m.runSearch(true, false))
-	if !m.searchResults.forwardExhausted {
+	if !m.searchResults.Exhausted(true) {
 		t.Fatal("expected forward search to be exhausted after second badbeef hit")
 	}
 	cmd := m.runSearch(false, false)

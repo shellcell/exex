@@ -7,7 +7,6 @@ package ui
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
@@ -55,127 +55,69 @@ type disasmSearchProgressMsg struct {
 	status    string
 }
 
-type disasmSearchCache struct {
-	query             string
-	hits              []disasmSearchHit
-	forwardExhausted  bool
-	backwardExhausted bool
-	scannedLo         int
-	scannedHi         int
-	overflow          bool
-}
-
-const disasmSearchCacheCap = 100
-
+// searchCursorMode values mirror explorer.CursorMode; the shell tracks where the
+// search cursor sits so the cache can answer "the next hit" after running off an
+// end.
 const (
-	searchCursorAtMatch = iota
-	searchCursorAfterEnd
-	searchCursorBeforeStart
+	searchCursorAtMatch     = explorer.CursorAtMatch
+	searchCursorAfterEnd    = explorer.CursorAfterEnd
+	searchCursorBeforeStart = explorer.CursorBeforeStart
 )
 
+// resetDisasmSearchCache / ensureDisasmSearchCache keep the cache aligned with
+// the live query; the cache itself lives in internal/explorer.
 func (m *Model) resetDisasmSearchCache(query string) {
-	m.searchResults = disasmSearchCache{query: query, scannedLo: -1}
+	m.searchResults.Reset(query)
 	m.searchCursorMode = searchCursorAtMatch
 	m.searchCursorAddr = 0
 }
 
 func (m *Model) ensureDisasmSearchCache() {
-	if m.searchResults.query != m.searchQuery {
-		m.resetDisasmSearchCache(m.searchQuery)
+	if m.searchResults.EnsureQuery(m.searchQuery) {
+		m.searchCursorMode = searchCursorAtMatch
+		m.searchCursorAddr = 0
 	}
 }
 
+// cacheDisasmSearchHits stores the addresses and text of fresh hits. The decoded
+// windows that found them are deliberately dropped (see explorer.SearchHit).
 func (m *Model) cacheDisasmSearchHits(hits []disasmSearchHit, forward bool) {
 	if len(hits) == 0 {
 		return
 	}
 	m.ensureDisasmSearchCache()
-	sort.Slice(hits, func(i, j int) bool { return hits[i].addr < hits[j].addr })
-	for _, hit := range hits {
-		i := sort.Search(len(m.searchResults.hits), func(i int) bool { return m.searchResults.hits[i].addr >= hit.addr })
-		if i < len(m.searchResults.hits) && m.searchResults.hits[i].addr == hit.addr {
-			continue
-		}
-		if len(m.searchResults.hits) >= disasmSearchCacheCap {
-			m.searchResults.overflow = true
-		}
-		m.searchResults.hits = append(m.searchResults.hits, disasmSearchHit{})
-		copy(m.searchResults.hits[i+1:], m.searchResults.hits[i:])
-		m.searchResults.hits[i] = disasmSearchHit{addr: hit.addr, text: hit.text}
+	cached := make([]explorer.SearchHit, len(hits))
+	for i, h := range hits {
+		cached[i] = explorer.SearchHit{Addr: h.addr, Text: h.text}
 	}
-	if len(m.searchResults.hits) > disasmSearchCacheCap {
-		if forward {
-			m.searchResults.hits = m.searchResults.hits[len(m.searchResults.hits)-disasmSearchCacheCap:]
-		} else {
-			m.searchResults.hits = m.searchResults.hits[:disasmSearchCacheCap]
-		}
-	}
+	m.searchResults.Add(cached, forward)
 }
 
 func (m *Model) noteDisasmSearchCoverage(lo, hi int) {
 	m.ensureDisasmSearchCache()
-	if lo < 0 {
-		lo = 0
-	}
-	if hi < lo {
-		hi = lo
-	}
-	if m.searchResults.scannedLo < 0 || lo < m.searchResults.scannedLo {
-		m.searchResults.scannedLo = lo
-	}
-	if hi > m.searchResults.scannedHi {
-		m.searchResults.scannedHi = hi
-	}
+	m.searchResults.NoteCoverage(lo, hi)
 }
 
 func (m *Model) disasmSearchCacheComplete() bool {
-	img := m.file.ExecImage()
-	return !m.searchResults.overflow && m.searchResults.scannedLo == 0 && m.searchResults.scannedHi >= img.Len()
+	return m.searchResults.Complete(m.file.ExecImage().Len())
 }
 
-func (m *Model) cachedDisasmSearchHit(forward, inclusive bool) (disasmSearchHit, bool) {
+// cachedDisasmSearchHit answers a repeat search from the cache when it can.
+func (m *Model) cachedDisasmSearchHit(forward, inclusive bool) (explorer.SearchHit, bool) {
 	m.ensureDisasmSearchCache()
-	if len(m.searchResults.hits) == 0 || len(m.disasmInst) == 0 {
-		return disasmSearchHit{}, false
-	}
-	if !forward && m.searchCursorMode == searchCursorAfterEnd {
-		return m.searchResults.hits[len(m.searchResults.hits)-1], true
-	}
-	if forward && m.searchCursorMode == searchCursorBeforeStart {
-		return m.searchResults.hits[0], true
+	if len(m.disasmInst) == 0 {
+		return explorer.SearchHit{}, false
 	}
 	cur := m.disasmInst[m.disasmCur].Addr
 	if m.searchCursorAddr != 0 {
 		cur = m.searchCursorAddr
 	}
-	if forward {
-		for _, hit := range m.searchResults.hits {
-			if (!inclusive && hit.addr <= cur) || (inclusive && hit.addr < cur) {
-				continue
-			}
-			return hit, true
-		}
-		return disasmSearchHit{}, false
-	}
-	for i := len(m.searchResults.hits) - 1; i >= 0; i-- {
-		hit := m.searchResults.hits[i]
-		if (!inclusive && hit.addr >= cur) || (inclusive && hit.addr > cur) {
-			continue
-		}
-		return hit, true
-	}
-	return disasmSearchHit{}, false
+	return m.searchResults.Next(cur, m.searchCursorMode, forward, inclusive)
 }
 
 func (m *Model) cachedDisasmSearchBoundary(forward bool) (uint64, bool) {
 	m.ensureDisasmSearchCache()
-	if len(m.searchResults.hits) == 0 {
-		return 0, false
-	}
-	if forward {
-		return m.searchResults.hits[len(m.searchResults.hits)-1].addr, true
-	}
-	return m.searchResults.hits[0].addr, true
+	return m.searchResults.Boundary(forward)
 }
 
 func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
@@ -186,18 +128,14 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 	m.ensureDisasmSearchCache()
 	if fromCursor {
 		if hit, ok := m.cachedDisasmSearchHit(forward, inclusive); ok {
-			m.loadDisasmAt(hit.addr)
+			m.loadDisasmAt(hit.Addr)
 			m.searchCursorMode = searchCursorAtMatch
-			m.searchCursorAddr = hit.addr
-			m.setStatus("match: "+strings.TrimSpace(hit.text), false)
-			return m.prefetchDisasmAroundCmd(hit.addr)
+			m.searchCursorAddr = hit.Addr
+			m.setStatus("match: "+strings.TrimSpace(hit.Text), false)
+			return m.prefetchDisasmAroundCmd(hit.Addr)
 		}
 	}
-	if fromCursor && forward && m.searchResults.forwardExhausted {
-		m.setStatus("not found: "+m.searchQuery, true)
-		return nil
-	}
-	if fromCursor && !forward && m.searchResults.backwardExhausted {
+	if fromCursor && m.searchResults.Exhausted(forward) {
 		m.setStatus("not found: "+m.searchQuery, true)
 		return nil
 	}

@@ -67,12 +67,17 @@ func effectiveThemeName(name string) string {
 }
 
 // presetColors returns the colour overlay for a named theme. The three built-in
-// names use hand-tuned palettes; any other name is matched against Chroma's
-// style set (74 of them — dracula, monokai, github-dark, …) and derived into a
-// full UI palette. An empty name is resolved before this function; unknown names
-// keep the built-in dark defaults.
+// names use hand-tuned palettes; any other name is matched against the curated
+// Chroma style set (dracula, monokai, github-dark, …) and derived into a full UI
+// palette. An empty name is resolved before this function; unknown names keep
+// the built-in dark defaults.
+//
+// The name is lowercased and trimmed once up front: theme.PaletteFor is
+// case-sensitive, so passing a raw config value straight to it would silently
+// drop `theme: Dracula` back to the defaults.
 func presetColors(name string) config.Colors {
-	switch strings.ToLower(strings.TrimSpace(name)) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch name {
 	case "", "dark":
 		return config.Colors{}
 	case "solarized-dark":
@@ -92,8 +97,8 @@ func presetColors(name string) config.Colors {
 		c.ViewBG = nord0
 		return c
 	}
-	if p, ok := theme.PaletteFor(strings.TrimSpace(name)); ok {
-		return deriveColors(strings.TrimSpace(name), p)
+	if p, ok := theme.PaletteFor(name); ok {
+		return deriveColors(name, p)
 	}
 	return config.Colors{}
 }

@@ -1,11 +1,15 @@
 package chromastyles
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/rabarbra/exex/internal/chromasubset"
+)
 
 func TestCuratedStyles(t *testing.T) {
 	for _, name := range []string{"swapoff", "nord", "catppuccin-mocha", "dracula", "solarized-dark", "solarized-light"} {
-		if st := Get(name); st == nil {
-			t.Fatalf("Get(%q) returned nil", name)
+		if st, ok := Lookup(name); !ok || st == nil {
+			t.Errorf("Lookup(%q) returned no style", name)
 		}
 	}
 }
@@ -15,21 +19,24 @@ func TestCuratedStyleFallback(t *testing.T) {
 		t.Fatal("Fallback is nil")
 	}
 	if _, ok := Lookup("definitely-not-a-style"); ok {
-		t.Fatalf("unknown style unexpectedly bundled")
-	}
-	if got := Get("definitely-not-a-style"); got != Fallback() {
-		t.Fatalf("unknown style did not return Fallback")
+		t.Fatal("unknown style unexpectedly bundled")
 	}
 }
 
-func TestCuratedStyleNames(t *testing.T) {
-	names := Names()
-	if len(names) == 0 {
-		t.Fatal("Names returned no styles")
+// TestBundledMatchesManifest keeps the embedded assets and the manifest in step.
+// internal/theme's palette table is generated from the same manifest, so drift
+// here is drift between the settings picker and the styles it can render.
+func TestBundledMatchesManifest(t *testing.T) {
+	names, err := chromasubset.StyleNames()
+	if err != nil {
+		t.Fatalf("StyleNames: %v", err)
 	}
-	for i := 1; i < len(names); i++ {
-		if names[i-1] > names[i] {
-			t.Fatalf("Names not sorted: %q before %q", names[i-1], names[i])
+	for _, name := range names {
+		if _, ok := Lookup(name); !ok {
+			t.Errorf("styles.txt lists %q but it is not embedded; run go generate ./internal/chromasubset", name)
 		}
+	}
+	if got := len(registry()); got != len(names) {
+		t.Errorf("embedded %d styles, manifest lists %d", got, len(names))
 	}
 }

@@ -83,7 +83,9 @@ func TestUnsupportedLanguageFallsBackToMinimal(t *testing.T) {
 }
 
 func TestUnsupportedChromaStyleFallsBackToMinimal(t *testing.T) {
-	const style = "rose-pine"
+	// A name Chroma will never register, so curating more styles into
+	// internal/chromasubset/styles.txt can't quietly invalidate this test.
+	const style = "definitely-not-a-style"
 	if _, ok := chromastyles.Lookup(style); ok {
 		t.Fatalf("%s is bundled; pick an unbundled style for this test", style)
 	}

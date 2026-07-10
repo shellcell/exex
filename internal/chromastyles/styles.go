@@ -5,7 +5,6 @@ package chromastyles
 import (
 	"embed"
 	"io/fs"
-	"sort"
 	"strings"
 	"sync"
 
@@ -46,27 +45,11 @@ func Fallback() *chroma.Style {
 	return registry()["swapoff"]
 }
 
-// Names returns the sorted list of curated style names.
-func Names() []string {
-	reg := registry()
-	out := make([]string, 0, len(reg))
-	for name := range reg {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// Lookup returns the named curated style and whether it is bundled.
+// Lookup returns the named curated style and whether it is bundled. Callers
+// decide what an absent style means; there is deliberately no Get-with-fallback
+// helper, because silently substituting a different style is what let the
+// settings picker offer themes it could not actually render.
 func Lookup(name string) (*chroma.Style, bool) {
 	style, ok := registry()[strings.ToLower(strings.TrimSpace(name))]
 	return style, ok
-}
-
-// Get returns the named curated style or Fallback when the name is not bundled.
-func Get(name string) *chroma.Style {
-	if style, ok := Lookup(name); ok {
-		return style
-	}
-	return Fallback()
 }

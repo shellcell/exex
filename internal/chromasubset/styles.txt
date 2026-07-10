@@ -1,21 +1,63 @@
 # Chroma style XML files copied into internal/chromastyles/embedded.
+#
+# This manifest is the single source of truth for which styles exist: it drives
+# both the embedded XML assets (internal/chromastyles) and the palette table
+# (internal/theme/palettes_gen.go), so the settings picker can never offer a
+# theme whose highlighter is not bundled.
+#
 # swapoff must stay present because it is the runtime fallback style.
+#
+# nord, solarized-dark and solarized-light back the hand-tuned built-in presets
+# of the same name (see internal/ui/themes.go), which set SyntaxTheme to those
+# Chroma styles. settingsThemeList dedupes them out of the Chroma section rather
+# than listing them twice.
 swapoff.xml
 nord.xml
-catppuccin-mocha.xml
-catppuccin-latte.xml
-catppuccin-frappe.xml
-catppuccin-macchiato.xml
-dracula.xml
-github.xml
-github-dark.xml
-monokai.xml
 solarized-dark.xml
 solarized-light.xml
+
+abap.xml
+arduino.xml
+ashen.xml
+aura-theme-dark.xml
+base16-snazzy.xml
+catppuccin-frappe.xml
+catppuccin-latte.xml
+catppuccin-macchiato.xml
+catppuccin-mocha.xml
+darcula.xml
+doom-one.xml
+doom-one2.xml
+dracula.xml
+evergarden.xml
+fruity.xml
+github-dark.xml
+gruvbox.xml
+gruvbox-light.xml
+kanagawa-dragon.xml
+kanagawa-lotus.xml
+kanagawa-wave.xml
+modus-operandi.xml
+modus-vivendi.xml
+monokai.xml
+monokailight.xml
+native.xml
+nordic.xml
+onedark.xml
+paraiso-dark.xml
+paraiso-light.xml
+rainbow_dash.xml
+rose-pine.xml
+rose-pine-dawn.xml
+rose-pine-moon.xml
+rpgle.xml
+rrt.xml
+solarized-dark256.xml
+tango.xml
+tokyonight-day.xml
+tokyonight-moon.xml
+tokyonight-night.xml
+vulcan.xml
+witchhazel.xml
 xcode.xml
 xcode-dark.xml
-native.xml
-vim.xml
-onedark.xml
-gruvbox.xml
-tokyonight-night.xml

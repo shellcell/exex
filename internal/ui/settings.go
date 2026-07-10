@@ -76,8 +76,13 @@ var settingsViewNames = []string{
 	"info", "sections", "symbols", "disasm", "hex", "raw", "strings", "libs", "sources",
 }
 
-// settingsThemeList is the cycle for the "theme" setting: the built-in names
-// first, then every Chroma style.
+// settingsThemeList is the cycle for the "theme" setting: the four built-in
+// names first, then every curated Chroma style.
+//
+// theme.Names() is generated from the same manifest that decides which style
+// XMLs get embedded, so every entry here has a real highlighter behind it. The
+// three built-ins that are also Chroma styles (nord, solarized-dark,
+// solarized-light) are deduplicated so they appear once, as built-ins.
 func settingsThemeList() []string {
 	out := []string{defaultThemeName, "dark", "solarized-dark", "solarized-light"}
 	seen := map[string]bool{}

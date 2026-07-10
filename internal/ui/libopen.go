@@ -93,10 +93,11 @@ func (m *Model) openCacheLib(lib string) (tea.Model, tea.Cmd) {
 func (m *Model) enterLibFile(f *binfile.File, label string) (tea.Model, tea.Cmd) {
 	nm, err := New(f, Options{Config: &m.cfg})
 	if err != nil {
+		f.Close()
 		m.setStatus("open library: "+err.Error(), true)
 		return m, nil
 	}
 	m.enterFile(nm, label)
 	nm.setStatus("opened dependency "+label+"  (Ctrl+O: back)", false)
-	return nm, nm.switchMode(modeInfo)
+	return nm, tea.Batch(nm.Init(), nm.switchMode(modeInfo))
 }

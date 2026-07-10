@@ -7,6 +7,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,57 @@ type disasmSearchProgressMsg struct {
 	scannedHi int
 	done      bool
 	status    string
+}
+
+const disasmSearchLead = 1 << 10
+
+// directionalHitBuffer keeps only the nearest hits in the direction being
+// searched. Backward decoding still arrives in ascending address order, so it
+// uses a ring to retain the latest addresses without shifting on every match.
+type directionalHitBuffer struct {
+	hits     []disasmSearchHit
+	limit    int
+	forward  bool
+	next     int
+	overflow bool
+}
+
+func (b *directionalHitBuffer) add(hit disasmSearchHit) {
+	if len(b.hits) < b.limit {
+		b.hits = append(b.hits, hit)
+		return
+	}
+	b.overflow = true
+	if b.forward {
+		return
+	}
+	b.hits[b.next] = hit
+	b.next = (b.next + 1) % b.limit
+}
+
+func (b *directionalHitBuffer) ordered() []disasmSearchHit {
+	if b.forward {
+		return b.hits
+	}
+	out := make([]disasmSearchHit, len(b.hits))
+	if !b.overflow {
+		for i := range b.hits {
+			out[i] = b.hits[len(b.hits)-1-i]
+		}
+		return out
+	}
+	for i := range b.hits {
+		j := (b.next - 1 - i + len(b.hits)) % len(b.hits)
+		out[i] = b.hits[j]
+	}
+	return out
+}
+
+func appendDirectionalHits(dst, src []disasmSearchHit, limit int) []disasmSearchHit {
+	if len(dst) >= limit {
+		return dst
+	}
+	return append(dst, src[:min(len(src), limit-len(dst))]...)
 }
 
 // searchCursorMode values mirror explorer.CursorMode; the shell tracks where the
@@ -206,7 +258,7 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		}
 	}
 	m.setStatus(m.disasmSearchStatus(step), false)
-	return m.searchDisasmStepCmd(step)
+	return m.backgroundCmd(m.searchDisasmStepCmd(step))
 }
 
 // nameMatches compares a search query to a symbol name, honouring case
@@ -333,20 +385,35 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		}
 		return strings.Contains(strings.ToLower(s), query)
 	}
+	var symbolStarts []uint64
+	for _, sym := range file.Symbols {
+		if sym.Addr != 0 && matchText(sym.Display()) {
+			symbolStarts = append(symbolStarts, sym.Addr)
+		}
+	}
+	slices.Sort(symbolStarts)
+	symbolStarts = slices.Compact(symbolStarts)
 	match := func(instText string, addr uint64) bool {
 		if matchText(instText) {
 			return true
 		}
-		if sym, ok := file.SymbolAt(addr); ok && sym.Addr == addr && matchText(sym.Display()) {
-			return true
-		}
-		return false
+		_, ok := slices.BinarySearch(symbolStarts, addr)
+		return ok
 	}
 	type chunkResult struct {
-		order int
-		win   binfile.Window
-		insts []disasm.Inst
-		hits  []disasmSearchHit
+		hits []disasmSearchHit
+	}
+	const hitLimit = explorer.CacheCap + 1 // one extra makes SearchCache record overflow
+	hydrate := func(hit disasmSearchHit) disasmSearchHit {
+		win, ok := img.WindowContaining(hit.addr, step.chunk, step.chunk/4)
+		if !ok {
+			return hit
+		}
+		insts := svc.DecodeWindow(win)
+		if idx, ok := disasm.IndexForAddr(insts, hit.addr); ok {
+			hit.win, hit.insts, hit.idx = win, insts, idx
+		}
+		return hit
 	}
 	return func() tea.Msg {
 		if scanCancelled(step.cancel) {
@@ -383,35 +450,27 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 					if scanCancelled(step.cancel) {
 						return
 					}
-					insts := svc.DecodeWindow(win)
-					results[i] = chunkResult{order: i, win: win, insts: insts}
-					startPos := step.logical
-					if i > 0 {
-						startPos = win.Start
-					}
-					for j, inst := range insts {
+					buf := directionalHitBuffer{forward: true, limit: hitLimit}
+					svc.DecodeRangeFunc(win.Start, win.End-win.Start, disasmSearchLead, func(inst disasm.Inst) bool {
 						if scanCancelled(step.cancel) {
-							return
-						}
-						instPos, ok := img.PosForAddr(inst.Addr)
-						if !ok || instPos < startPos {
-							continue
+							return false
 						}
 						if match(inst.Text, inst.Addr) {
-							results[i].hits = append(results[i].hits, disasmSearchHit{win: win, insts: insts, idx: j, addr: inst.Addr, text: inst.Text})
+							buf.add(disasmSearchHit{addr: inst.Addr, text: inst.Text})
 						}
-					}
+						return true
+					})
+					results[i].hits = buf.ordered()
 				}(i, win)
 			}
 			wg.Wait()
-			var found []disasmSearchHit
+			found := make([]disasmSearchHit, 0, hitLimit)
 			for _, res := range results {
-				if len(res.hits) > 0 {
-					found = append(found, res.hits...)
-				}
+				found = appendDirectionalHits(found, res.hits, hitLimit)
 			}
 			if len(found) > 0 {
-				return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: step.logical, scannedHi: logical, done: true}
+				hit := hydrate(found[0])
+				return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &hit, found: found, scannedLo: step.logical, scannedHi: logical, done: true}
 			}
 			next := step
 			next.logical = logical
@@ -444,36 +503,27 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 				if scanCancelled(step.cancel) {
 					return
 				}
-				insts := svc.DecodeWindow(win)
-				results[i] = chunkResult{order: i, win: win, insts: insts}
-				endPos := step.logical
-				if i > 0 {
-					endPos = win.End
-				}
-				for j := len(insts) - 1; j >= 0; j-- {
+				buf := directionalHitBuffer{forward: false, limit: hitLimit}
+				svc.DecodeRangeFunc(win.Start, win.End-win.Start, disasmSearchLead, func(inst disasm.Inst) bool {
 					if scanCancelled(step.cancel) {
-						return
-					}
-					inst := insts[j]
-					instPos, ok := img.PosForAddr(inst.Addr)
-					if !ok || instPos >= endPos {
-						continue
+						return false
 					}
 					if match(inst.Text, inst.Addr) {
-						results[i].hits = append(results[i].hits, disasmSearchHit{win: win, insts: insts, idx: j, addr: inst.Addr, text: inst.Text})
+						buf.add(disasmSearchHit{addr: inst.Addr, text: inst.Text})
 					}
-				}
+					return true
+				})
+				results[i].hits = buf.ordered()
 			}(i, win)
 		}
 		wg.Wait()
-		var found []disasmSearchHit
+		found := make([]disasmSearchHit, 0, hitLimit)
 		for _, res := range results {
-			if len(res.hits) > 0 {
-				found = append(found, res.hits...)
-			}
+			found = appendDirectionalHits(found, res.hits, hitLimit)
 		}
 		if len(found) > 0 {
-			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: logical, scannedHi: step.logical, done: true}
+			hit := hydrate(found[0])
+			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &hit, found: found, scannedLo: logical, scannedHi: step.logical, done: true}
 		}
 		next := step
 		next.logical = logical

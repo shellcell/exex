@@ -356,14 +356,12 @@ func (m *Model) listGeometryFor() (listGeometry, bool) {
 		m.sources.Ensure(ctx)
 		return listGeometry{len(m.sources.Rows), 1, oneRow, &m.sources.Cur, &m.sources.Top, m.sources.RenderedTop}, true
 	case modeRelocs:
-		m.relocs.Recompute(m.viewContext())
 		return listGeometry{len(m.relocs.Filtered), 2, oneRow, &m.relocs.Cur, &m.relocs.Top, m.relocs.Top}, true
 	case modeLibs:
 		if m.file.Info == nil {
 			return listGeometry{}, false
 		}
 		ctx := m.viewContext()
-		m.libs.BuildRows(ctx)
 		return listGeometry{len(m.libs.Rows), m.libs.HeaderRows(ctx), m.libs.RowHeightFn(ctx), &m.libs.Cur, &m.libs.Top, m.libs.RenderedTop}, true
 	}
 	return listGeometry{}, false

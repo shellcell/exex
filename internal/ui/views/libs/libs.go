@@ -43,6 +43,7 @@ type State struct {
 
 	collapsed map[string]bool      // collapsed directory paths
 	availKind map[string]availKind // cached (filesystem-touching) classifications
+	built     bool
 }
 
 // libAvail classifies a library path, caching the (filesystem-touching) result.
@@ -114,6 +115,7 @@ func (st *State) sortedIdxs(ctx view.Context) ([]int, []string) {
 // BuildRows flattens the needed libraries into a path tree (tree mode) or one
 // leaf row per library (flat mode).
 func (st *State) BuildRows(ctx view.Context) {
+	st.built = true
 	idxs, libs := st.sortedIdxs(ctx)
 	if st.Tree {
 		roots := layout.BuildTree(idxs, func(i int) string { return libs[i] }, layout.SegPath)
@@ -202,7 +204,6 @@ func (st *State) Update(ctx view.Context, host view.Host, key string) {
 	if ctx.File.Info == nil || len(ctx.File.Info.DynamicLibs) == 0 {
 		return
 	}
-	st.BuildRows(ctx)
 	if layout.NavKey(&st.Cur, len(st.Rows), host.ListPage(), key) {
 		return
 	}
@@ -319,10 +320,13 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 		return lipgloss.Place(ctx.Width, bodyH, lipgloss.Center, lipgloss.Center, strings.TrimRight(body, "\n"))
 	}
 
-	st.BuildRows(ctx)
+	if !st.built {
+		st.BuildRows(ctx)
+	}
 	b := strings.Builder{}
-	b.WriteString(st.renderHeader(ctx))
-	headerH := st.HeaderRows(ctx)
+	header := st.renderHeader(ctx)
+	b.WriteString(header)
+	headerH := renderedLineCount(header)
 	visible := bodyH - headerH
 	if visible < 1 {
 		visible = 1
@@ -336,14 +340,17 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 		b.WriteString(ctx.PlaceCentred("no matching libraries  ·  Esc clears filters", bodyH-headerH))
 		return layout.PadBody(b.String(), ctx.Width, bodyH)
 	}
+	rendered := headerH
+renderRows:
 	for i := top; i < len(st.Rows); i++ {
 		line := st.row(ctx, i, i == st.Cur)
 		for _, row := range layout.RenderLineRowsIndented(line, ctx.Width, ctx.Wrap, 6) {
-			if renderedLineCount(b.String()) >= bodyH {
-				break
+			if rendered >= bodyH {
+				break renderRows
 			}
 			b.WriteString(row)
 			b.WriteString("\n")
+			rendered++
 		}
 	}
 	return layout.PadBody(b.String(), ctx.Width, bodyH)

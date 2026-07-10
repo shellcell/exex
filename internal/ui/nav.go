@@ -52,7 +52,10 @@ func filterCapture(in *textinput.Model, key string, msg tea.KeyMsg, recompute fu
 		return nil, false // navigation falls through to the view handler
 	}
 	var cmd tea.Cmd
+	before := in.Value()
 	*in, cmd = in.Update(msg)
-	recompute()
+	if in.Value() != before {
+		recompute()
+	}
 	return cmd, true
 }

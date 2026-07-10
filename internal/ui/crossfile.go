@@ -17,6 +17,7 @@ import (
 // pushed on top, takes m's size, and records its breadcrumb label. Every file
 // switch (dependency / member / arch) routes through this so Back works uniformly.
 func (m *Model) enterFile(nm *Model, label string) {
+	m.suspendBackground()
 	nm.fileStack = append(append([]*Model(nil), m.fileStack...), m)
 	nm.fileLabel = label
 	nm.width, nm.height = m.width, m.height
@@ -31,11 +32,12 @@ func (m *Model) goBackFile() (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	prev := m.fileStack[n-1]
+	m.retireFile()
 	prev.fileStack = m.fileStack[: n-1 : n-1]
 	prev.width, prev.height = m.width, m.height
 	prev.viewDirty = true
 	prev.setStatus("back to "+prev.breadcrumbLeaf(), false)
-	return prev, nil, true
+	return prev, prev.Init(), true
 }
 
 // breadcrumbLeaf is this model's own file name (the last breadcrumb segment).

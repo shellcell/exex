@@ -52,10 +52,10 @@ func (m *Model) startCPUFeatScan() tea.Cmd {
 	done := make(chan struct{})
 	m.cpufeatCancel = done
 	m.setStatus("scanning for CPU features … (Esc cancels)", false)
-	return func() tea.Msg {
+	return m.backgroundCmd(func() tea.Msg {
 		set, err := dump.ScanCPUFeaturesCancel(file, done)
 		return cpufeatDoneMsg{file: file, seq: seq, set: set, err: err}
-	}
+	})
 }
 
 func (m *Model) handleCPUFeatDone(msg cpufeatDoneMsg) (tea.Model, tea.Cmd) {

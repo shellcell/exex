@@ -13,6 +13,7 @@ package ui
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,7 +98,7 @@ func NewText(path string, cfg config.Config) (tea.Model, error) {
 
 // load reads path and recomputes the highlighted paths.
 func (m *textModel) load(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := readFilePrefix(path, maxTextFileBytes+1)
 	if err != nil {
 		return err
 	}
@@ -234,7 +235,7 @@ func (m *textModel) open(resolved string) (tea.Model, tea.Cmd) {
 		nm.width, nm.height = m.width, m.height
 		return nm, nm.Init()
 	}
-	data, err := os.ReadFile(resolved)
+	data, err := readFilePrefix(resolved, 8192)
 	if err != nil {
 		m.status = "open: " + err.Error()
 		return m, nil
@@ -248,6 +249,15 @@ func (m *textModel) open(resolved string) (tea.Model, tea.Cmd) {
 		m.status = "open: " + err.Error()
 	}
 	return m, nil
+}
+
+func readFilePrefix(path string, limit int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, int64(limit)))
 }
 
 func (m *textModel) View() tea.View {
@@ -387,7 +397,8 @@ func (m *textModel) overlayCenterText(bg, modal string) string {
 func extractPaths(lines []string, dir string) ([][]pathSpan, []string) {
 	spans := make([][]pathSpan, len(lines))
 	seen := map[string]bool{}
-	cmdCache := map[string]string{} // memoised $PATH lookups
+	pathCache := map[string]string{} // memoised filesystem hits and misses
+	cmdCache := map[string]string{}  // memoised $PATH lookups
 	var picks []string
 	for i, line := range lines {
 		var ls []pathSpan
@@ -402,7 +413,11 @@ func extractPaths(lines []string, dir string) ([][]pathSpan, []string) {
 			}
 			tok := line[s:e]
 			// A filesystem path first; otherwise a bare command name on $PATH.
-			resolved := resolveExistingPath(tok, dir)
+			resolved, cached := pathCache[tok]
+			if !cached {
+				resolved = resolveExistingPath(tok, dir)
+				pathCache[tok] = resolved
+			}
 			if resolved == "" {
 				resolved = resolveCommand(tok, cmdCache)
 			}

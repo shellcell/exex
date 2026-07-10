@@ -82,13 +82,16 @@ func (st *State) Render(ctx view.Context) string {
 	// viewport scroll changes per frame — so build it once and cache by width. A
 	// theme change clears it via DropCaches; an arch switch builds a fresh model.
 	// Compiler() is scanned lazily during this first build, then cached.
-	if st.Body == "" || st.BodyW != innerW {
+	rebuilt := st.Body == "" || st.BodyW != innerW
+	if rebuilt {
 		st.Body = buildContent(ctx, innerW)
 		st.BodyW = innerW
 	}
 	st.VP.SetWidth(innerW)
 	st.VP.SetHeight(max(1, bodyH-2))
-	st.VP.SetContent(st.Body)
+	if rebuilt {
+		st.VP.SetContent(st.Body)
+	}
 	panel := ctx.PanelStyle.Render(st.VP.View())
 	return lipgloss.Place(ctx.Width, bodyH, lipgloss.Center, lipgloss.Top, panel)
 }

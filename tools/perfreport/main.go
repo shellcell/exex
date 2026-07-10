@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/dump"
@@ -127,6 +129,27 @@ func main() {
 		func(v any) { v.(*binfile.File).Close() },
 	)
 	rows = append(rows, row{"TUI startup cold-model (ui.New)", tui})
+	// Model.Init starts the immediate demangle and disassembly prewarm. Measure it
+	// separately from ui.New so startup reports include the work users pay before
+	// the first Disasm switch becomes instant.
+	tuiInit := measurePrepared(*runs,
+		func() any {
+			f := mustOpen(path)
+			m, err := ui.New(f, ui.Options{Config: cfg})
+			if err != nil {
+				f.Close()
+				fmt.Fprintf(os.Stderr, "perfreport: ui.New: %v\n", err)
+				os.Exit(1)
+			}
+			return &preparedTUI{file: f, model: m}
+		},
+		func(v any) {
+			p := v.(*preparedTUI)
+			p.model = settleProgram(p.model, p.model.Init())
+		},
+		func(v any) { v.(*preparedTUI).file.Close() },
+	)
+	rows = append(rows, row{"TUI startup background (Init settled)", tuiInit})
 
 	// Per-view interactive render cost (a full 160×48 frame, decode completed).
 	for _, v := range ui.RenderViewStats(loaded, 160, 48, *runs) {
@@ -161,6 +184,43 @@ func main() {
 type stat struct {
 	dur   time.Duration
 	alloc uint64
+}
+
+type preparedTUI struct {
+	file  *binfile.File
+	model tea.Model
+}
+
+// settleProgram executes a command and every command it schedules, running
+// Batch children concurrently like Bubble Tea does while serialising Update.
+func settleProgram(model tea.Model, initial tea.Cmd) tea.Model {
+	if initial == nil {
+		return model
+	}
+	results := make(chan tea.Msg)
+	active := 0
+	start := func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		active++
+		go func() { results <- cmd() }()
+	}
+	start(initial)
+	for active > 0 {
+		msg := <-results
+		active--
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, cmd := range batch {
+				start(cmd)
+			}
+			continue
+		}
+		var next tea.Cmd
+		model, next = model.Update(msg)
+		start(next)
+	}
+	return model
 }
 
 // measure times fn over `runs` iterations (reporting the fastest, to suppress

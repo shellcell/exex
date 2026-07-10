@@ -94,7 +94,7 @@ func (m *Model) startXrefScan() tea.Cmd {
 	done := make(chan struct{})
 	m.xrefCancel = done
 	m.setStatus("finding references to "+label+" … (Esc cancels)", false)
-	return m.xrefScanCmd(target, m.xrefSeq, done)
+	return m.backgroundCmd(m.xrefScanCmd(target, m.xrefSeq, done))
 }
 
 func (m *Model) xrefLabelForTarget(target uint64) string {

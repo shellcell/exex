@@ -125,6 +125,7 @@ func (v hexView) ensure() tea.Cmd     { v.byteViews.EnsureHex(v.viewContextPtr()
 func (v rawView) ensure() tea.Cmd     { v.byteViews.EnsureRaw(v.viewContextPtr()); return nil }
 func (v stringsView) ensure() tea.Cmd { v.strs.Ensure(v.viewContext()); return nil }
 func (v sourcesView) ensure() tea.Cmd { v.sources.Ensure(v.viewContext()); return nil }
+func (v libsView) ensure() tea.Cmd    { v.libs.BuildRows(v.viewContext()); return nil }
 
 func (v relocsView) ensure() tea.Cmd {
 	ctx := v.viewContext()

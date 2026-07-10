@@ -389,7 +389,7 @@ func hasExplicitSameAddr(symbols []Symbol, explicitSize []bool, addrIdx []int, p
 // demangle.Filter is pure, so the C++/Rust pass is fanned out across cores.
 func (f *File) ComputeDemangled() []string {
 	out := make([]string, len(f.Symbols))
-	n := max(runtime.NumCPU(), 1)
+	n := demangleWorkers(runtime.GOMAXPROCS(0))
 	itanium := func(lo, hi int) {
 		for i := lo; i < hi; i++ {
 			out[i] = demangleName(f.Symbols[i].Name)
@@ -409,6 +409,10 @@ func (f *File) ComputeDemangled() []string {
 	}
 	demangleSwiftInto(f.Symbols, out)
 	return out
+}
+
+func demangleWorkers(procs int) int {
+	return min(max(procs, 1), 8)
 }
 
 // ApplyDemangled stores the result of ComputeDemangled onto the symbols. Run it

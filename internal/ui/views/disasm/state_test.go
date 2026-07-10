@@ -104,6 +104,15 @@ func TestSnapshotCursorNoops(t *testing.T) {
 			t.Errorf("History[0] = %#x, want 0x10 untouched", st.History[0])
 		}
 	})
+	t.Run("cursor outside window", func(t *testing.T) {
+		st := pushed(0x10)
+		st.Inst = []dis.Inst{{Addr: 0x24}}
+		st.Cur = 2
+		st.SnapshotCursorToHistory()
+		if st.History[0] != 0x10 {
+			t.Errorf("History[0] = %#x, want 0x10 untouched", st.History[0])
+		}
+	})
 }
 
 func TestSetSpanInstallsAndDropsCaches(t *testing.T) {
@@ -157,5 +166,9 @@ func TestCurAddr(t *testing.T) {
 	st.Cur = 1
 	if a, ok := st.CurAddr(); !ok || a != 0x14 {
 		t.Errorf("CurAddr = (%#x, %v), want (0x14, true)", a, ok)
+	}
+	st.Cur = len(st.Inst)
+	if _, ok := st.CurAddr(); ok {
+		t.Error("an out-of-range cursor has an address")
 	}
 }

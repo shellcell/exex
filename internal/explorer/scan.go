@@ -2,7 +2,6 @@ package explorer
 
 import (
 	"container/heap"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -44,12 +43,6 @@ func (s *DisasmService) ScanMatching(match func(text string) bool, limit int, do
 	img := s.file.ExecImage()
 	chunk := s.SearchChunkBytes()
 
-	_, configuredWorkers := s.options()
-	maxWorkers := runtime.GOMAXPROCS(0)
-	if configuredWorkers > 0 {
-		maxWorkers = configuredWorkers
-	}
-
 	var starts []int
 	for pos := 0; pos < img.Len(); {
 		win := img.Window(pos, chunk)
@@ -59,7 +52,7 @@ func (s *DisasmService) ScanMatching(match func(text string) bool, limit int, do
 		starts = append(starts, pos)
 		pos = win.End
 	}
-	workers := max(min(maxWorkers, len(starts)), 1)
+	workers := s.SearchWorkersFor(len(starts))
 	sem := make(chan struct{}, workers)
 
 	// One heap for all workers: a per-worker cap would still scale with the chunk

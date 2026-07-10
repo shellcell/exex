@@ -59,10 +59,10 @@ func (m *Model) prefetchDisasmAroundCmd(addr uint64) tea.Cmd {
 		return nil
 	}
 	svc := m.disasmService()
-	return func() tea.Msg {
+	return m.backgroundCmd(func() tea.Msg {
 		svc.PrefetchAround(addr)
 		return disasmPrefetchMsg{}
-	}
+	})
 }
 
 func (m *Model) decodeDisasmAt(addr uint64, before int) explorer.Span {
@@ -100,10 +100,10 @@ func (m *Model) decodeDisasmCmd(addr uint64) tea.Cmd {
 	svc := m.disasmService()
 	file := m.file
 	before := svc.LeadBytes()
-	return func() tea.Msg {
+	return m.backgroundCmd(func() tea.Msg {
 		span := svc.DecodeSpanAt(addr, before)
 		return disasmReadyMsg{file: file, addr: addr, span: span}
-	}
+	})
 }
 
 // disasmLoadedAddr reports whether addr is inside the decoded window *and* lands

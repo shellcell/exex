@@ -15,7 +15,7 @@ func (m *Model) Init() tea.Cmd {
 	// immediately; names switch from raw to demangled when it completes. Skipped
 	// when the user disabled demangling (the pass allocates 1+ GB on large C++/
 	// Swift binaries) — toggling it on later computes lazily.
-	if len(m.file.Symbols) > 0 && !m.cfg.Behavior.NoDemangle {
+	if len(m.file.Symbols) > 0 && len(m.demangledNames) == 0 && !m.cfg.Behavior.NoDemangle {
 		cmds = append(cmds, m.demangleCmd())
 	}
 	// If the configured default view is Disasm, switchMode already flagged a
@@ -25,7 +25,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	// Pre-warm the initial disasm window right after the first frame. This keeps
 	// startup responsive while making the view ready for the common next action.
-	cmds = append(cmds, func() tea.Msg { return prewarmMsg{} })
+	cmds = append(cmds, m.backgroundCmd(func() tea.Msg { return prewarmMsg{} }))
 	return tea.Batch(cmds...)
 }
 
@@ -53,6 +53,9 @@ func (m *Model) setStatus(s string, isError bool) {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if done, ok := msg.(backgroundDoneMsg); ok {
+		return m.handleBackgroundDone(done)
+	}
 	// Assume each message changes the screen; the rare no-op paths (coalesced
 	// wheel events) clear this so View() can reuse the previous frame.
 	m.viewDirty = true
@@ -210,9 +213,13 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		m.searchCancelable = false
 		m.searchCancel = nil
 		if msg.hit != nil {
-			m.setDisasmSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
-			m.dasm.Cur = msg.hit.idx
-			m.dasm.Top = msg.hit.idx
+			if len(msg.hit.insts) > 0 {
+				m.setDisasmSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
+				m.dasm.Cur = msg.hit.idx
+				m.dasm.Top = msg.hit.idx
+			} else {
+				m.loadDisasmAt(msg.hit.addr)
+			}
 			m.dasm.Positioned = true
 			m.setMode(modeDisasm)
 			m.searchCursorMode = searchCursorAtMatch
@@ -231,7 +238,7 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		return m, nil
 	}
 	m.setStatus(msg.status, false)
-	return m, m.searchDisasmStepCmd(msg.next)
+	return m, m.backgroundCmd(m.searchDisasmStepCmd(msg.next))
 }
 
 // demangleDoneMsg carries the result of the background symbol demangle.
@@ -300,7 +307,7 @@ func (m *Model) toggleDemangle() {
 // shows up immediately (with raw names) instead of blocking on startup.
 func (m *Model) demangleCmd() tea.Cmd {
 	f := m.file
-	return func() tea.Msg { return demangleDoneMsg{file: f, names: f.ComputeDemangled()} }
+	return m.backgroundCmd(func() tea.Msg { return demangleDoneMsg{file: f, names: f.ComputeDemangled()} })
 }
 
 // copyToClipboard puts text on the system clipboard and reports success or

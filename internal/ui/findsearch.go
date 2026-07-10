@@ -124,10 +124,10 @@ func (m *Model) launchFindSearch(q findQuery) tea.Cmd {
 	m.findCancel = done
 
 	cmds := []tea.Cmd{
-		m.findDisasmCmd(q, seq, done),
-		m.findDataCmd(q, seq, done),
-		m.findStringsCmd(q, seq, done),
-		m.findRelocsCmd(q, seq, done),
+		m.backgroundCmd(m.findDisasmCmd(q, seq, done)),
+		m.backgroundCmd(m.findDataCmd(q, seq, done)),
+		m.backgroundCmd(m.findStringsCmd(q, seq, done)),
+		m.backgroundCmd(m.findRelocsCmd(q, seq, done)),
 	}
 	m.findResults.Open(q.label, len(cmds))
 	m.setStatus("searching for "+q.label+" …", false)

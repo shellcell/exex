@@ -95,6 +95,13 @@ func (f *File) elfRelocs(ef *elf.File) []Reloc {
 	is64 := ef.Class == elf.ELFCLASS64
 	bo := ef.ByteOrder
 	typeName := elfRelocTypeNamer(ef.Machine)
+	type symtab struct {
+		syms    []elf.Symbol
+		dynamic bool
+	}
+	symtabs := make(map[uint32]symtab)
+	var dynSymLib []string
+	dynSymLibCached := false
 
 	var out []Reloc
 	for _, s := range ef.Sections {
@@ -105,7 +112,15 @@ func (f *File) elfRelocs(ef *elf.File) []Reloc {
 		if err != nil {
 			continue
 		}
-		syms, libOf := elfRelocSymbols(ef, s)
+		table, ok := symtabs[s.Link]
+		if !ok {
+			table.syms, table.dynamic = elfRelocSymbols(ef, s)
+			symtabs[s.Link] = table
+		}
+		if table.dynamic && !dynSymLibCached {
+			dynSymLib = elfDynSymLibraries(ef, len(table.syms))
+			dynSymLibCached = true
+		}
 		rela := s.Type == elf.SHT_RELA
 		entSize := elfRelocEntSize(is64, rela)
 		// In a relocatable object r_offset is relative to the section the relocs
@@ -133,10 +148,12 @@ func (f *File) elfRelocs(ef *elf.File) []Reloc {
 					r.Addend = int64(int32(bo.Uint32(data[off+8:])))
 				}
 			}
-			if sym != 0 && int(sym)-1 < len(syms) {
-				es := syms[int(sym)-1]
+			if sym != 0 && int(sym)-1 < len(table.syms) {
+				es := table.syms[int(sym)-1]
 				r.Sym = es.Name
-				r.Lib = libOf(sym)
+				if table.dynamic && int(sym) < len(dynSymLib) {
+					r.Lib = dynSymLib[sym]
+				}
 			}
 			out = append(out, r)
 		}
@@ -159,29 +176,21 @@ func elfRelocEntSize(is64, rela bool) int {
 }
 
 // elfRelocSymbols returns the symbol table a reloc section is linked to (via
-// sh_link: .dynsym for dynamic relocs, .symtab otherwise), plus a helper that
-// maps a symbol index to its owning library when versioned. Symbols are in
-// index order without the index-0 null entry, so callers index with sym-1.
-func elfRelocSymbols(ef *elf.File, s *elf.Section) ([]elf.Symbol, func(uint32) string) {
-	noLib := func(uint32) string { return "" }
+// sh_link: .dynsym for dynamic relocs, .symtab otherwise) and reports whether
+// it is the dynamic table. Symbols omit the index-0 null entry.
+func elfRelocSymbols(ef *elf.File, s *elf.Section) ([]elf.Symbol, bool) {
 	if int(s.Link) < len(ef.Sections) {
 		if ef.Sections[s.Link].Name == ".symtab" {
 			if syms, err := ef.Symbols(); err == nil {
-				return syms, noLib
+				return syms, false
 			}
 		}
 	}
 	dyn, err := ef.DynamicSymbols()
 	if err != nil {
-		return nil, noLib
+		return nil, false
 	}
-	symLib := elfDynSymLibraries(ef, len(dyn))
-	return dyn, func(sym uint32) string {
-		if int(sym) < len(symLib) {
-			return symLib[sym]
-		}
-		return ""
-	}
+	return dyn, true
 }
 
 // elfRelocTypeNamer returns a function mapping a raw relocation type number to

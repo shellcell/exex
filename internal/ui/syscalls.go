@@ -10,7 +10,6 @@ package ui
 
 import (
 	"fmt"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -85,7 +84,7 @@ func (m *Model) startSyscallScan() tea.Cmd {
 	done := make(chan struct{})
 	m.syscallCancel = done
 	m.setStatus("scanning for syscalls … (Esc cancels)", false)
-	return m.syscallScanCmd(m.syscallSeq, done)
+	return m.backgroundCmd(m.syscallScanCmd(m.syscallSeq, done))
 }
 
 // syscallScanCmd decodes the executable image in parallel chunks (reusing the
@@ -97,10 +96,6 @@ func (m *Model) syscallScanCmd(seq int, done <-chan struct{}) tea.Cmd {
 	arch := m.file.Arch()
 	symAt := dump.VDSOSymAt(file) // nil unless the binary has vDSO symbols
 	chunk := m.disasmSearchChunkBytes()
-	maxWorkers := runtime.GOMAXPROCS(0)
-	if m.disasmSearchWorkers > 0 {
-		maxWorkers = m.disasmSearchWorkers
-	}
 	return func() tea.Msg {
 		var starts []int
 		for pos := 0; pos < img.Len(); {
@@ -113,7 +108,7 @@ func (m *Model) syscallScanCmd(seq int, done <-chan struct{}) tea.Cmd {
 		}
 
 		results := make([][]dump.SyscallSite, len(starts))
-		workers := max(min(maxWorkers, len(starts)), 1)
+		workers := svc.SearchWorkersFor(len(starts))
 		sem := make(chan struct{}, workers)
 		var wg sync.WaitGroup
 		for i, start := range starts {
@@ -285,10 +280,10 @@ func (m *Model) StartFullScan() tea.Cmd {
 	file := m.file
 	done := make(chan struct{})
 	m.syscallFullCancel = done
-	return func() tea.Msg {
+	return m.backgroundCmd(func() tea.Msg {
 		sites, objs, notes := dump.CollectSyscallsFullCancel(file, done)
 		return syscallFullDoneMsg{file: file, seq: seq, sites: sites, objs: objs, notes: notes}
-	}
+	})
 }
 
 func (m *Model) stopSyscallFullScan() {

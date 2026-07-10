@@ -111,6 +111,10 @@ func TestDisasmSearchWorkerPolicy(t *testing.T) {
 	if got := s.SearchBatchChunks(); got < 4 {
 		t.Fatalf("small-window batch chunks = %d, want at least 4", got)
 	}
+	s.SetOptions(256<<10, 0)
+	if got := s.SearchWorkersFor(100); got < 1 || got > 6 {
+		t.Fatalf("default workers = %d, want between 1 and 6", got)
+	}
 }
 
 func TestDisasmLeadAndOverlapStayWithinBudget(t *testing.T) {
@@ -120,5 +124,73 @@ func TestDisasmLeadAndOverlapStayWithinBudget(t *testing.T) {
 	}
 	if got := s.LeadBytes(); got < s.OverlapBytes() || got >= 16<<10 {
 		t.Fatalf("lead = %d, overlap = %d", got, s.OverlapBytes())
+	}
+}
+
+func TestDisasmCacheEvictsByRetainedBytes(t *testing.T) {
+	s := NewDisasmService(nil, nil, 1, 0)
+	light := []disasm.Inst{{Text: "x"}}
+	heavy := []disasm.Inst{{Text: "xx"}}
+	s.cacheBudget = disasmCacheWeight(light) * 2
+
+	a := disasmCacheKey{start: 1}
+	b := disasmCacheKey{start: 2}
+	c := disasmCacheKey{start: 3}
+	s.cachePut(a, light)
+	s.cachePut(b, light)
+	s.cachePut(c, heavy)
+
+	if _, ok := s.cacheGet(a); ok {
+		t.Fatal("oldest entry remained cached after byte eviction")
+	}
+	if _, ok := s.cacheGet(b); ok {
+		t.Fatal("second entry remained cached despite unequal entry weights")
+	}
+	if _, ok := s.cacheGet(c); !ok {
+		t.Fatal("new entry was not cached")
+	}
+	if s.cacheBytes != disasmCacheWeight(heavy) || len(s.cache) != 1 {
+		t.Fatalf("cache retained %d bytes in %d entries, budget %d", s.cacheBytes, len(s.cache), s.cacheBudget)
+	}
+}
+
+func TestDisasmCacheRejectsOversizedEntry(t *testing.T) {
+	s := NewDisasmService(nil, nil, 1, 0)
+	s.cacheBudget = disasmCacheWeight([]disasm.Inst{{}})
+	key := disasmCacheKey{start: 1}
+	s.cachePut(key, []disasm.Inst{{Text: "too large"}})
+
+	if _, ok := s.cacheGet(key); ok {
+		t.Fatal("oversized entry entered cache")
+	}
+	if s.cacheBytes != 0 || len(s.cache) != 0 {
+		t.Fatalf("cache retained oversized entry: %d bytes in %d entries", s.cacheBytes, len(s.cache))
+	}
+}
+
+func TestDisasmCacheHitUpdatesRecency(t *testing.T) {
+	s := NewDisasmService(nil, nil, 1, 0)
+	insts := []disasm.Inst{{Text: "x"}}
+	weight := disasmCacheWeight(insts)
+	s.cacheBudget = weight * 2
+
+	a := disasmCacheKey{start: 1}
+	b := disasmCacheKey{start: 2}
+	c := disasmCacheKey{start: 3}
+	s.cachePut(a, insts)
+	s.cachePut(b, insts)
+	if _, ok := s.cacheGet(a); !ok {
+		t.Fatal("expected first entry in cache")
+	}
+	s.cachePut(c, insts)
+
+	if _, ok := s.cacheGet(b); ok {
+		t.Fatal("least recently used entry remained cached")
+	}
+	if _, ok := s.cacheGet(a); !ok {
+		t.Fatal("recently accessed entry was evicted")
+	}
+	if _, ok := s.cacheGet(c); !ok {
+		t.Fatal("new entry was not cached")
 	}
 }

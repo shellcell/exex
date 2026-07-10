@@ -68,9 +68,7 @@ func (m *Model) enterMembersList() {
 }
 
 // loadArchiveMember parses the i-th member and returns a fresh model for it (the
-// archive context carries over), showing that member's header info. Mirrors the
-// fat-Mach-O arch switch: the previous member's image stays mapped, so any
-// in-flight background decode is safe.
+// archive context carries over), showing that member's header info.
 func (m *Model) loadArchiveMember(i int) (tea.Model, tea.Cmd) {
 	if i < 0 || i >= len(m.archiveMembers) {
 		return m, nil
@@ -83,6 +81,7 @@ func (m *Model) loadArchiveMember(i int) (tea.Model, tea.Cmd) {
 	}
 	nm, err := New(f, Options{Config: &m.cfg})
 	if err != nil {
+		f.Close()
 		m.setStatus("member "+mem.Name+": "+err.Error(), true)
 		return m, nil
 	}
@@ -92,7 +91,10 @@ func (m *Model) loadArchiveMember(i int) (tea.Model, tea.Cmd) {
 	nm.memberSel = i
 	nm.infoMembers = false // show the loaded member's info; t/tab returns to the list
 	nm.width, nm.height = m.width, m.height
+	nm.fileStack = append([]*Model(nil), m.fileStack...)
+	nm.fileLabel = m.fileLabel
 	nm.setStatus(fmt.Sprintf("member %d/%d: %s", i+1, len(m.archiveMembers), mem.Name), false)
+	m.retireFile()
 	return nm, nm.Init()
 }
 

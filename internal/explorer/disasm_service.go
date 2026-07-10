@@ -1,8 +1,10 @@
 package explorer
 
 import (
+	"container/list"
 	"runtime"
 	"sync"
+	"unsafe"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
@@ -17,9 +19,11 @@ type DisasmService struct {
 	maxBytes      int
 	searchWorkers int
 
-	mu    sync.RWMutex
-	cache map[disasmCacheKey][]disasm.Inst
-	order []disasmCacheKey
+	mu          sync.RWMutex
+	cache       map[disasmCacheKey]*list.Element
+	cacheLRU    list.List
+	cacheBytes  int
+	cacheBudget int
 }
 
 // disasmCacheKey identifies a decoded instruction window and its overlap start.
@@ -29,15 +33,22 @@ type disasmCacheKey struct {
 	decodeStart int
 }
 
-// disasmCacheCap bounds decoded-window memory retained by the service.
-const disasmCacheCap = 24
+type disasmCacheEntry struct {
+	key    disasmCacheKey
+	insts  []disasm.Inst
+	weight int
+}
+
+// disasmCacheBudget bounds decoded-window memory retained by the service.
+const disasmCacheBudget = 128 << 20
 
 // NewDisasmService creates a bounded disassembly decoder/cache.
 func NewDisasmService(file *binfile.File, dis disasm.Disassembler, maxBytes, searchWorkers int) *DisasmService {
 	s := &DisasmService{
-		file:  file,
-		dis:   dis,
-		cache: map[disasmCacheKey][]disasm.Inst{},
+		file:        file,
+		dis:         dis,
+		cache:       map[disasmCacheKey]*list.Element{},
+		cacheBudget: disasmCacheBudget,
 	}
 	s.SetOptions(maxBytes, searchWorkers)
 	return s
@@ -322,28 +333,51 @@ func (s *DisasmService) options() (maxBytes, searchWorkers int) {
 	return maxBytes, searchWorkers
 }
 
-// cacheGet returns a cached decoded window.
+// cacheGet returns a cached decoded window and marks it most recently used.
 func (s *DisasmService) cacheGet(key disasmCacheKey) ([]disasm.Inst, bool) {
-	s.mu.RLock()
-	insts, ok := s.cache[key]
-	s.mu.RUnlock()
-	return insts, ok
-}
-
-// cachePut stores a decoded window and evicts the oldest entries over capacity.
-func (s *DisasmService) cachePut(key disasmCacheKey, insts []disasm.Inst) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.cache[key]; !ok {
-		s.order = append(s.order, key)
+	elem, ok := s.cache[key]
+	if !ok {
+		return nil, false
 	}
-	s.cache[key] = insts
-	// Evict oldest over capacity, compacting in place so the backing array's head
-	// isn't leaked by repeated reslicing.
-	if n := len(s.order) - disasmCacheCap; n > 0 {
-		for _, old := range s.order[:n] {
-			delete(s.cache, old)
-		}
-		s.order = append(s.order[:0], s.order[n:]...)
+	s.cacheLRU.MoveToFront(elem)
+	return elem.Value.(*disasmCacheEntry).insts, true
+}
+
+func disasmCacheWeight(insts []disasm.Inst) int {
+	// Count the retained backing array and text; Bytes refers into the mapped image.
+	weight := cap(insts) * int(unsafe.Sizeof(disasm.Inst{}))
+	for _, inst := range insts {
+		weight += len(inst.Text)
+	}
+	return weight
+}
+
+// cachePut stores a decoded window and evicts least-recently-used entries over budget.
+func (s *DisasmService) cachePut(key disasmCacheKey, insts []disasm.Inst) {
+	weight := disasmCacheWeight(insts)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if weight > s.cacheBudget {
+		return
+	}
+	if elem, ok := s.cache[key]; ok {
+		entry := elem.Value.(*disasmCacheEntry)
+		s.cacheBytes += weight - entry.weight
+		entry.insts = insts
+		entry.weight = weight
+		s.cacheLRU.MoveToFront(elem)
+	} else {
+		entry := &disasmCacheEntry{key: key, insts: insts, weight: weight}
+		s.cache[key] = s.cacheLRU.PushFront(entry)
+		s.cacheBytes += weight
+	}
+	for s.cacheBytes > s.cacheBudget {
+		elem := s.cacheLRU.Back()
+		entry := elem.Value.(*disasmCacheEntry)
+		delete(s.cache, entry.key)
+		s.cacheLRU.Remove(elem)
+		s.cacheBytes -= entry.weight
 	}
 }

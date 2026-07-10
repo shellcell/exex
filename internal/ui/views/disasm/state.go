@@ -78,7 +78,7 @@ type AsmKey struct {
 
 // CurAddr returns the address under the cursor, when a window is loaded.
 func (st *State) CurAddr() (uint64, bool) {
-	if len(st.Inst) == 0 {
+	if st.Cur < 0 || st.Cur >= len(st.Inst) {
 		return 0, false
 	}
 	return st.Inst[st.Cur].Addr, true
@@ -94,6 +94,13 @@ func (st *State) SetSpan(span explorer.Span) bool {
 	}
 	st.Inst = span.Insts
 	st.PosLo, st.PosHi = span.PosLo, span.PosHi
+	if len(st.Inst) == 0 {
+		st.Cur, st.Top, st.RenderedTop = 0, 0, 0
+	} else {
+		st.Cur = min(max(st.Cur, 0), len(st.Inst)-1)
+		st.Top = min(max(st.Top, 0), len(st.Inst)-1)
+		st.RenderedTop = min(max(st.RenderedTop, 0), len(st.Inst)-1)
+	}
 	st.Built = true
 	st.Decoding = false
 	st.PendingAddr = 0
@@ -124,7 +131,7 @@ func (st *State) SnapshotCursorToHistory() {
 	if st.HistoryPos < 0 || st.HistoryPos >= len(st.History) {
 		return
 	}
-	if len(st.Inst) == 0 {
+	if st.Cur < 0 || st.Cur >= len(st.Inst) {
 		return
 	}
 	st.History[st.HistoryPos] = st.Inst[st.Cur].Addr

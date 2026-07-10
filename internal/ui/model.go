@@ -321,8 +321,9 @@ type Model struct {
 	// dependency / archive member / fat-arch slice each replace the whole model),
 	// so Back can return to them with their state intact; fileLabel is this file's
 	// breadcrumb name.
-	fileStack []*Model
-	fileLabel string
+	fileStack  []*Model
+	fileLabel  string
+	background backgroundState
 
 	mode mode
 

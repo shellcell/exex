@@ -39,9 +39,8 @@ func (m *Model) renderInfo() string {
 }
 
 // switchFatArch re-opens the binary at the next architecture slice of a fat
-// Mach-O, returning a fresh model for it (the previous file stays mapped, like
-// opening a library as primary, to avoid a use-after-unmap with any in-flight
-// background decode).
+// Mach-O, returning a fresh model for it. The previous mapping is retired after
+// its model-owned background commands have physically completed.
 func (m *Model) switchFatArch() (tea.Model, tea.Cmd) {
 	arches := m.file.FatArches
 	next := arches[0]
@@ -67,6 +66,9 @@ func (m *Model) switchFatArch() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	nm.width, nm.height = m.width, m.height
+	nm.fileStack = append([]*Model(nil), m.fileStack...)
+	nm.fileLabel = m.fileLabel
 	nm.setStatus("architecture: "+next, false)
+	m.retireFile()
 	return nm, nm.Init()
 }

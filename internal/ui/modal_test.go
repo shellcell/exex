@@ -54,7 +54,7 @@ func TestTextOverlaysCaptureMouse(t *testing.T) {
 		name string
 		open func(*Model)
 	}{
-		{"help", func(m *Model) { m.helpActive = true }},
+		{"help", func(m *Model) { m.help.Open() }},
 		{"header", func(m *Model) { m.headerActive = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,14 +85,14 @@ func TestTextOverlaysCaptureMouse(t *testing.T) {
 // scroll offset, matching what the arrow keys already did.
 func TestTextOverlayWheelScrollsOverlay(t *testing.T) {
 	m := overlayModel()
-	m.helpActive = true
+	m.help.Open()
 	wheel(m, tea.MouseWheelDown)
-	if m.helpScroll != wheelScrollLines {
-		t.Errorf("helpScroll = %d, want %d", m.helpScroll, wheelScrollLines)
+	if m.help.ScrollOffset() != wheelScrollLines {
+		t.Errorf("help scroll = %d, want %d", m.help.ScrollOffset(), wheelScrollLines)
 	}
 	wheel(m, tea.MouseWheelUp)
-	if m.helpScroll != 0 {
-		t.Errorf("helpScroll = %d after scrolling back, want 0", m.helpScroll)
+	if m.help.ScrollOffset() != 0 {
+		t.Errorf("help scroll = %d after scrolling back, want 0", m.help.ScrollOffset())
 	}
 
 	m = overlayModel()

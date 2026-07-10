@@ -42,7 +42,7 @@ var modalOrder = [...]struct {
 	active func(*Model) bool
 }{
 	{modalHeader, func(m *Model) bool { return m.headerActive }},
-	{modalHelp, func(m *Model) bool { return m.helpActive }},
+	{modalHelp, func(m *Model) bool { return m.help.Active() }},
 	{modalCPUFeat, func(m *Model) bool { return m.cpufeat.Active() }},
 	{modalXref, func(m *Model) bool { return m.xrefActive }},
 	{modalSyscall, func(m *Model) bool { return m.syscallActive }},
@@ -74,7 +74,7 @@ func (m *Model) renderActiveModal() string {
 	case modalHeader:
 		return m.renderHeaderModal()
 	case modalHelp:
-		return m.renderHelpModal()
+		return m.help.Render(m.modalContext())
 	case modalCPUFeat:
 		// Migrated modals record their own list row while rendering; the mouse
 		// hit-test reads it back through the shell's modalListRow.

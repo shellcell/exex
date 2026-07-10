@@ -16,6 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
+	helpmodal "github.com/rabarbra/exex/internal/ui/modals/help"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
@@ -260,11 +261,6 @@ type interactionState struct {
 	// of overshooting on chrome rows or wrapped multi-line entries.
 	pageRows int
 
-	// helpActive toggles the keybinding cheat-sheet overlay; helpScroll is its
-	// vertical scroll offset when it is taller than the terminal.
-	helpActive bool
-	helpScroll int
-
 	// headerActive toggles the raw container-header overlay (ELF e_*, Mach-O
 	// mach_header + load commands, PE headers); headerScroll is its scroll offset.
 	headerActive bool
@@ -437,6 +433,8 @@ type Model struct {
 	find findtomodal.State
 	// palette is the "Jump to" command palette (internal/ui/modals/palette).
 	palette palettemodal.State
+	// help is the keybinding cheat-sheet overlay (internal/ui/modals/help).
+	help helpmodal.State
 	archiveState
 	statusState
 	keyState

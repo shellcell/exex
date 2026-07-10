@@ -7,8 +7,8 @@
 //     view.Context it carries the full terminal Height, because an overlay is
 //     centred on the screen rather than laid out inside the view body.
 //   - Host is the small set of mutating actions a modal triggers on the shell.
-//   - Modal is the interface the shell's modalOrder table dispatches through, so
-//     render, keys and mouse cannot disagree about which overlay is on top.
+//
+// There is deliberately no Modal interface; see the note further down.
 package modal
 
 import (
@@ -51,6 +51,8 @@ type Styles struct {
 	KeyStyle     lipgloss.Style // shortcut digits / key badges
 	AccentStyle  lipgloss.Style // row markers and other small accents
 	RowStyle     lipgloss.Style // ordinary list text
+	DescStyle    lipgloss.Style // descriptive text beside a key or label
+	HeadStyle    lipgloss.Style // section headers inside a scrollable overlay
 
 	// SymbolStyle colours a symbol row by its kind and binding, exactly as the
 	// Symbols view does, so a symbol looks the same wherever it is listed. It is a

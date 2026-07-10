@@ -63,6 +63,8 @@ func (m *Model) modalStyles() *modal.Styles {
 		RowStyle:     t.tableRowStyle,
 		ErrorStyle:   t.errorStyle,
 		SymbolStyle:  t.styleForSymbol,
+		DescStyle:    t.helpDescStyle,
+		HeadStyle:    t.helpHeadStyle,
 	}
 	return m.modalStylesCache
 }

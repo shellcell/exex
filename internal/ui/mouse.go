@@ -62,17 +62,15 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Scrollable text overlays with no selection: the wheel pages them (as the
 		// arrow keys do), and everything else is swallowed.
 		if _, ok := msg.(tea.MouseWheelMsg); ok {
-			scroll := &m.helpScroll
+			delta := wheelScrollLines
+			if ms.Button == tea.MouseWheelUp {
+				delta = -wheelScrollLines
+			}
 			if kind == modalHeader {
-				scroll = &m.headerScroll
+				m.headerScroll += delta // clamped where the header overlay is rendered
+			} else {
+				m.help.Scroll(delta)
 			}
-			switch ms.Button {
-			case tea.MouseWheelUp:
-				*scroll -= wheelScrollLines
-			case tea.MouseWheelDown:
-				*scroll += wheelScrollLines
-			}
-			// Both offsets are clamped where the overlay is rendered.
 		}
 		return m, nil
 

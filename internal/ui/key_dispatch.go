@@ -50,22 +50,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case modalHelp:
-		switch key {
-		case "up", "k":
-			m.helpScroll--
-		case "down", "j":
-			m.helpScroll++
-		case "pgup":
-			m.helpScroll -= helpPageStep
-		case "pgdown":
-			m.helpScroll += helpPageStep
-		case "home", "g":
-			m.helpScroll = 0
-		case "end", "G":
-			m.helpScroll = 1 << 20 // clamped to the bottom in renderHelpModal
-		default:
-			m.helpActive = false
-		}
+		m.help.Update(key)
 		return m, nil
 	}
 
@@ -124,8 +109,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// '?' toggles the keybinding cheat-sheet (after modal/filter capture, so it
 	// still types into inputs).
 	if key == "?" {
-		m.helpActive = true
-		m.helpScroll = 0
+		m.help.Open()
 		return m, nil
 	}
 	// `tab` doubles as the mode-toggle (the `t` key) in every non-disasm view —

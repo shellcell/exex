@@ -174,11 +174,11 @@ func TestKeysGlobal(t *testing.T) {
 
 	// ? opens help; the next key dismisses it.
 	h.press("?")
-	if !h.m().helpActive {
+	if !h.m().help.Active() {
 		t.Fatal("? did not open help")
 	}
 	h.press("x")
-	if h.m().helpActive {
+	if h.m().help.Active() {
 		t.Fatal("help overlay did not dismiss on next key")
 	}
 

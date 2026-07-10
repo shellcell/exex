@@ -117,7 +117,7 @@ func goldenModals(t *testing.T) map[string]string {
 		name string
 		open func(*Model)
 	}{
-		{"help", func(m *Model) { m.helpActive = true }},
+		{"help", func(m *Model) { m.help.Open() }},
 		{"header", func(m *Model) { m.headerActive = true }},
 		{"settings", func(m *Model) { m.openSettings() }},
 		// Field 14 scrolls the list so its window starts on a group header, which

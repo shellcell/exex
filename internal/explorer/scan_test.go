@@ -1,63 +1,63 @@
-package ui
+package explorer
 
 import (
 	"math/rand"
-	"sort"
+	"slices"
 	"testing"
 )
 
-// pushAll feeds addrs through the bounded heap the way scanDisasmMatching does:
+// pushAll feeds addrs through the bounded heap the way ScanMatching does:
 // consult wants first, then push.
-func pushAll(limit int, addrs []uint64) lowestHits {
-	best := make(lowestHits, 0, limit)
+func pushAll(limit int, addrs []uint64) lowestMatches {
+	best := make(lowestMatches, 0, limit)
 	for _, a := range addrs {
 		if !best.wants(a, limit) {
 			continue
 		}
-		best.push(xrefHit{addr: a}, limit)
+		best.push(Match{Addr: a}, limit)
 	}
 	return best
 }
 
-func sortedAddrs(h lowestHits) []uint64 {
+func sortedAddrs(h lowestMatches) []uint64 {
 	out := make([]uint64, len(h))
 	for i, hit := range h {
-		out[i] = hit.addr
+		out[i] = hit.Addr
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 
-// TestLowestHitsNeverExceedsLimit is the memory bound: retained hits are capped
-// by limit, not by the number of matches. scanDisasmMatching used to accumulate
+// TestLowestMatchesNeverExceedsLimit is the memory bound: retained matches are
+// capped by limit, not by the number of matches. ScanMatching used to accumulate
 // every match (~98k for "mov" over a 15 MB binary) before truncating to 500.
-func TestLowestHitsNeverExceedsLimit(t *testing.T) {
+func TestLowestMatchesNeverExceedsLimit(t *testing.T) {
 	const limit = 500
-	best := make(lowestHits, 0, limit)
+	best := make(lowestMatches, 0, limit)
 	rng := rand.New(rand.NewSource(1))
-	for i := 0; i < 100_000; i++ {
+	for range 100_000 {
 		a := rng.Uint64()
 		if !best.wants(a, limit) {
 			continue
 		}
-		best.push(xrefHit{addr: a}, limit)
+		best.push(Match{Addr: a}, limit)
 		if len(best) > limit {
 			t.Fatalf("heap grew to %d, limit %d", len(best), limit)
 		}
 	}
 	if len(best) != limit {
-		t.Errorf("heap holds %d hits, want %d", len(best), limit)
+		t.Errorf("heap holds %d matches, want %d", len(best), limit)
 	}
 	if cap(best) != limit {
 		t.Errorf("heap reallocated: cap %d, want %d", cap(best), limit)
 	}
 }
 
-// TestLowestHitsKeepsGloballyLowest is the correctness fix. The old merge
+// TestLowestMatchesKeepsGloballyLowest is the correctness fix. The old merge
 // truncated in chunk-arrival order before sorting, so a low address discovered
 // late lost to a high address discovered early. Feeding descending addresses
 // (worst case for arrival order) must still yield the lowest `limit`.
-func TestLowestHitsKeepsGloballyLowest(t *testing.T) {
+func TestLowestMatchesKeepsGloballyLowest(t *testing.T) {
 	const limit = 10
 	var descending []uint64
 	for a := uint64(100); a > 0; a-- {
@@ -71,9 +71,9 @@ func TestLowestHitsKeepsGloballyLowest(t *testing.T) {
 	}
 }
 
-// TestLowestHitsOrderIndependent: the result must not depend on the order
+// TestLowestMatchesOrderIndependent: the result must not depend on the order
 // workers happen to report matches in, which is nondeterministic across chunks.
-func TestLowestHitsOrderIndependent(t *testing.T) {
+func TestLowestMatchesOrderIndependent(t *testing.T) {
 	const limit = 50
 	addrs := make([]uint64, 1000)
 	for i := range addrs {
@@ -82,8 +82,8 @@ func TestLowestHitsOrderIndependent(t *testing.T) {
 	want := sortedAddrs(pushAll(limit, addrs))
 
 	rng := rand.New(rand.NewSource(7))
-	for trial := 0; trial < 20; trial++ {
-		shuffled := append([]uint64(nil), addrs...)
+	for trial := range 20 {
+		shuffled := slices.Clone(addrs)
 		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 		got := sortedAddrs(pushAll(limit, shuffled))
 		for i := range want {
@@ -106,19 +106,34 @@ func TestDedupeByAddr(t *testing.T) {
 		{"all same", []uint64{4, 4, 4}, []uint64{4}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hits := make([]xrefHit, len(tc.in))
+			hits := make([]Match, len(tc.in))
 			for i, a := range tc.in {
-				hits[i] = xrefHit{addr: a}
+				hits[i] = Match{Addr: a}
 			}
 			got := dedupeByAddr(hits)
 			if len(got) != len(tc.want) {
-				t.Fatalf("got %d hits, want %d", len(got), len(tc.want))
+				t.Fatalf("got %d matches, want %d", len(got), len(tc.want))
 			}
 			for i, h := range got {
-				if h.addr != tc.want[i] {
-					t.Errorf("addr[%d] = %d, want %d", i, h.addr, tc.want[i])
+				if h.Addr != tc.want[i] {
+					t.Errorf("addr[%d] = %d, want %d", i, h.Addr, tc.want[i])
 				}
 			}
 		})
+	}
+}
+
+func TestCancelled(t *testing.T) {
+	if cancelled(nil) {
+		t.Error("nil done reported cancelled")
+	}
+	open := make(chan struct{})
+	if cancelled(open) {
+		t.Error("open done reported cancelled")
+	}
+	closed := make(chan struct{})
+	close(closed)
+	if !cancelled(closed) {
+		t.Error("closed done not reported cancelled")
 	}
 }

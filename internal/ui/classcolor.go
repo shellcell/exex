@@ -140,4 +140,3 @@ func sectionColorCategory(s *binfile.Section) binfile.SectionCategory {
 	}
 	return s.Category
 }
-

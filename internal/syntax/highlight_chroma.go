@@ -108,4 +108,3 @@ func lexerFor(filename, src string) chroma.Lexer {
 	}
 	return chromalexers.Analyse(src)
 }
-

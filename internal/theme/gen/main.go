@@ -14,7 +14,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"go/format"
 	"os"
 	"sort"
 	"strings"
@@ -82,12 +84,18 @@ func main() {
 		"q": func(s string) string { return `"` + s + `"` },
 	}).Parse(tmplText))
 
-	f, err := os.Create("palettes_gen.go")
-	if err != nil {
+	var raw bytes.Buffer
+	if err := tmpl.Execute(&raw, pals); err != nil {
 		fatal(err)
 	}
-	defer f.Close()
-	if err := tmpl.Execute(f, pals); err != nil {
+	// The template emits one long map entry per line; gofmt aligns the columns.
+	// Without this the generated file fails `gofmt -l`, which the repo treats as
+	// a build error.
+	src, err := format.Source(raw.Bytes())
+	if err != nil {
+		fatal(fmt.Errorf("gofmt generated source: %w", err))
+	}
+	if err := os.WriteFile("palettes_gen.go", src, 0o644); err != nil {
 		fatal(err)
 	}
 	fmt.Printf("wrote %d palettes\n", len(pals))

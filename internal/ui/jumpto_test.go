@@ -1,6 +1,10 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
+)
 
 // TestJumpModalFromDisasm: the cross-view "open caret in…" modal opens on the
 // disasm cursor's address, offers the other address views (not Disasm itself)
@@ -9,14 +13,14 @@ func TestJumpModalFromDisasm(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press(">")
-	if !h.m().jumpActive {
+	if !h.m().jump.Active() {
 		t.Fatalf("jump modal did not open from disasm; status=%q", h.m().status)
 	}
 
-	byLabel := map[string]jumpTarget{}
-	for _, tg := range h.m().jumpTargets {
-		byLabel[tg.label] = tg
-		if tg.mode == modeDisasm {
+	byLabel := map[string]jumptomodal.Target{}
+	for _, tg := range h.m().jump.Targets() {
+		byLabel[tg.Label] = tg
+		if tg.ID == int(modeDisasm) {
 			t.Error("jump modal offered the current (Disasm) view as a target")
 		}
 	}
@@ -29,8 +33,8 @@ func TestJumpModalFromDisasm(t *testing.T) {
 			t.Errorf("missing %s target", want)
 			continue
 		}
-		if !tg.enabled || tg.preview == "" {
-			t.Errorf("%s target should be enabled with a preview, got enabled=%v preview=%q", want, tg.enabled, tg.preview)
+		if !tg.Enabled || tg.Preview == "" {
+			t.Errorf("%s target should be enabled with a preview, got enabled=%v preview=%q", want, tg.Enabled, tg.Preview)
 		}
 	}
 	if _, ok := byLabel["Symbols"]; !ok {
@@ -39,7 +43,7 @@ func TestJumpModalFromDisasm(t *testing.T) {
 
 	// The selection starts on the first enabled row; Enter navigates and closes.
 	h.press("enter")
-	if h.m().jumpActive {
+	if h.m().jump.Active() {
 		t.Error("modal still open after Enter")
 	}
 	if h.m().mode == modeDisasm {
@@ -53,18 +57,18 @@ func TestJumpModalNavAndEsc(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press(">")
-	if !h.m().jumpActive {
+	if !h.m().jump.Active() {
 		t.Skip("no caret address to open from")
 	}
 	// Every landing the cursor stops on must be an enabled target.
-	for i := 0; i < len(h.m().jumpTargets)+1; i++ {
-		if tg := h.m().jumpTargets[h.m().jumpSel]; !tg.enabled {
-			t.Fatalf("selection rested on a disabled target %q", tg.label)
+	for i := 0; i < len(h.m().jump.Targets())+1; i++ {
+		if tg := h.m().jump.Targets()[h.m().jump.Sel()]; !tg.Enabled {
+			t.Fatalf("selection rested on a disabled target %q", tg.Label)
 		}
 		h.press("down")
 	}
 	h.press("esc")
-	if h.m().jumpActive {
+	if h.m().jump.Active() {
 		t.Error("Esc did not close the jump modal")
 	}
 	if h.m().mode != modeDisasm {
@@ -79,7 +83,7 @@ func TestJumpModalFromInfo(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeInfo, "1")
 	h.press("space")
-	if !h.m().jumpActive {
+	if !h.m().jump.Active() {
 		t.Fatalf("modal did not open from Info; status=%q", h.m().status)
 	}
 	if !h.m().jumpCaret.hasAddr {
@@ -89,8 +93,8 @@ func TestJumpModalFromInfo(t *testing.T) {
 		t.Errorf("Info caret = 0x%x, want entry 0x%x", h.m().jumpCaret.addr, entry)
 	}
 	// Info is not an address view, so it isn't offered as a target.
-	for _, tg := range h.m().jumpTargets {
-		if tg.mode == modeInfo {
+	for _, tg := range h.m().jump.Targets() {
+		if tg.ID == int(modeInfo) {
 			t.Error("Info offered as a jump target")
 		}
 	}
@@ -109,12 +113,12 @@ func TestJumpModalRawStringByOffset(t *testing.T) {
 	h.m().openRawAt(s.Offset)
 	h.m().setMode(modeRaw)
 	h.press("space")
-	if !h.m().jumpActive {
+	if !h.m().jump.Active() {
 		t.Fatalf("modal did not open from Raw; status=%q", h.m().status)
 	}
 	strEnabled := false
-	for _, tg := range h.m().jumpTargets {
-		if tg.mode == modeStrings && tg.enabled {
+	for _, tg := range h.m().jump.Targets() {
+		if tg.ID == int(modeStrings) && tg.Enabled {
 			strEnabled = true
 		}
 	}
@@ -123,8 +127,8 @@ func TestJumpModalRawStringByOffset(t *testing.T) {
 	}
 	// Opening it lands in the Strings view on that string.
 	h.press("7")
-	if h.m().jumpActive || h.m().mode != modeStrings {
-		t.Errorf("digit 7 did not open Strings: active=%v mode=%v", h.m().jumpActive, h.m().mode)
+	if h.m().jump.Active() || h.m().mode != modeStrings {
+		t.Errorf("digit 7 did not open Strings: active=%v mode=%v", h.m().jump.Active(), h.m().mode)
 	}
 }
 
@@ -134,14 +138,14 @@ func TestJumpModalSpaceAndDigit(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press("space")
-	if !h.m().jumpActive {
+	if !h.m().jump.Active() {
 		t.Fatalf("space did not open the jump modal; status=%q", h.m().status)
 	}
 	// Every listed target carries its view digit; Hex (5) is always reachable from
 	// a mapped code address.
 	hasHex := false
-	for _, tg := range h.m().jumpTargets {
-		if tg.mode == modeHex && tg.enabled && modeDigit(tg.mode) == "5" {
+	for _, tg := range h.m().jump.Targets() {
+		if tg.ID == int(modeHex) && tg.Enabled && tg.Digit == "5" {
 			hasHex = true
 		}
 	}
@@ -149,8 +153,8 @@ func TestJumpModalSpaceAndDigit(t *testing.T) {
 		t.Fatal("expected an enabled Hex (5) target")
 	}
 	h.press("5")
-	if h.m().jumpActive || h.m().mode != modeHex {
-		t.Errorf("digit 5 did not open Hex: active=%v mode=%v", h.m().jumpActive, h.m().mode)
+	if h.m().jump.Active() || h.m().mode != modeHex {
+		t.Errorf("digit 5 did not open Hex: active=%v mode=%v", h.m().jump.Active(), h.m().mode)
 	}
 }
 
@@ -164,18 +168,18 @@ func TestJumpModalFromStrings(t *testing.T) {
 		t.Skip("no strings")
 	}
 	h.press("space")
-	if !h.m().jumpActive {
+	if !h.m().jump.Active() {
 		t.Fatalf("space did not open the modal from Strings; status=%q", h.m().status)
 	}
 	if !h.m().jumpCaret.hasOff {
 		t.Error("string caret has no file offset")
 	}
 	rawEnabled, offeredStrings := false, false
-	for _, tg := range h.m().jumpTargets {
-		if tg.mode == modeRaw && tg.enabled {
+	for _, tg := range h.m().jump.Targets() {
+		if tg.ID == int(modeRaw) && tg.Enabled {
 			rawEnabled = true
 		}
-		if tg.mode == modeStrings {
+		if tg.ID == int(modeStrings) {
 			offeredStrings = true // must not offer the current view
 		}
 	}
@@ -187,7 +191,7 @@ func TestJumpModalFromStrings(t *testing.T) {
 	}
 	// Jumping to Raw lands in the Raw view.
 	h.press("6")
-	if h.m().jumpActive || h.m().mode != modeRaw {
-		t.Errorf("digit 6 did not open Raw: active=%v mode=%v", h.m().jumpActive, h.m().mode)
+	if h.m().jump.Active() || h.m().mode != modeRaw {
+		t.Errorf("digit 6 did not open Raw: active=%v mode=%v", h.m().jump.Active(), h.m().mode)
 	}
 }

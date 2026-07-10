@@ -43,7 +43,11 @@ type Styles struct {
 	InfoStyle    lipgloss.Style // positive values / primary list text
 	WarnStyle    lipgloss.Style // warning badges
 	ShadowStyle  lipgloss.Style // dim / secondary text
-	HeadingStyle lipgloss.Style // group headings inside a modal
+	HeadingStyle lipgloss.Style // group headings / symbol names
+	AddrStyle    lipgloss.Style // addresses and offsets
+	KeyStyle     lipgloss.Style // shortcut digits / key badges
+	AccentStyle  lipgloss.Style // row markers and other small accents
+	RowStyle     lipgloss.Style // ordinary list text
 }
 
 // ListWidth is the content width of a modal's list rows.

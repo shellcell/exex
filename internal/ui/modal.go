@@ -46,7 +46,7 @@ var modalOrder = [...]struct {
 	{modalCPUFeat, func(m *Model) bool { return m.cpufeat.Active() }},
 	{modalXref, func(m *Model) bool { return m.xrefActive }},
 	{modalSyscall, func(m *Model) bool { return m.syscallActive }},
-	{modalJump, func(m *Model) bool { return m.jumpActive }},
+	{modalJump, func(m *Model) bool { return m.jump.Active() }},
 	{modalFind, func(m *Model) bool { return m.findActive }},
 	{modalFindQuery, func(m *Model) bool { return m.findQueryActive }},
 	{modalFindResults, func(m *Model) bool { return m.findResultsActive }},
@@ -86,7 +86,9 @@ func (m *Model) renderActiveModal() string {
 	case modalSyscall:
 		return m.renderSyscallModal()
 	case modalJump:
-		return m.renderJumpModal()
+		out := m.jump.Render(m.modalContext())
+		m.modalListRow = m.jump.ListRow()
+		return out
 	case modalFind:
 		return m.renderFindModal()
 	case modalFindQuery:

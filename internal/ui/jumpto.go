@@ -1,32 +1,22 @@
 package ui
 
-// The "open caret position in…" modal: from any address-bearing view, take the
-// address under the cursor and offer to reopen it in each of the other views —
-// Disasm, Hex, Raw, Symbols, Sections, Strings, Relocs — each row previewing
-// exactly where it would land (the covering function, section, file offset,
-// string, or number of relocations there). A header shows what the address *is*
-// (its symbol + section, and the pointer it holds when it holds one), turning the
-// per-view d/h/m jumps into one discoverable, self-describing menu.
+// The caret machinery, and the shell half of the "open caret position in…"
+// overlay (internal/ui/modals/jumpto).
+//
+// What lives here is everything that needs to know about views and the binary:
+// where the caret is (`caret`, caretPos), what it points at (stringAtCaret,
+// caretPointerAt, relocPreviewAt, caretContextLine), which views could show it
+// (buildJumpTargets), and how to actually go there (OpenCaretIn). The caret
+// helpers are shared with the Find overlay and the hex views, so they are not
+// the jump overlay's to own.
 
 import (
 	"fmt"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 )
-
-// jumpTarget is one row of the modal: a destination view, a preview of where the
-// caret address lands there, and whether that landing is possible.
-type jumpTarget struct {
-	mode    mode
-	label   string
-	preview string
-	enabled bool
-}
 
 // modeDigit is the view-switch digit for a mode (matching defaultKeyMap), shown
 // as a badge in the modal and usable as a shortcut to jump straight to that view.
@@ -143,29 +133,57 @@ func (m *Model) openJumpModal() {
 		return
 	}
 	m.jumpCaret = c
-	m.jumpTargets = m.buildJumpTargets(c)
-	anyEnabled := false
-	m.jumpSel = 0
-	for i, t := range m.jumpTargets {
-		if t.enabled {
-			if !anyEnabled {
-				m.jumpSel = i
-			}
-			anyEnabled = true
-		}
-	}
-	if !anyEnabled {
+	if !m.jump.Open(m.jumpHeader(c), m.buildJumpTargets(c)) {
 		m.setStatus("nothing else can open this position", true)
-		return
 	}
-	m.jumpActive = true
+}
+
+// jumpHeader resolves what the caret address *is* into the plain strings the
+// overlay renders.
+func (m *Model) jumpHeader(c caret) jumptomodal.Header {
+	h := jumptomodal.Header{Loc: fmt.Sprintf("0x%x", c.addr)}
+	if !c.hasAddr {
+		h.Loc = fmt.Sprintf("file 0x%x", c.off)
+	}
+	h.Context = m.caretContextLine(c)
+	if c.hasAddr {
+		h.Pointer = m.caretPointer(c.addr)
+	}
+	return h
+}
+
+// OpenCaretIn performs the jump for a target row. It satisfies jumpto.Host; the
+// id is the destination view's mode.
+func (m *Model) OpenCaretIn(id int) {
+	c := m.jumpCaret
+	switch mode(id) {
+	case modeRaw:
+		// Raw is addressed by file offset, so it works even for an offset-only caret.
+		m.openRawAt(c.off)
+	case modeDisasm:
+		m.jumpDisasmAtAddr(c.addr)
+	case modeHex:
+		m.jumpHexAtAddr(c.addr)
+	case modeSymbols:
+		m.jumpSymbolsAtAddr(c.addr)
+	case modeSections:
+		m.jumpSectionsAtAddr(c.addr)
+	case modeStrings:
+		if c.hasAddr {
+			m.jumpStringsAtAddr(c.addr)
+		} else {
+			m.jumpStringsAtOffset(c.off)
+		}
+	case modeRelocs:
+		m.jumpRelocsAtAddr(c.addr)
+	}
 }
 
 // buildJumpTargets assembles the destination rows for the caret, skipping the
 // view it is already in. Address-keyed targets need c.hasAddr; Raw needs only
 // c.hasOff, so an offset-only string can still be opened there. Each row's preview
 // and enabled flag come from the same resolution the jump itself will use.
-func (m *Model) buildJumpTargets(c caret) []jumpTarget {
+func (m *Model) buildJumpTargets(c caret) []jumptomodal.Target {
 	addr := c.addr
 	var sym binfile.Symbol
 	var hasSym bool
@@ -174,12 +192,14 @@ func (m *Model) buildJumpTargets(c caret) []jumpTarget {
 		sym, hasSym = m.file.SymbolAt(addr)
 		sec = m.file.SectionAt(addr)
 	}
-	var out []jumpTarget
+	var out []jumptomodal.Target
 	add := func(md mode, label, preview string, enabled bool) {
 		if md == m.mode {
 			return
 		}
-		out = append(out, jumpTarget{mode: md, label: label, preview: preview, enabled: enabled})
+		out = append(out, jumptomodal.Target{
+			ID: int(md), Digit: modeDigit(md), Label: label, Preview: preview, Enabled: enabled,
+		})
 	}
 
 	canDis := c.hasAddr && m.canDisasmAt(addr)
@@ -397,136 +417,4 @@ func (m *Model) caretPointer(addr uint64) string {
 		return fmt.Sprintf("→ 0x%x  %s", v, ann)
 	}
 	return fmt.Sprintf("→ 0x%x", v)
-}
-
-// activateJump performs the selected jump for the caret address and closes the
-// modal. A disabled row reports its reason instead of navigating.
-func (m *Model) activateJump() {
-	if m.jumpSel < 0 || m.jumpSel >= len(m.jumpTargets) {
-		return
-	}
-	t := m.jumpTargets[m.jumpSel]
-	if !t.enabled {
-		m.setStatus(t.label+": "+t.preview, true)
-		return
-	}
-	c := m.jumpCaret
-	m.jumpActive = false
-	switch t.mode {
-	case modeRaw:
-		// Raw is addressed by file offset, so it works even for an offset-only caret.
-		m.openRawAt(c.off)
-	case modeDisasm:
-		m.jumpDisasmAtAddr(c.addr)
-	case modeHex:
-		m.jumpHexAtAddr(c.addr)
-	case modeSymbols:
-		m.jumpSymbolsAtAddr(c.addr)
-	case modeSections:
-		m.jumpSectionsAtAddr(c.addr)
-	case modeStrings:
-		if c.hasAddr {
-			m.jumpStringsAtAddr(c.addr)
-		} else {
-			m.jumpStringsAtOffset(c.off)
-		}
-	case modeRelocs:
-		m.jumpRelocsAtAddr(c.addr)
-	}
-}
-
-// updateJumpModal drives the modal's selection: up/down move, a target's view
-// digit jumps straight to it, Enter opens the selection, Esc closes.
-func (m *Model) updateJumpModal(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc":
-		m.jumpActive = false
-	case "up", "k":
-		m.jumpMoveSel(-1)
-	case "down", "j":
-		m.jumpMoveSel(1)
-	case "enter", "space":
-		m.activateJump()
-	default:
-		if len(key) == 1 && key[0] >= '0' && key[0] <= '9' {
-			for i, t := range m.jumpTargets {
-				if t.enabled && modeDigit(t.mode) == key {
-					m.jumpSel = i
-					m.activateJump()
-					break
-				}
-			}
-		}
-	}
-	return m, nil
-}
-
-// jumpMoveSel moves the selection by d, skipping disabled rows so the cursor
-// always rests on something actionable.
-func (m *Model) jumpMoveSel(d int) {
-	n := len(m.jumpTargets)
-	if n == 0 {
-		return
-	}
-	for range m.jumpTargets {
-		m.jumpSel = (m.jumpSel + d + n) % n
-		if m.jumpTargets[m.jumpSel].enabled {
-			return
-		}
-	}
-}
-
-func (m *Model) renderJumpModal() string {
-	var sb strings.Builder
-	rowW := modalListWidth(m.width)
-
-	// Header: the address (or file offset, for an offset-only caret), then what it
-	// is (symbol · section) and, for a data slot, the pointer it holds. Count the
-	// lines so modalClick maps rows correctly.
-	c := m.jumpCaret
-	loc := fmt.Sprintf("0x%x", c.addr)
-	if !c.hasAddr {
-		loc = fmt.Sprintf("file 0x%x", c.off)
-	}
-	sb.WriteString(m.theme.modalTitle("Open ") + " " + m.theme.addrStyle.Render(loc))
-	sb.WriteString("\n")
-	headerLines := 1
-	if ctx := m.caretContextLine(c); ctx != "" {
-		sb.WriteString(" " + m.theme.symbolNameStyle.Render(layout.TruncateANSI(ctx, max(1, rowW-1))) + "\n")
-		headerLines++
-	}
-	if c.hasAddr {
-		if ptr := m.caretPointer(c.addr); ptr != "" {
-			sb.WriteString(" " + m.theme.srcShadowStyle.Render(layout.TruncateANSI(ptr, max(1, rowW-1))) + "\n")
-			headerLines++
-		}
-	}
-	sb.WriteString("\n")
-	headerLines++
-	m.modalListRow = headerLines
-
-	const labelW = 9
-	prevW := max(4, rowW-3-2-labelW-3)
-	faint := lipgloss.NewStyle().Faint(true)
-	for i, t := range m.jumpTargets {
-		glyph, gStyle := "▸", m.theme.headerKey
-		if !t.enabled {
-			glyph, gStyle = "·", m.theme.srcShadowStyle
-		}
-		digit := m.theme.helpKeyStyle.Render(modeDigit(t.mode))
-		label := layout.PadVisual(t.label, labelW)
-		preview := m.theme.srcShadowStyle.Render(layout.TruncateMiddle(t.preview, prevW))
-		line := fmt.Sprintf(" %s %s  %s  %s", gStyle.Render(glyph), digit, label, preview)
-		line = layout.PadRight(line, rowW)
-		switch {
-		case i == m.jumpSel:
-			line = m.theme.tableSelStyle.Render(ansi.Strip(line))
-		case !t.enabled:
-			line = faint.Render(ansi.Strip(line))
-		}
-		sb.WriteString(line + "\n")
-	}
-	sb.WriteString("\n")
-	sb.WriteString(m.theme.modalHint("↑/↓ select · ↵ or digit open · Esc cancel"))
-	return m.theme.modalStyle.Render(sb.String())
 }

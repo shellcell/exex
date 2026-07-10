@@ -15,6 +15,7 @@ import (
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
+	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 	"github.com/rabarbra/exex/internal/ui/view"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
@@ -299,14 +300,11 @@ type gotoState struct {
 	gotoAddrPhys bool      // interpret a typed address as physical (LMA), resolving to virtual
 }
 
-// jumpState stores the "open caret position in another view" modal: a fixed list
-// of target views, each with a preview of where it would land for the caret's
-// current position (a virtual address, a file offset, or both).
+// jumpState stores what the shell keeps for the "open caret position in another
+// view" overlay: the caret it was opened for. The overlay's own state (rows,
+// selection) lives on m.jump (internal/ui/modals/jumpto).
 type jumpState struct {
-	jumpActive  bool
-	jumpCaret   caret
-	jumpTargets []jumpTarget
-	jumpSel     int
+	jumpCaret caret
 }
 
 // findState stores the "Find from here" flow: a seed picker (candidate searches
@@ -441,6 +439,8 @@ type Model struct {
 	// settings is the preferences overlay (internal/ui/modals/settings); what a
 	// change *means* stays in the shell (see settings.go).
 	settings settingsmodal.State
+	// jump is the "open caret position in…" overlay (internal/ui/modals/jumpto).
+	jump jumptomodal.State
 	archiveState
 	statusState
 	keyState

@@ -99,7 +99,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalSyscall:
 		return m.updateSyscallModal(msg, key)
 	case modalJump:
-		return m.updateJumpModal(key)
+		return m, m.jump.Update(m, key)
 	case modalFind:
 		return m.updateFindModal(key)
 	case modalFindQuery:

@@ -9,6 +9,7 @@ package ui
 
 import (
 	"github.com/rabarbra/exex/internal/ui/modal"
+	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 	"github.com/rabarbra/exex/internal/ui/view"
 )
@@ -20,6 +21,7 @@ var (
 	_ modal.Host         = (*Model)(nil)
 	_ view.Host          = (*Model)(nil)
 	_ settingsmodal.Host = (*Model)(nil)
+	_ jumptomodal.Host   = (*Model)(nil)
 )
 
 // modalContext snapshots the current model state for the open overlay. Unlike
@@ -51,6 +53,10 @@ func (m *Model) modalStyles() *modal.Styles {
 		WarnStyle:    t.warnStyle,
 		ShadowStyle:  t.srcShadowStyle,
 		HeadingStyle: t.symbolNameStyle,
+		AddrStyle:    t.addrStyle,
+		KeyStyle:     t.helpKeyStyle,
+		AccentStyle:  t.headerKey,
+		RowStyle:     t.tableRowStyle,
 	}
 	return m.modalStylesCache
 }

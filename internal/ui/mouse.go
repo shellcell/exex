@@ -174,7 +174,7 @@ func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 	case modalFind:
 		return m.find.List()
 	case modalFindResults:
-		return &m.findResSel, m.findResTop, len(m.findShown), false, true
+		return m.findResults.List()
 	}
 	return nil, 0, 0, false, false
 }
@@ -223,6 +223,8 @@ func (m *Model) modalClick(y int) bool {
 		return m.palette.ClickRow(listRow)
 	case modalXref:
 		return m.xref.ClickRow(listRow)
+	case modalFindResults:
+		return m.findResults.ClickRow(listRow)
 	}
 	sel, top, n, _, ok := m.modalList()
 	if !ok {
@@ -250,7 +252,7 @@ func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 	case modalFind:
 		return m, m.find.Activate(m)
 	case modalFindResults:
-		return m.findJump()
+		return m, m.findResults.Activate(m)
 	}
 	return m, nil
 }

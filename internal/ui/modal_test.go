@@ -108,7 +108,7 @@ func TestTextOverlayWheelScrollsOverlay(t *testing.T) {
 // with no list, so it swallows the mouse rather than letting it reach the view.
 func TestFindQueryPromptCapturesMouse(t *testing.T) {
 	m := overlayModel()
-	m.openFindQuery()
+	m.findQueryModal.Open()
 	top := m.strs.Top
 
 	wheel(m, tea.MouseWheelDown)

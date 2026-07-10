@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
 )
 
 // TestTextMatcherCaseSensitivity covers the predicate shared by the disasm and
@@ -69,7 +70,7 @@ func TestRelocSymbolMatchIsSubstring(t *testing.T) {
 }
 
 // collectFacet runs one facet's command and returns its hits.
-func collectFacet(t *testing.T, cmd tea.Cmd) []findHit {
+func collectFacet(t *testing.T, cmd tea.Cmd) []findresultsmodal.Hit {
 	t.Helper()
 	msg, ok := cmd().(findPartialMsg)
 	if !ok {

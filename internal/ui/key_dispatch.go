@@ -88,9 +88,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalFind:
 		return m, m.find.Update(m, key)
 	case modalFindQuery:
-		return m.updateFindQuery(msg, key)
+		return m, m.findQueryModal.Update(m, msg, key)
 	case modalFindResults:
-		return m.updateFindResultsModal(msg, key)
+		return m, m.findResults.Update(m, msg, key)
 	case modalSettings:
 		return m, m.settings.Update(m, key)
 	case modalGoto:
@@ -441,7 +441,7 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 		m.openFindModal()
 		return m, nil, true
 	case actionFindQuery:
-		m.openFindQuery()
+		m.findQueryModal.Open()
 		return m, nil, true
 	}
 	return m, nil, false

@@ -129,6 +129,8 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	// the widget and hands it over.
 	m.palette.SetInput(newPromptInput("0x401000 or symbol name", "→ "))
 	m.xref.SetInput(newPromptInput("location · text · 0xaddr", "/ "))
+	m.findQueryModal.SetInput(newPromptInput("symbol · string · 0xaddr", "search "))
+	m.findResults.SetInput(newPromptInput("filter results", "/ "))
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))

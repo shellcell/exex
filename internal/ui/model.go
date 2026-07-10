@@ -15,6 +15,8 @@ import (
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
+	findquerymodal "github.com/rabarbra/exex/internal/ui/modals/findquery"
+	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	helpmodal "github.com/rabarbra/exex/internal/ui/modals/help"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
@@ -72,6 +74,8 @@ func (m mode) String() string {
 		return "Strings"
 	case modeSources:
 		return "Sources"
+	case modeRelocs:
+		return "Relocs"
 	}
 	return "?"
 }
@@ -303,31 +307,16 @@ type jumpState struct {
 // derived from the caret) feeding a global value search whose results — disasm
 // operand references, data-word occurrences, string matches and reloc targets —
 // are listed in one modal, tagged and filterable by the view they belong to.
+// findState holds what the shell keeps for the global value search: the async
+// bookkeeping for the per-source scans. The two overlays it drives — the
+// free-text prompt and the results list — live in internal/ui/modals/findquery
+// and internal/ui/modals/findresults.
 type findState struct {
-	// Seed picker.
-
-	// Global-search results modal.
-	findResultsActive bool
-	findRunning       bool
-	findSeq           int
-	findCancel        chan struct{}
-	findQuery         findQuery
-	findHits          []findHit
-	findShown         []int // indices into findHits after facet + text filter
-	findResSel        int
-	findResTop        int
-	findFacet         findFacet // which view's hits to show (all / disasm / data / …)
-	findFilter        textinput.Model
-	findFiltering     bool
-	findTotal         int     // hits in the active facet before the text filter
-	findPending       int     // source scans still running (0 = done)
-	findFacetPending  [5]bool // per-facet: is that source still scanning? (index by findFacet)
-
-	// Free-text query modal (the `l` global search): type anything, then run the
-	// same content scan the caret-seeded `f` uses.
-	findQueryActive bool
-	findQueryInput  textinput.Model
-	findQueryCase   bool // case-sensitive matching (default off; toggled with ^i)
+	findSeq    int
+	findCancel chan struct{}
+	// findQueryCase mirrors the prompt's case-sensitivity toggle, so a query typed
+	// there is interpreted the same way the prompt showed it.
+	findQueryCase bool
 }
 
 // searchState stores modal and async state for view searches.
@@ -434,6 +423,10 @@ type Model struct {
 	find findtomodal.State
 	// palette is the "Jump to" command palette (internal/ui/modals/palette).
 	palette palettemodal.State
+	// findQuery is the free-text search prompt (internal/ui/modals/findquery).
+	findQueryModal findquerymodal.State
+	// findResults is the global-search results overlay (internal/ui/modals/findresults).
+	findResults findresultsmodal.State
 	// help is the keybinding cheat-sheet overlay (internal/ui/modals/help).
 	help helpmodal.State
 	// xref is the cross-references results overlay (internal/ui/modals/xref).

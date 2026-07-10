@@ -9,6 +9,8 @@ package ui
 
 import (
 	"github.com/rabarbra/exex/internal/ui/modal"
+	findquerymodal "github.com/rabarbra/exex/internal/ui/modals/findquery"
+	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
@@ -20,12 +22,14 @@ import (
 // them fails at this file rather than at a distant call site. A modal that needs
 // more than modal.Host declares its own, embedding it (settings.Host).
 var (
-	_ modal.Host         = (*Model)(nil)
-	_ view.Host          = (*Model)(nil)
-	_ settingsmodal.Host = (*Model)(nil)
-	_ jumptomodal.Host   = (*Model)(nil)
-	_ findtomodal.Host   = (*Model)(nil)
-	_ palettemodal.Host  = (*Model)(nil)
+	_ modal.Host            = (*Model)(nil)
+	_ view.Host             = (*Model)(nil)
+	_ settingsmodal.Host    = (*Model)(nil)
+	_ jumptomodal.Host      = (*Model)(nil)
+	_ findtomodal.Host      = (*Model)(nil)
+	_ palettemodal.Host     = (*Model)(nil)
+	_ findquerymodal.Host   = (*Model)(nil)
+	_ findresultsmodal.Host = (*Model)(nil)
 )
 
 // modalContext snapshots the current model state for the open overlay. Unlike

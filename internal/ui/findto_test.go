@@ -2,6 +2,7 @@ package ui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	"testing"
 )
@@ -27,26 +28,26 @@ func TestFindModalSeedsAndSearch(t *testing.T) {
 	if h.m().find.Active() {
 		t.Error("seed picker still open after activate")
 	}
-	if !h.m().findResultsActive || !h.m().findRunning {
-		t.Fatalf("Enter did not start the search: results=%v running=%v", h.m().findResultsActive, h.m().findRunning)
+	if !h.m().findResults.Active() || !h.m().findResults.Running() {
+		t.Fatalf("Enter did not start the search: results=%v running=%v", h.m().findResults.Active(), h.m().findResults.Running())
 	}
 	if cmd == nil {
 		t.Fatal("no search command returned")
 	}
-	if h.m().findPending <= 0 {
-		t.Errorf("findPending = %d, want > 0", h.m().findPending)
+	if h.m().findResults.Pending() <= 0 {
+		t.Errorf("findPending = %d, want > 0", h.m().findResults.Pending())
 	}
 	// As each source reports, its hits append and the pending count drops; the last
 	// one ends the scan.
-	pending := h.m().findPending
+	pending := h.m().findResults.Pending()
 	for i := 0; i < pending; i++ {
-		h.m().handleFindPartial(findPartialMsg{seq: h.m().findSeq, hits: []findHit{{facet: ffData, off: uint64(i)}}})
+		h.m().handleFindPartial(findPartialMsg{seq: h.m().findSeq, hits: []findresultsmodal.Hit{{Facet: findresultsmodal.FacetData, Off: uint64(i)}}})
 	}
-	if h.m().findRunning {
+	if h.m().findResults.Running() {
 		t.Error("scan still running after all sources reported")
 	}
-	if len(h.m().findHits) != pending {
-		t.Errorf("got %d hits, want %d (one per source)", len(h.m().findHits), pending)
+	if len(h.m().findResults.Hits()) != pending {
+		t.Errorf("got %d hits, want %d (one per source)", len(h.m().findResults.Hits()), pending)
 	}
 }
 
@@ -60,8 +61,8 @@ func TestFindModalDigitSearch(t *testing.T) {
 	}
 	h.m().find.SetSel(0)
 	cmd := h.m().find.Activate(h.m())
-	if h.m().find.Active() || !h.m().findResultsActive {
-		t.Errorf("first seed did not open the results modal: picker=%v results=%v", h.m().find.Active(), h.m().findResultsActive)
+	if h.m().find.Active() || !h.m().findResults.Active() {
+		t.Errorf("first seed did not open the results modal: picker=%v results=%v", h.m().find.Active(), h.m().findResults.Active())
 	}
 	if cmd == nil {
 		t.Fatal("no search command")
@@ -119,25 +120,24 @@ func TestFindSearchFacetsAndStreaming(t *testing.T) {
 		t.Fatal("no search cmd")
 	}
 	m := h.m()
-	if !m.findRunning {
+	if !m.findResults.Running() {
 		t.Fatal("search not running")
 	}
 	// Before any source reports, the disasm facet (still scanning) must report as
 	// scanning, not "no occurrences".
-	m.findFacet = ffDisasm
-	if !m.facetStillScanning() {
+	m.findResults.SetFacet(findresultsmodal.FacetDisasm)
+	if !m.findResults.FacetStillScanning() {
 		t.Error("disasm facet should be scanning before its source reports")
 	}
 	// A data source reports two hits; they appear under the data facet.
-	m.handleFindPartial(findPartialMsg{seq: m.findSeq, facet: ffData, hits: []findHit{
-		{facet: ffData, off: 0x10}, {facet: ffData, off: 0x20},
+	m.handleFindPartial(findPartialMsg{seq: m.findSeq, facet: findresultsmodal.FacetData, hits: []findresultsmodal.Hit{
+		{Facet: findresultsmodal.FacetData, Off: 0x10}, {Facet: findresultsmodal.FacetData, Off: 0x20},
 	}})
-	m.findFacet = ffData
-	m.rebuildFindRows()
-	if len(m.findShown) != 2 {
-		t.Errorf("data facet shows %d hits, want 2", len(m.findShown))
+	m.findResults.SetFacet(findresultsmodal.FacetData)
+	if m.findResults.Shown() != 2 {
+		t.Errorf("data facet shows %d hits, want 2", m.findResults.Shown())
 	}
-	if m.facetStillScanning() {
+	if m.findResults.FacetStillScanning() {
 		t.Error("data facet reported but still marked scanning")
 	}
 }
@@ -149,26 +149,28 @@ func TestFindQueryFreeText(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press("l")
-	if !h.m().findQueryActive {
+	if !h.m().findQueryModal.Active() {
 		t.Fatal("l did not open the free-text search prompt")
 	}
 	for _, r := range "0x1000" {
 		h.pump(tea.KeyPressMsg(tea.Key{Text: string(r), Code: r}))
 	}
 	h.press("enter")
-	if h.m().findQueryActive {
+	if h.m().findQueryModal.Active() {
 		t.Error("prompt still open after Enter")
 	}
-	if !h.m().findResultsActive {
+	if !h.m().findResults.Active() {
 		t.Fatalf("Enter did not start the search; status=%q", h.m().status)
 	}
-	if !h.m().findQuery.hasAddr {
-		t.Error("hex literal not interpreted as an address")
+	if got := h.m().findResults.Label(); got != "0x1000" {
+		t.Errorf("results title = %q, want the typed query", got)
 	}
 
-	// Free text stays a string query.
-	q := h.m().queryForText("hello")
-	if q.text != "hello" {
-		t.Errorf("text query text = %q, want hello", q.text)
+	// A hex literal is an address query; free text stays a string query.
+	if q := h.m().queryForText("0x1000"); !q.hasAddr || q.text != "" {
+		t.Errorf("hex literal: hasAddr=%v text=%q, want an address query", q.hasAddr, q.text)
+	}
+	if q := h.m().queryForText("hello"); q.text != "hello" || q.hasAddr {
+		t.Errorf("free text: text=%q hasAddr=%v, want a string query", q.text, q.hasAddr)
 	}
 }

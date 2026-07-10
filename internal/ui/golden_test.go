@@ -11,6 +11,7 @@ import (
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/dump"
 	"github.com/rabarbra/exex/internal/testbin"
+	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
 
@@ -137,7 +138,7 @@ func goldenModals(t *testing.T) map[string]string {
 			m.palette.SetQuery(m, "t")
 		}},
 		{"search", func(m *Model) { m.openSearch() }},
-		{"find_query", func(m *Model) { m.openFindQuery() }},
+		{"find_query", func(m *Model) { m.findQueryModal.Open() }},
 		{"find_seeds", func(m *Model) {
 			enterMode(t, m, modeSymbols)
 			m.openFindModal()
@@ -167,6 +168,25 @@ func goldenModals(t *testing.T) map[string]string {
 			})
 		}},
 		{"cpufeatures_empty", func(m *Model) { m.cpufeat.Open(dump.CPUFeatureSet{Total: 99}) }},
+		// The results overlay, with hits from three sources so the frame covers the
+		// facet bar's per-facet counts, the badge colours, and both location columns
+		// (an address for disasm/strings, an @offset for a data hit).
+		{"find_results", func(m *Model) {
+			m.findResults.Open("_start", 4)
+			m.findResults.AddHits(findresultsmodal.FacetDisasm, []findresultsmodal.Hit{
+				{Facet: findresultsmodal.FacetDisasm, Addr: 0x40100e, HasAddr: true, Text: "call 0x401020", Sym: "_start"},
+			})
+			m.findResults.AddHits(findresultsmodal.FacetData, []findresultsmodal.Hit{
+				{Facet: findresultsmodal.FacetData, Off: 0x3000, Text: "pointer word", Sym: ".data"},
+			})
+			m.findResults.AddHits(findresultsmodal.FacetStrings, []findresultsmodal.Hit{
+				{Facet: findresultsmodal.FacetStrings, Addr: 0x402000, HasAddr: true, Text: "hello world", Sym: ".rodata"},
+			})
+			m.findResults.AddHits(findresultsmodal.FacetRelocs, nil) // last source: scan finishes
+		}},
+		// Mid-scan, before any source reports: the overlay must say "searching",
+		// with the running note, not "no occurrences found".
+		{"find_results_searching", func(m *Model) { m.findResults.Open("_start", 4) }},
 		{"syscalls", func(m *Model) {
 			enterMode(t, m, modeDisasm)
 			m.openSyscallResults([]dump.SyscallSite{

@@ -48,8 +48,8 @@ var modalOrder = [...]struct {
 	{modalSyscall, func(m *Model) bool { return m.syscallActive }},
 	{modalJump, func(m *Model) bool { return m.jump.Active() }},
 	{modalFind, func(m *Model) bool { return m.find.Active() }},
-	{modalFindQuery, func(m *Model) bool { return m.findQueryActive }},
-	{modalFindResults, func(m *Model) bool { return m.findResultsActive }},
+	{modalFindQuery, func(m *Model) bool { return m.findQueryModal.Active() }},
+	{modalFindResults, func(m *Model) bool { return m.findResults.Active() }},
 	{modalSettings, func(m *Model) bool { return m.settings.Active() }},
 	{modalGoto, func(m *Model) bool { return m.palette.Active() }},
 	{modalSearch, func(m *Model) bool { return m.searchActive }},
@@ -96,9 +96,11 @@ func (m *Model) renderActiveModal() string {
 		m.modalListRow = m.find.ListRow()
 		return out
 	case modalFindQuery:
-		return m.renderFindQueryModal()
+		return m.findQueryModal.Render(m.modalContext())
 	case modalFindResults:
-		return m.renderFindResultsModal()
+		out := m.findResults.Render(m.modalContext())
+		m.modalListRow = m.findResults.ListRow()
+		return out
 	case modalSettings:
 		out := m.settings.Render(m.modalContext(), m)
 		m.modalListRow = m.settings.ListRow()

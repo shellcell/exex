@@ -6,6 +6,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
+	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
 
@@ -40,8 +41,8 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 
 	m.syscallRunning = true
 	m.syscallSeq = 1
-	if _, _ = m.handleSyscallDone(syscallDoneMsg{file: oldFile, seq: 1, sites: []dump.SyscallSite{{Addr: 0x1000}}}); !m.syscallRunning || m.syscallActive {
-		t.Fatalf("stale syscall result was applied: running=%v active=%v", m.syscallRunning, m.syscallActive)
+	if _, _ = m.handleSyscallDone(syscallDoneMsg{file: oldFile, seq: 1, sites: []dump.SyscallSite{{Addr: 0x1000}}}); !m.syscallRunning || m.syscalls.Active() {
+		t.Fatalf("stale syscall result was applied: running=%v active=%v", m.syscallRunning, m.syscalls.Active())
 	}
 
 	m.cpufeatRunning = true
@@ -52,8 +53,8 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 
 	m.syscallFullRunning = true
 	m.syscallFullSeq = 1
-	if _, _ = m.handleSyscallFullDone(syscallFullDoneMsg{file: oldFile, seq: 1, sites: []dump.SyscallSite{{Addr: 0x1000}}, objs: 2}); !m.syscallFullRunning || m.syscallFullDone {
-		t.Fatalf("stale full syscall result was applied: running=%v done=%v", m.syscallFullRunning, m.syscallFullDone)
+	if _, _ = m.handleSyscallFullDone(syscallFullDoneMsg{file: oldFile, seq: 1, sites: []dump.SyscallSite{{Addr: 0x1000}}, objs: 2}); !m.syscallFullRunning || m.syscalls.FullDone() {
+		t.Fatalf("stale full syscall result was applied: running=%v done=%v", m.syscallFullRunning, m.syscalls.FullDone())
 	}
 }
 
@@ -67,11 +68,11 @@ func TestSyscallEmptyFallsBackToFullScope(t *testing.T) {
 	m.syscallRunning = true
 	m.syscallSeq = 3
 	_, cmd := m.handleSyscallDone(syscallDoneMsg{file: f, seq: 3, sites: nil})
-	if !m.syscallActive {
+	if !m.syscalls.Active() {
 		t.Fatal("modal did not open on an empty direct scan")
 	}
-	if m.syscallScope != sysScopeFull {
-		t.Fatalf("scope = %d, want full (%d)", m.syscallScope, sysScopeFull)
+	if m.syscalls.Scope() != syscallsmodal.ScopeFull {
+		t.Fatalf("scope = %d, want full (%d)", m.syscalls.Scope(), syscallsmodal.ScopeFull)
 	}
 	if !m.syscallFullRunning || cmd == nil {
 		t.Fatalf("full (+libs) scan was not started: running=%v cmd=%v", m.syscallFullRunning, cmd != nil)
@@ -86,7 +87,7 @@ func TestCancelSyscallFullScanClosesChannelAndIgnoresLateResult(t *testing.T) {
 	m.syscallFullSeq = 7
 	m.syscallFullCancel = done
 
-	m.cancelSyscallFullScan()
+	m.CancelFullScan()
 	if m.syscallFullRunning {
 		t.Fatal("full syscall scan still marked running after cancel")
 	}
@@ -102,7 +103,7 @@ func TestCancelSyscallFullScanClosesChannelAndIgnoresLateResult(t *testing.T) {
 		t.Fatal("full syscall cancel channel was not closed")
 	}
 
-	if _, _ = m.handleSyscallFullDone(syscallFullDoneMsg{file: f, seq: 7, sites: []dump.SyscallSite{{Addr: 0x1000}}, objs: 2}); m.syscallFullDone || len(m.syscallFull) != 0 {
-		t.Fatalf("late cancelled full syscall result was applied: done=%v sites=%d", m.syscallFullDone, len(m.syscallFull))
+	if _, _ = m.handleSyscallFullDone(syscallFullDoneMsg{file: f, seq: 7, sites: []dump.SyscallSite{{Addr: 0x1000}}, objs: 2}); m.syscalls.FullDone() || len(m.syscalls.FullSites()) != 0 {
+		t.Fatalf("late cancelled full syscall result was applied: done=%v sites=%d", m.syscalls.FullDone(), len(m.syscalls.FullSites()))
 	}
 }

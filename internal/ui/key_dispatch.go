@@ -50,7 +50,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.syscallFullRunning && key == "esc" {
-		m.cancelSyscallFullScan()
+		m.CancelFullScan()
 		m.setStatus("syscall scan cancelled", false)
 		return m, nil
 	}
@@ -65,7 +65,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalXref:
 		return m, m.xref.Update(m, msg, key)
 	case modalSyscall:
-		return m.updateSyscallModal(msg, key)
+		return m, m.syscalls.Update(m, msg, key)
 	case modalJump:
 		return m, m.jump.Update(m, key)
 	case modalFind:

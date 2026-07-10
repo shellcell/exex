@@ -23,6 +23,7 @@ import (
 	rawheadermodal "github.com/rabarbra/exex/internal/ui/modals/rawheader"
 	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
+	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 	"github.com/rabarbra/exex/internal/ui/view"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
@@ -426,6 +427,8 @@ type Model struct {
 	header rawheadermodal.State
 	// search is the in-view search prompt (internal/ui/modals/search).
 	search searchmodal.State
+	// syscalls is the system-calls results overlay (internal/ui/modals/syscalls).
+	syscalls syscallsmodal.State
 	// xref is the cross-references results overlay (internal/ui/modals/xref).
 	xref xrefmodal.State
 	archiveState

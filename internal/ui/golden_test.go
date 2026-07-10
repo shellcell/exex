@@ -201,9 +201,25 @@ func goldenModals(t *testing.T) map[string]string {
 		// Mid-scan, before any source reports: the overlay must say "searching",
 		// with the running note, not "no occurrences found".
 		{"find_results_searching", func(m *Model) { m.findResults.Open("_start", 4) }},
+		// Long macOS syscall names in the full (+libs) scope: the name column sizes
+		// itself to the content, so "kdebug_trace_string" is not truncated to
+		// "kd…e_string" while the origin column beside it sits half empty.
+		{"syscalls_full_longnames", func(m *Model) {
+			enterMode(t, m, modeDisasm)
+			site := func(n int64, name string) dump.SyscallSite {
+				return dump.SyscallSite{Num: n, HasNum: true, Name: name, Addr: 0x401000,
+					Origin: "libsystem_kernel.dylib", Text: "svc #0x80"}
+			}
+			m.syscalls.SetFullResults([]dump.SyscallSite{
+				site(170, "csops_audittoken"), site(173, "waitid"),
+				site(177, "kdebug_typefilter"), site(178, "kdebug_trace_string"),
+				site(179, "kdebug_trace64"), site(180, "kdebug_trace"),
+			}, nil, 2)
+			m.syscalls.OpenFull()
+		}},
 		{"syscalls", func(m *Model) {
 			enterMode(t, m, modeDisasm)
-			m.openSyscallResults([]dump.SyscallSite{
+			m.syscalls.Open([]dump.SyscallSite{
 				{Addr: 0x401013, Num: 1, Name: "write", Sym: "_start"},
 			})
 		}},

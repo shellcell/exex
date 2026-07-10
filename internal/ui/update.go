@@ -268,11 +268,8 @@ func (m *Model) refreshModalSymbolNames() {
 		m.xref.RelabelSymbols(m.symbolDisplayAt)
 	}
 	m.syscallCached = nil
-	if m.syscallActive {
-		for i := range m.syscallResults {
-			m.syscallResults[i].Sym = m.symbolDisplayAt(m.syscallResults[i].Addr)
-		}
-		m.rebuildSyscallRows()
+	if m.syscalls.Active() {
+		m.syscalls.RelabelSymbols(m.symbolDisplayAt)
 	}
 }
 

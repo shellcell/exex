@@ -85,9 +85,6 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 			Filter: relocFilter,
 		},
 		gotoState: gotoState{},
-		syscallState: syscallState{
-			syscallFilter: sysFilter,
-		},
 		interactionState: interactionState{
 			wrap:                cfg.Behavior.DefaultWrap,
 			treeCollapseDefault: cfg.Behavior.TreeCollapsed,
@@ -127,6 +124,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	m.findQueryModal.SetInput(newPromptInput("symbol · string · 0xaddr", "search "))
 	m.findResults.SetInput(newPromptInput("filter results", "/ "))
 	m.search.Init(searchInput)
+	m.syscalls.SetInput(sysFilter)
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))

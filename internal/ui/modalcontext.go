@@ -16,6 +16,7 @@ import (
 	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
+	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
 	"github.com/rabarbra/exex/internal/ui/view"
 )
 
@@ -32,6 +33,7 @@ var (
 	_ findquerymodal.Host   = (*Model)(nil)
 	_ findresultsmodal.Host = (*Model)(nil)
 	_ searchmodal.Host      = (*Model)(nil)
+	_ syscallsmodal.Host    = (*Model)(nil)
 )
 
 // modalContext snapshots the current model state for the open overlay. Unlike

@@ -171,7 +171,7 @@ func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 	case modalXref:
 		return m.xref.List()
 	case modalSyscall:
-		return &m.syscallSel, m.syscallTop, len(m.syscallShown), false, true
+		return m.syscalls.List()
 	case modalCPUFeat:
 		return m.cpufeat.List()
 	case modalGoto:
@@ -234,6 +234,8 @@ func (m *Model) modalClick(y int) bool {
 		return m.xref.ClickRow(listRow)
 	case modalFindResults:
 		return m.findResults.ClickRow(listRow)
+	case modalSyscall:
+		return m.syscalls.ClickRow(listRow)
 	}
 	sel, top, n, _, ok := m.modalList()
 	if !ok {
@@ -248,7 +250,7 @@ func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 	case modalXref:
 		return m, m.xref.Activate(m)
 	case modalSyscall:
-		return m.syscallJump()
+		return m, m.syscalls.Activate(m)
 	case modalCPUFeat:
 		return m, m.cpufeat.Activate(m)
 	case modalGoto:

@@ -167,7 +167,7 @@ func TestKeysGlobal(t *testing.T) {
 
 	// , opens settings; esc closes.
 	h.press(",")
-	if !h.m().settingsActive {
+	if !h.m().settings.Active() {
 		t.Fatal(", did not open settings")
 	}
 	h.press("esc")

@@ -120,6 +120,13 @@ func goldenModals(t *testing.T) map[string]string {
 		{"help", func(m *Model) { m.helpActive = true }},
 		{"header", func(m *Model) { m.headerActive = true }},
 		{"settings", func(m *Model) { m.openSettings() }},
+		// Field 14 scrolls the list so its window starts on a group header, which
+		// is the one row whose leading blank separator is suppressed. Nothing else
+		// exercises that branch.
+		{"settings_scrolled", func(m *Model) {
+			m.openSettings()
+			m.settings.SetCur(14)
+		}},
 		{"goto", func(m *Model) {
 			m.gotoActive = true
 			m.gotoInput.Focus()
@@ -144,10 +151,18 @@ func goldenModals(t *testing.T) map[string]string {
 				{addr: 0x40100e, text: "call 0x401020", sym: "_start"},
 			})
 		}},
+		// A populated set, so the frame covers the row layout (name padding, count
+		// column, first-use address) and the selection bar — not just the
+		// "no optional features detected" branch an empty set would render.
 		{"cpufeatures", func(m *Model) {
-			set := dump.CPUFeatureSet{}
-			m.openCPUFeatModal(set)
+			m.cpufeat.Open(dump.CPUFeatureSet{
+				Total:    12345,
+				Baseline: "x86-64-v3",
+				Counts:   map[string]int{"AVX": 42, "SSE2": 7, "AVX512F": 1, "BMI2": 300},
+				FirstUse: map[string]uint64{"AVX": 0x401000, "SSE2": 0x401020, "AVX512F": 0x4010ff, "BMI2": 0x402000},
+			})
 		}},
+		{"cpufeatures_empty", func(m *Model) { m.cpufeat.Open(dump.CPUFeatureSet{Total: 99}) }},
 		{"syscalls", func(m *Model) {
 			enterMode(t, m, modeDisasm)
 			m.openSyscallResults([]dump.SyscallSite{

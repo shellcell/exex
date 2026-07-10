@@ -126,7 +126,7 @@ func TestFindQueryPromptCapturesMouse(t *testing.T) {
 // per-site chains got wrong (render preferred settings, keys preferred xref).
 func TestActiveModalOrdering(t *testing.T) {
 	m := overlayModel()
-	m.settingsActive = true
+	m.settings.Open()
 	m.xrefActive = true
 	if got := m.activeModal(); got != modalXref {
 		t.Fatalf("activeModal = %v, want modalXref (higher priority than settings)", got)

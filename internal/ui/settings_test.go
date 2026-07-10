@@ -14,40 +14,40 @@ func TestSettingsCycleAndPersist(t *testing.T) {
 	m := &Model{theme: DefaultTheme(), file: &binfile.File{}}
 
 	m.openSettings()
-	if !m.settingsActive {
+	if !m.settings.Active() {
 		t.Fatal("openSettings did not activate the popup")
 	}
 
 	// Field 0: theme — right cycles off the default.
-	m.updateSettings("right")
+	m.settings.Update(m, "right")
 	if m.cfg.Theme == "" || m.cfg.Theme == defaultThemeName {
 		t.Fatalf("theme did not cycle, got %q", m.cfg.Theme)
 	}
 
 	// Field 1: background — space toggles it on.
-	m.updateSettings("down")
-	m.updateSettings(" ")
+	m.settings.Update(m, "down")
+	m.settings.Update(m, " ")
 	if !m.cfg.Behavior.Background {
 		t.Fatal("background toggle did not turn on")
 	}
 
 	// Field 2: default wrap — space toggles it on and applies it for the session.
-	m.updateSettings("down")
-	m.updateSettings(" ")
+	m.settings.Update(m, "down")
+	m.settings.Update(m, " ")
 	if !m.cfg.Behavior.DefaultWrap || !m.wrap {
 		t.Fatal("default wrap toggle did not turn on")
 	}
 
 	// Field 3: default view — right cycles to a non-empty view name.
-	m.updateSettings("down")
-	m.updateSettings("right")
+	m.settings.Update(m, "down")
+	m.settings.Update(m, "right")
 	if m.cfg.Behavior.DefaultView == "" {
 		t.Fatal("default view did not cycle")
 	}
 
 	// Enter persists and closes.
-	m.updateSettings("enter")
-	if m.settingsActive {
+	m.settings.Update(m, "enter")
+	if m.settings.Active() {
 		t.Fatal("Enter should close the popup")
 	}
 	c, err := config.Load()
@@ -70,36 +70,36 @@ func TestSettingsNewFields(t *testing.T) {
 
 	// Disasm target (field 4): cycling lands on a known strategy and updates the
 	// live target used for default landings.
-	m.settingsCur = 4
-	m.cycleSetting(1)
+	m.settings.SetCur(4)
+	m.CycleSetting(m.settings.Cur(), 1)
 	if m.cfg.Behavior.DefaultDisasmTarget == "" || m.disasmTarget != m.cfg.Behavior.DefaultDisasmTarget {
 		t.Fatalf("disasm target not applied live: cfg=%q live=%q",
 			m.cfg.Behavior.DefaultDisasmTarget, m.disasmTarget)
 	}
 
 	// Demangle (field 10): toggling flips the (negated) preference.
-	m.settingsCur = 10
-	m.cycleSetting(1)
+	m.settings.SetCur(10)
+	m.CycleSetting(m.settings.Cur(), 1)
 	if !m.cfg.Behavior.NoDemangle {
 		t.Fatal("demangle toggle did not set NoDemangle")
 	}
 
 	// Compact addresses (field 14): toggling sets the flag and pushes it to the file.
-	m.settingsCur = 14
-	m.cycleSetting(1)
+	m.settings.SetCur(14)
+	m.CycleSetting(m.settings.Cur(), 1)
 	if !m.cfg.Behavior.CompactAddresses {
 		t.Fatal("compact-addresses toggle did not set the flag")
 	}
 
 	// Hex bytes/row (field 15): cycles 16 → 32.
-	m.settingsCur = 15
-	m.cycleSetting(1)
+	m.settings.SetCur(15)
+	m.CycleSetting(m.settings.Cur(), 1)
 	if m.cfg.Behavior.HexBytesPerRow != 32 {
 		t.Fatalf("hex bytes/row = %d, want 32", m.cfg.Behavior.HexBytesPerRow)
 	}
 
 	// Persist and reload: every new field round-trips.
-	m.persistSettings()
+	m.PersistSettings()
 	c, err := config.Load()
 	if err != nil {
 		t.Fatalf("reload: %v", err)

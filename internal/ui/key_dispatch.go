@@ -93,7 +93,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The open modal owns the keyboard. modalHeader/modalHelp returned above.
 	switch m.activeModal() {
 	case modalCPUFeat:
-		return m.updateCPUFeatModal(key)
+		return m, m.cpufeat.Update(m.modalContext(), m, key)
 	case modalXref:
 		return m.updateXrefModal(msg, key)
 	case modalSyscall:
@@ -107,7 +107,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalFindResults:
 		return m.updateFindResultsModal(msg, key)
 	case modalSettings:
-		return m.updateSettings(key)
+		return m, m.settings.Update(m, key)
 	case modalGoto:
 		return m.updateGotoInput(msg, key)
 	case modalSearch:

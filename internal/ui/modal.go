@@ -43,14 +43,14 @@ var modalOrder = [...]struct {
 }{
 	{modalHeader, func(m *Model) bool { return m.headerActive }},
 	{modalHelp, func(m *Model) bool { return m.helpActive }},
-	{modalCPUFeat, func(m *Model) bool { return m.cpufeatActive }},
+	{modalCPUFeat, func(m *Model) bool { return m.cpufeat.Active() }},
 	{modalXref, func(m *Model) bool { return m.xrefActive }},
 	{modalSyscall, func(m *Model) bool { return m.syscallActive }},
 	{modalJump, func(m *Model) bool { return m.jumpActive }},
 	{modalFind, func(m *Model) bool { return m.findActive }},
 	{modalFindQuery, func(m *Model) bool { return m.findQueryActive }},
 	{modalFindResults, func(m *Model) bool { return m.findResultsActive }},
-	{modalSettings, func(m *Model) bool { return m.settingsActive }},
+	{modalSettings, func(m *Model) bool { return m.settings.Active() }},
 	{modalGoto, func(m *Model) bool { return m.gotoActive }},
 	{modalSearch, func(m *Model) bool { return m.searchActive }},
 }
@@ -76,7 +76,11 @@ func (m *Model) renderActiveModal() string {
 	case modalHelp:
 		return m.renderHelpModal()
 	case modalCPUFeat:
-		return m.renderCPUFeatModal()
+		// Migrated modals record their own list row while rendering; the mouse
+		// hit-test reads it back through the shell's modalListRow.
+		out := m.cpufeat.Render(m.modalContext())
+		m.modalListRow = m.cpufeat.ListRow()
+		return out
 	case modalXref:
 		return m.renderXrefModal()
 	case modalSyscall:
@@ -90,7 +94,9 @@ func (m *Model) renderActiveModal() string {
 	case modalFindResults:
 		return m.renderFindResultsModal()
 	case modalSettings:
-		return m.renderSettingsModal()
+		out := m.settings.Render(m.modalContext(), m)
+		m.modalListRow = m.settings.ListRow()
+		return out
 	case modalGoto:
 		return m.renderGotoModal()
 	case modalSearch:

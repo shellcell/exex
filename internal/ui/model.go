@@ -13,6 +13,9 @@ import (
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/modal"
+	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
+	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 	"github.com/rabarbra/exex/internal/ui/view"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 	infoview "github.com/rabarbra/exex/internal/ui/views/info"
@@ -97,6 +100,7 @@ func (m *Model) clearAllViewCaches() {
 // on geometry, not colour, so they're left intact.)
 func (m *Model) clearColorCaches() {
 	m.viewStylesCache = nil
+	m.modalStylesCache = nil
 	m.clearAllViewCaches()
 	m.disasmAsmCache = nil
 	m.disasmTokenStyles = nil
@@ -357,15 +361,9 @@ type searchState struct {
 	searchCaseSensitive bool // in-view search honours case (default off)
 }
 
-// settingsState stores state for the on-the-fly settings popup.
+// settingsState holds the overlay geometry the shell still tracks. The settings
+// popup's own state (selection, scroll, row→field map) lives on m.settings.
 type settingsState struct {
-	settingsActive bool
-	settingsCur    int // selected field index (0..settingsFieldCount-1)
-	settingsTop    int // first visible field when the list is taller than the window
-	// settingsLineFields maps each rendered list line (from modalListRow) to its
-	// field index, or -1 for a group header / blank separator. Rebuilt every render
-	// so a mouse click lands on the right field despite the interspersed headers.
-	settingsLineFields []int
 	// modalListRow is the content row (within whichever overlay modal is open)
 	// where its scrollable list/fields begin, set by that modal's render so a mouse
 	// click can be mapped to an item. Only one modal is open at a time.
@@ -408,6 +406,8 @@ type Model struct {
 	// viewStylesCache is the lazily-built style/closure vocabulary shared with
 	// the view packages (see viewStyles). Dropped on theme or settings changes.
 	viewStylesCache *view.Styles
+	// modalStylesCache is the same for the modal packages (see modalStyles).
+	modalStylesCache *modal.Styles
 
 	layoutState
 	info     infoview.State
@@ -434,6 +434,13 @@ type Model struct {
 	xrefState
 	syscallState
 	cpufeatState
+	// cpufeat is the CPU-features overlay (internal/ui/modals/cpufeat). Modals are
+	// migrating to their own packages behind modal.Modal; cpufeatState above keeps
+	// only the async bookkeeping for its background scan.
+	cpufeat cpufeatmodal.State
+	// settings is the preferences overlay (internal/ui/modals/settings); what a
+	// change *means* stays in the shell (see settings.go).
+	settings settingsmodal.State
 	archiveState
 	statusState
 	keyState

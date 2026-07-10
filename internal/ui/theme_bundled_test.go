@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rabarbra/exex/internal/chromastyles"
+	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 )
 
 // TestSettingsThemesAreAllBundled is the guard for the two-registry bug: the
@@ -16,7 +17,7 @@ import (
 // Both lists now come from internal/chromasubset/styles.txt. If they ever drift
 // again, this fails instead of shipping a picker that lies.
 func TestSettingsThemesAreAllBundled(t *testing.T) {
-	for _, name := range settingsThemeList() {
+	for _, name := range settingsmodal.ThemeList(defaultThemeName) {
 		syntaxTheme := presetColors(name).SyntaxTheme
 		if syntaxTheme == "" {
 			syntaxTheme = darkSyntaxTheme // the "dark" built-in carries no overlay

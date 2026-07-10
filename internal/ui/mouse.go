@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/modal"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
@@ -165,11 +166,11 @@ func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 	case modalSyscall:
 		return &m.syscallSel, m.syscallTop, len(m.syscallShown), false, true
 	case modalCPUFeat:
-		return &m.cpufeatSel, m.cpufeatTop, len(m.cpufeatFeats), false, true
+		return m.cpufeat.List()
 	case modalGoto:
 		return &m.gotoSel, m.gotoTop, len(m.gotoResults), false, true
 	case modalSettings:
-		return &m.settingsCur, m.settingsTop, settingsFieldCount, true, true
+		return m.settings.List()
 	case modalJump:
 		return &m.jumpSel, 0, len(m.jumpTargets), false, true
 	case modalFind:
@@ -197,37 +198,31 @@ func (m *Model) modalScrollSel(d int) {
 // returning whether it hit one. It re-renders the modal to recompute its centred
 // geometry and the list's starting row (modalListRow).
 func (m *Model) modalClick(y int) bool {
-	modal := m.renderActiveModal()
-	if modal == "" {
+	box := m.renderActiveModal()
+	if box == "" {
 		return false
 	}
-	mtop := (m.height - lipgloss.Height(modal)) / 2
+	mtop := (m.height - lipgloss.Height(box)) / 2
 	// content row = y - modalTop - border(1) - padding-top(1), then minus where the
 	// list begins within the modal content.
 	listRow := (y - mtop - 2) - m.modalListRow
 	if listRow < 0 {
 		return false
 	}
-	// Settings has group headers and separators interleaved, so a rendered line
-	// maps to a field through settingsLineFields (-1 for non-selectable lines).
-	if m.activeModal() == modalSettings {
-		if listRow < len(m.settingsLineFields) {
-			if f := m.settingsLineFields[listRow]; f >= 0 {
-				m.settingsCur = f
-				return true
-			}
-		}
-		return false
+	// Extracted modals own their row→item mapping: settings interleaves group
+	// headers and separators, so a rendered line does not correspond to a list
+	// index the way the flat result lists do.
+	switch m.activeModal() {
+	case modalSettings:
+		return m.settings.ClickRow(listRow)
+	case modalCPUFeat:
+		return m.cpufeat.ClickRow(listRow)
 	}
 	sel, top, n, _, ok := m.modalList()
 	if !ok {
 		return false
 	}
-	if idx := top + listRow; idx >= 0 && idx < n {
-		*sel = idx
-		return true
-	}
-	return false
+	return modal.ClickIndex(sel, top, n, listRow)
 }
 
 // modalActivate runs the open modal's Enter action (mouse double-click).
@@ -238,14 +233,13 @@ func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 	case modalSyscall:
 		return m.syscallJump()
 	case modalCPUFeat:
-		return m.cpufeatJump()
+		return m, m.cpufeat.Activate(m)
 	case modalGoto:
 		m.activateGoto()
 		m.closeGoto()
 		return m, nil
 	case modalSettings:
-		m.cycleSetting(1)
-		return m, nil
+		return m, m.settings.Activate(m)
 	case modalJump:
 		m.activateJump()
 		return m, nil

@@ -45,8 +45,8 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 
 	m.cpufeatRunning = true
 	m.cpufeatSeq = 1
-	if _, _ = m.handleCPUFeatDone(cpufeatDoneMsg{file: oldFile, seq: 1, set: dump.CPUFeatureSet{Counts: map[string]int{"AVX": 1}}}); !m.cpufeatRunning || m.cpufeatDone {
-		t.Fatalf("stale CPU-feature result was applied: running=%v done=%v", m.cpufeatRunning, m.cpufeatDone)
+	if _, _ = m.handleCPUFeatDone(cpufeatDoneMsg{file: oldFile, seq: 1, set: dump.CPUFeatureSet{Counts: map[string]int{"AVX": 1}}}); !m.cpufeatRunning || m.cpufeat.Scanned() {
+		t.Fatalf("stale CPU-feature result was applied: running=%v scanned=%v", m.cpufeatRunning, m.cpufeat.Scanned())
 	}
 
 	m.syscallFullRunning = true

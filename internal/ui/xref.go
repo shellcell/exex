@@ -10,6 +10,7 @@ package ui
 // own symbol name partly bridges that gap).
 
 import (
+	"container/heap"
 	"fmt"
 	"runtime"
 	"sort"
@@ -165,13 +166,28 @@ func (m *Model) xrefLabelForTarget(target uint64) string {
 // scanDisasmRefs collects every instruction whose resolved operand address
 // equals target — the xref query, and one of the find query's disasm matchers.
 func (m *Model) scanDisasmRefs(target uint64, done <-chan struct{}) []xrefHit {
-	return m.scanDisasmMatching(func(text string) bool { return instReferences(text, target) }, done)
+	return m.scanDisasmMatching(func(text string) bool { return instReferences(text, target) }, xrefMaxHits, done)
 }
 
-// scanDisasmMatching decodes the executable image in parallel chunks and collects
-// every instruction whose text satisfies match. Shared by the xref scan and the
-// global search (operand-reference or free-text matching).
-func (m *Model) scanDisasmMatching(match func(text string) bool, done <-chan struct{}) []xrefHit {
+// scanDisasmMatching decodes the executable image in parallel chunks and returns
+// the `limit` lowest-addressed instructions whose text satisfies match. Shared by
+// the xref scan and the global search (operand-reference or free-text matching).
+//
+// Retained memory is bounded by limit, not by the number of matches. Each worker
+// used to accumulate *every* match in its chunk, and the cap was applied only
+// after all of them had been joined and sorted: searching "mov" over exex's own
+// 15 MB binary matches ~98,000 instructions, so ~10 MB was allocated (and sorted)
+// to show 500 rows — and it grew linearly with the target's size.
+//
+// Bounding it also fixes what the cap discarded. The old merge stopped after the
+// first chunks filled the quota, so matches in later chunks were dropped before
+// the sort even looked at them; a low-addressed hit late in the image lost to a
+// high-addressed one early in it. The shared heap below compares every match, so
+// the result is exactly the lowest `limit` by address.
+func (m *Model) scanDisasmMatching(match func(text string) bool, limit int, done <-chan struct{}) []xrefHit {
+	if limit <= 0 {
+		return nil
+	}
 	svc := m.disasmService()
 	img := m.file.ExecImage()
 	file := m.file
@@ -189,23 +205,27 @@ func (m *Model) scanDisasmMatching(match func(text string) bool, done <-chan str
 		starts = append(starts, pos)
 		pos = win.End
 	}
-	results := make([][]xrefHit, len(starts))
 	workers := max(min(maxWorkers, len(starts)), 1)
 	sem := make(chan struct{}, workers)
+
+	// One heap for all workers: a per-worker cap would still scale with the chunk
+	// count. The lock is taken only on a match, which is rare next to the decode.
+	var mu sync.Mutex
+	best := make(lowestHits, 0, limit)
+
 	var wg sync.WaitGroup
-	for i, start := range starts {
+	for _, start := range starts {
 		if scanCancelled(done) {
 			break
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i, start int) {
+		go func(start int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			if scanCancelled(done) {
 				return
 			}
-			var hits []xrefHit
 			svc.DecodeRangeFunc(start, chunk, xrefLead, func(inst disasm.Inst) bool {
 				if scanCancelled(done) {
 					return false
@@ -213,37 +233,77 @@ func (m *Model) scanDisasmMatching(match func(text string) bool, done <-chan str
 				if !match(inst.Text) {
 					return true
 				}
+				// Check the threshold before building the hit, so a saturated scan
+				// stops calling SymbolAt and trimming text for hits it will discard.
+				mu.Lock()
+				if !best.wants(inst.Addr, limit) {
+					mu.Unlock()
+					return true
+				}
+				mu.Unlock()
+
 				sym := ""
 				if s, ok := file.SymbolAt(inst.Addr); ok {
 					sym = s.Display()
 				}
-				hits = append(hits, xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym})
+				hit := xrefHit{addr: inst.Addr, text: strings.TrimSpace(inst.Text), sym: sym}
+
+				mu.Lock()
+				best.push(hit, limit)
+				mu.Unlock()
 				return true
 			})
-			results[i] = hits
-		}(i, start)
+		}(start)
 	}
 	wg.Wait()
 
-	seen := map[uint64]bool{}
-	var hits []xrefHit
-	for _, rs := range results {
-		for _, h := range rs {
-			if seen[h.addr] {
-				continue
-			}
-			seen[h.addr] = true
-			hits = append(hits, h)
-		}
-		if len(hits) >= xrefMaxHits {
-			break
-		}
-	}
+	hits := []xrefHit(best)
 	sort.Slice(hits, func(i, j int) bool { return hits[i].addr < hits[j].addr })
-	if len(hits) > xrefMaxHits {
-		hits = hits[:xrefMaxHits]
+	return dedupeByAddr(hits)
+}
+
+// dedupeByAddr drops repeated addresses from an address-sorted slice. Chunks
+// cover disjoint offset ranges, so a duplicate needs two offsets mapping to one
+// address (overlapping regions in a sparse image) — rare, and cheap to handle
+// here rather than by retaining a set of every match seen.
+func dedupeByAddr(hits []xrefHit) []xrefHit {
+	out := hits[:0]
+	for i, h := range hits {
+		if i > 0 && h.addr == hits[i-1].addr {
+			continue
+		}
+		out = append(out, h)
 	}
-	return hits
+	return out
+}
+
+// lowestHits is a max-heap by address holding the lowest-addressed hits seen so
+// far, so the largest — the next to be evicted — sits at index 0. It never grows
+// beyond the caller's limit.
+type lowestHits []xrefHit
+
+func (h lowestHits) Len() int           { return len(h) }
+func (h lowestHits) Less(i, j int) bool { return h[i].addr > h[j].addr }
+func (h lowestHits) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *lowestHits) Push(x any)        { *h = append(*h, x.(xrefHit)) }
+func (h *lowestHits) Pop() any          { old := *h; n := len(old) - 1; it := old[n]; *h = old[:n]; return it }
+
+// wants reports whether addr would be kept: either the heap has room, or addr
+// beats the worst hit currently held.
+func (h lowestHits) wants(addr uint64, limit int) bool {
+	return len(h) < limit || addr < h[0].addr
+}
+
+// push inserts hit, evicting the highest-addressed hit once at limit.
+func (h *lowestHits) push(hit xrefHit, limit int) {
+	if len(*h) < limit {
+		heap.Push(h, hit)
+		return
+	}
+	if hit.addr < (*h)[0].addr {
+		(*h)[0] = hit
+		heap.Fix(h, 0)
+	}
 }
 
 func (m *Model) xrefScanCmd(target uint64, seq int, done <-chan struct{}) tea.Cmd {

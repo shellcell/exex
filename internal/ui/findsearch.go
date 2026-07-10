@@ -11,6 +11,7 @@ package ui
 // reuses.
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -228,12 +229,6 @@ type findPartialMsg struct {
 	hits  []findHit
 }
 
-// bytesContains reports whether b contains sub (exact bytes) — case-sensitive
-// string matching without allocating a string.
-func bytesContains(b, sub []byte) bool {
-	return bytesearch.FindBytes(b, sub, 0, true) >= 0
-}
-
 // textMatcher returns a predicate testing whether a string contains the query's
 // text, honouring its case-sensitivity flag (case-insensitive folds against a
 // pre-lowered needle with no per-call allocation). Empty text never matches.
@@ -249,6 +244,23 @@ func textMatcher(q findQuery) func(string) bool {
 	return func(s string) bool { return layout.ContainsFold(s, lower) }
 }
 
+// bytesMatcher is textMatcher over raw bytes, for the string table (whose entries
+// are byte slices into the mapped image, so testing them never allocates a
+// string). Both branches are chosen once, up front: the scan used to run the
+// case-insensitive fold over every string in the binary and then discard the
+// result whenever the query was case-sensitive — which seed searches always are.
+func bytesMatcher(q findQuery) func([]byte) bool {
+	if q.text == "" {
+		return func([]byte) bool { return false }
+	}
+	if q.caseSensitive {
+		needle := []byte(q.text)
+		return func(b []byte) bool { return bytes.Contains(b, needle) }
+	}
+	lower := strings.ToLower(q.text)
+	return func(b []byte) bool { return layout.ContainsFoldBytes(b, lower) }
+}
+
 // findDisasmCmd scans the executable image for instructions matching the query:
 // operand references to the address (an address query) and/or instruction text
 // containing the search text (a free-text query). The slowest source.
@@ -262,8 +274,9 @@ func (m *Model) findDisasmCmd(q findQuery, seq int, done <-chan struct{}) tea.Cm
 			}
 			return textMatch(text)
 		}
-		var hits []findHit
-		for _, h := range scan(match, done) {
+		matches := scan(match, findMaxPerFacet, done)
+		hits := make([]findHit, 0, len(matches))
+		for _, h := range matches {
 			hits = append(hits, findHit{facet: ffDisasm, addr: h.addr, hasAddr: true, text: h.text, sym: h.sym})
 		}
 		return findPartialMsg{seq: seq, facet: ffDisasm, hits: hits}
@@ -281,10 +294,15 @@ func (m *Model) findDataCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd 
 	return func() tea.Msg {
 		raw := file.Raw()
 		var hits []findHit
-		// Each pattern to look for, with the note shown for a hit.
+		// Each pattern to look for, with the note shown for a hit and whether it
+		// folds ASCII case. fold is a field rather than being re-derived from note:
+		// it used to be `p.note == "bytes"`, which keyed matching semantics off a
+		// display string, so renaming the note in the UI would silently change how
+		// the search matched.
 		type pat struct {
 			bytes []byte
 			note  string
+			fold  bool
 		}
 		var pats []pat
 		if q.hasAddr {
@@ -294,24 +312,24 @@ func (m *Model) findDataCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd 
 				pb[i] = byte(v)
 				v >>= 8
 			}
-			pats = append(pats, pat{pb, "pointer word"})
+			// The pointer word is a binary value: folding it would match byte values
+			// that merely differ by 0x20.
+			pats = append(pats, pat{bytes: pb, note: "pointer word", fold: false})
 		}
 		if q.text != "" {
-			pats = append(pats, pat{[]byte(q.text), "bytes"})
+			pats = append(pats, pat{bytes: []byte(q.text), note: "bytes", fold: !q.caseSensitive})
 		}
-		// The text pattern folds ASCII case unless the query is case-sensitive; the
-		// pointer-word pattern is binary and always matches exactly.
-		fold := !q.caseSensitive
+		// findMaxPerFacet caps the facet, not each pattern: an address+text query
+		// used to run the counter per pattern and could return 2× the documented cap.
 		for _, p := range pats {
 			if len(p.bytes) == 0 {
 				continue
 			}
-			patFold := fold && p.note == "bytes"
-			for pos, n := 0, 0; n < findMaxPerFacet; n++ {
+			for pos := 0; len(hits) < findMaxPerFacet; {
 				if scanCancelled(done) {
 					break
 				}
-				idx := bytesearch.FindBytesFold(raw, p.bytes, pos, true, patFold)
+				idx := bytesearch.FindBytesFold(raw, p.bytes, pos, true, p.fold)
 				if idx < 0 {
 					break
 				}
@@ -350,18 +368,12 @@ func (m *Model) findStringsCmd(q findQuery, seq int, done <-chan struct{}) tea.C
 			}
 		}
 		if q.text != "" {
-			needle := strings.ToLower(q.text)
-			raw := []byte(q.text)
+			matches := bytesMatcher(q)
 			for _, e := range file.Strings() {
 				if len(hits) >= findMaxPerFacet || scanCancelled(done) {
 					break
 				}
-				b := file.StringBytes(e)
-				match := layout.ContainsFoldBytes(b, needle)
-				if q.caseSensitive {
-					match = bytesContains(b, raw)
-				}
-				if !match {
+				if !matches(file.StringBytes(e)) {
 					continue
 				}
 				hits = append(hits, mk(e, e.Section))
@@ -372,15 +384,22 @@ func (m *Model) findStringsCmd(q findQuery, seq int, done <-chan struct{}) tea.C
 }
 
 // findRelocsCmd finds relocations patching the address or binding the symbol.
+//
+// The symbol test is a substring match honouring the query's case sensitivity,
+// like every other facet. It used to be an exact `==` that ignored the flag, so
+// searching "malloc" found it in disasm, data and strings but never in the
+// relocation that binds `malloc@GLIBC_2.2.5` — the one place the name is most
+// likely to be decorated.
 func (m *Model) findRelocsCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd {
 	file := m.file
+	symMatch := textMatcher(q)
 	return func() tea.Msg {
 		var hits []findHit
 		for _, r := range file.Relocations() {
 			if len(hits) >= findMaxPerFacet || scanCancelled(done) {
 				break
 			}
-			if !((q.hasAddr && r.Offset == q.addr) || (q.text != "" && r.Sym == q.text)) {
+			if !((q.hasAddr && r.Offset == q.addr) || symMatch(r.Sym)) {
 				continue
 			}
 			ctx := r.Type

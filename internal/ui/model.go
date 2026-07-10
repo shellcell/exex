@@ -15,8 +15,10 @@ import (
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
+	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
+	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/view"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 	infoview "github.com/rabarbra/exex/internal/ui/views/info"
@@ -295,9 +297,9 @@ type gotoState struct {
 	gotoActive   bool
 	gotoResults  []gotoTarget
 	gotoSel      int
-	gotoTop      int       // scroll offset into gotoResults
-	gotoScope    gotoScope // what the palette searches (all / symbols / sections / …)
-	gotoAddrPhys bool      // interpret a typed address as physical (LMA), resolving to virtual
+	gotoTop      int         // scroll offset into gotoResults
+	gotoScope    scope.Scope // what the palette searches (all / symbols / sections / …)
+	gotoAddrPhys bool        // interpret a typed address as physical (LMA), resolving to virtual
 }
 
 // jumpState stores what the shell keeps for the "open caret position in another
@@ -313,9 +315,6 @@ type jumpState struct {
 // are listed in one modal, tagged and filterable by the view they belong to.
 type findState struct {
 	// Seed picker.
-	findActive bool
-	findSeeds  []findSeed
-	findSel    int
 
 	// Global-search results modal.
 	findResultsActive bool
@@ -441,6 +440,8 @@ type Model struct {
 	settings settingsmodal.State
 	// jump is the "open caret position in…" overlay (internal/ui/modals/jumpto).
 	jump jumptomodal.State
+	// find is the "Find from here" seed picker (internal/ui/modals/findto).
+	find findtomodal.State
 	archiveState
 	statusState
 	keyState

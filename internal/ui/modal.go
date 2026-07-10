@@ -47,7 +47,7 @@ var modalOrder = [...]struct {
 	{modalXref, func(m *Model) bool { return m.xrefActive }},
 	{modalSyscall, func(m *Model) bool { return m.syscallActive }},
 	{modalJump, func(m *Model) bool { return m.jump.Active() }},
-	{modalFind, func(m *Model) bool { return m.findActive }},
+	{modalFind, func(m *Model) bool { return m.find.Active() }},
 	{modalFindQuery, func(m *Model) bool { return m.findQueryActive }},
 	{modalFindResults, func(m *Model) bool { return m.findResultsActive }},
 	{modalSettings, func(m *Model) bool { return m.settings.Active() }},
@@ -90,7 +90,9 @@ func (m *Model) renderActiveModal() string {
 		m.modalListRow = m.jump.ListRow()
 		return out
 	case modalFind:
-		return m.renderFindModal()
+		out := m.find.Render(m.modalContext())
+		m.modalListRow = m.find.ListRow()
+		return out
 	case modalFindQuery:
 		return m.renderFindQueryModal()
 	case modalFindResults:

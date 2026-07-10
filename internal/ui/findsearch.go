@@ -22,6 +22,8 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/bytesearch"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
+	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/views/strs"
 )
 
@@ -142,30 +144,33 @@ func (m *Model) startFindSearchQuery(q findQuery) tea.Cmd {
 // queryForSeed resolves a chosen seed into a search query. Seed searches are
 // case-sensitive: a seed is an exact value taken from the binary (a symbol name,
 // a string), so its case is meaningful.
-func (m *Model) queryForSeed(s findSeed) findQuery {
-	q := findQuery{label: s.preview, caseSensitive: true}
-	switch s.scope {
-	case gsAddr:
-		if a, err := parseAddr(s.value); err == nil {
+func (m *Model) queryForSeed(s findtomodal.Seed) findQuery {
+	q := findQuery{label: s.Preview, caseSensitive: true}
+	switch s.Scope {
+	case scope.Addr:
+		if a, err := parseAddr(s.Value); err == nil {
 			q.addr, q.hasAddr = a, true
 		}
-		q.label = s.value
+		q.label = s.Value
 	default:
 		// Symbol / String / Section / Library seeds carry text, and an address when
 		// the seed named a located thing.
-		q.text = s.value
-		q.addr, q.hasAddr = s.addr, s.hasAddr
+		q.text = s.Value
+		q.addr, q.hasAddr = s.Addr, s.HasAddr
 	}
 	return q
 }
 
-// startFindSearch opens the results modal and launches the per-source scans for
-// the selected seed. Each applicable source runs as its own command, so
-// tea.Batch executes them concurrently and their hits stream into the list as
-// each finishes — the fast data/strings/relocs scans appear almost immediately
-// while the disasm decode (the slow one) fills in when it completes.
-func (m *Model) startFindSearch(s findSeed) tea.Cmd {
-	m.findActive = false
+// StartSearch opens the results modal and launches the per-source scans for the
+// selected seed. Each applicable source runs as its own command, so tea.Batch
+// executes them concurrently and their hits stream into the list as each
+// finishes — the fast data/strings/relocs scans appear almost immediately while
+// the disasm decode (the slow one) fills in when it completes.
+//
+// It satisfies findto.Host. Closing the seed picker first is what keeps the
+// picker and the results overlay from both being open (see modalOrder).
+func (m *Model) StartSearch(s findtomodal.Seed) tea.Cmd {
+	m.find.Close()
 	q := m.queryForSeed(s)
 	if !q.hasAddr && q.text == "" {
 		m.setStatus("nothing searchable in that seed", true)

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/scope"
 )
 
 // View renders the screen.
@@ -340,7 +341,7 @@ func (m *Model) renderGotoModal() string {
 // the physical-address toggle when the binary has distinct LMAs.
 func (m *Model) gotoScopeBar() string {
 	var b strings.Builder
-	for s := gotoScope(0); s < gsScopeCount; s++ {
+	for s := scope.Scope(0); s < scope.Count; s++ {
 		if s > 0 {
 			b.WriteString(m.theme.srcShadowStyle.Render(" "))
 		}
@@ -350,7 +351,7 @@ func (m *Model) gotoScopeBar() string {
 			b.WriteString(m.theme.srcShadowStyle.Render(" " + s.String() + " "))
 		}
 	}
-	if (m.gotoScope == gsAll || m.gotoScope == gsAddr) && m.file.HasPhysAddrs() {
+	if (m.gotoScope == scope.All || m.gotoScope == scope.Addr) && m.file.HasPhysAddrs() {
 		tag := "virtual"
 		if m.gotoAddrPhys {
 			tag = m.theme.warnStyle.Render("physical")
@@ -398,15 +399,15 @@ func (m *Model) gotoKindStyle(t gotoTarget) lipgloss.Style {
 // gotoEmptyHint names what the current scope searches.
 func (m *Model) gotoEmptyHint() string {
 	switch m.gotoScope {
-	case gsAddr:
+	case scope.Addr:
 		return "a hex/decimal address"
-	case gsStrings:
+	case scope.Strings:
 		return "a printable string"
-	case gsLibs:
+	case scope.Libs:
 		return "a linked library"
-	case gsSections:
+	case scope.Sections:
 		return "a section name"
-	case gsSymbols:
+	case scope.Symbols:
 		return "a symbol name"
 	default:
 		return "a symbol, section or address"

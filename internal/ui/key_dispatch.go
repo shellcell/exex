@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
@@ -101,7 +102,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalJump:
 		return m, m.jump.Update(m, key)
 	case modalFind:
-		return m.updateFindModal(key)
+		return m, m.find.Update(m, key)
 	case modalFindQuery:
 		return m.updateFindQuery(msg, key)
 	case modalFindResults:
@@ -376,11 +377,11 @@ func (m *Model) updateGotoInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd)
 		m.closeGoto()
 		return m, nil
 	case "tab":
-		m.gotoScope = (m.gotoScope + 1) % gsScopeCount
+		m.gotoScope = scope.Next(m.gotoScope)
 		m.recomputeGoto()
 		return m, nil
 	case "shift+tab":
-		m.gotoScope = (m.gotoScope + gsScopeCount - 1) % gsScopeCount
+		m.gotoScope = scope.Prev(m.gotoScope)
 		m.recomputeGoto()
 		return m, nil
 	case "ctrl+p":

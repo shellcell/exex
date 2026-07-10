@@ -2,6 +2,7 @@ package ui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	"testing"
 )
 
@@ -11,19 +12,19 @@ func TestFindModalSeedsAndSearch(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press("f")
-	if !h.m().findActive {
+	if !h.m().find.Active() {
 		t.Fatalf("f did not open the find modal; status=%q", h.m().status)
 	}
-	labels := map[string]findSeed{}
-	for _, s := range h.m().findSeeds {
-		labels[s.label] = s
+	labels := map[string]findtomodal.Seed{}
+	for _, s := range h.m().find.Seeds() {
+		labels[s.Label] = s
 	}
 	if _, ok := labels["Address"]; !ok {
 		t.Error("no Address seed from a code caret")
 	}
 	// Enter launches the search and opens the results modal (seed picker closes).
-	cmd := h.m().activateFind()
-	if h.m().findActive {
+	cmd := h.m().find.Activate(h.m())
+	if h.m().find.Active() {
 		t.Error("seed picker still open after activate")
 	}
 	if !h.m().findResultsActive || !h.m().findRunning {
@@ -54,13 +55,13 @@ func TestFindModalDigitSearch(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press("f")
-	if !h.m().findActive || len(h.m().findSeeds) == 0 {
+	if !h.m().find.Active() || len(h.m().find.Seeds()) == 0 {
 		t.Skip("no seeds")
 	}
-	h.m().findSel = 0
-	cmd := h.m().activateFind()
-	if h.m().findActive || !h.m().findResultsActive {
-		t.Errorf("first seed did not open the results modal: picker=%v results=%v", h.m().findActive, h.m().findResultsActive)
+	h.m().find.SetSel(0)
+	cmd := h.m().find.Activate(h.m())
+	if h.m().find.Active() || !h.m().findResultsActive {
+		t.Errorf("first seed did not open the results modal: picker=%v results=%v", h.m().find.Active(), h.m().findResultsActive)
 	}
 	if cmd == nil {
 		t.Fatal("no search command")
@@ -73,12 +74,12 @@ func TestFindModalCopyValue(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press("f")
-	if !h.m().findActive || len(h.m().findSeeds) == 0 {
+	if !h.m().find.Active() || len(h.m().find.Seeds()) == 0 {
 		t.Skip("no seeds")
 	}
-	want := h.m().findSeeds[h.m().findSel].value
+	want := h.m().find.Seeds()[h.m().find.Sel()].Value
 	h.press("c")
-	if h.m().findActive {
+	if h.m().find.Active() {
 		t.Error("find modal still open after c")
 	}
 	if h.m().lastCopy != want {
@@ -95,7 +96,7 @@ func TestFindModalNeverEmpty(t *testing.T) {
 	h.press("f")
 	// Either seeds were found (picker open) or it reported "nothing to search" —
 	// never an empty picker.
-	if h.m().findActive && len(h.m().findSeeds) == 0 {
+	if h.m().find.Active() && len(h.m().find.Seeds()) == 0 {
 		t.Error("find modal opened with no seeds")
 	}
 }
@@ -106,15 +107,15 @@ func TestFindSearchFacetsAndStreaming(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
 	h.press("f")
-	if !h.m().findActive {
+	if !h.m().find.Active() {
 		t.Skip("no seeds")
 	}
-	for i, s := range h.m().findSeeds {
-		if s.label == "Address" {
-			h.m().findSel = i
+	for i, s := range h.m().find.Seeds() {
+		if s.Label == "Address" {
+			h.m().find.SetSel(i)
 		}
 	}
-	if cmd := h.m().activateFind(); cmd == nil {
+	if cmd := h.m().find.Activate(h.m()); cmd == nil {
 		t.Fatal("no search cmd")
 	}
 	m := h.m()

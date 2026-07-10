@@ -174,7 +174,7 @@ func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 	case modalJump:
 		return m.jump.List()
 	case modalFind:
-		return &m.findSel, 0, len(m.findSeeds), false, true
+		return m.find.List()
 	case modalFindResults:
 		return &m.findResSel, m.findResTop, len(m.findShown), false, true
 	}
@@ -219,6 +219,8 @@ func (m *Model) modalClick(y int) bool {
 		return m.cpufeat.ClickRow(listRow)
 	case modalJump:
 		return m.jump.ClickRow(listRow)
+	case modalFind:
+		return m.find.ClickRow(listRow)
 	}
 	sel, top, n, _, ok := m.modalList()
 	if !ok {
@@ -245,7 +247,7 @@ func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 	case modalJump:
 		return m, m.jump.Activate(m)
 	case modalFind:
-		return m, m.activateFind()
+		return m, m.find.Activate(m)
 	case modalFindResults:
 		return m.findJump()
 	}

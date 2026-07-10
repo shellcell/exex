@@ -7,6 +7,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/views/strs"
 )
 
@@ -39,35 +40,8 @@ func (k gotoKind) viewLabel() string {
 	}
 }
 
-// gotoScope selects what the palette searches.
-type gotoScope uint8
-
-const (
-	gsAll      gotoScope = iota // symbols + sections + a typed address
-	gsSymbols                   // symbols only
-	gsSections                  // section names
-	gsStrings                   // printable strings (its own scope — the corpus is large)
-	gsLibs                      // linked libraries
-	gsAddr                      // a raw address (virtual, or physical when toggled)
-	gsScopeCount
-)
-
-func (s gotoScope) String() string {
-	switch s {
-	case gsSymbols:
-		return "symbols"
-	case gsSections:
-		return "sections"
-	case gsStrings:
-		return "strings"
-	case gsLibs:
-		return "libraries"
-	case gsAddr:
-		return "address"
-	default:
-		return "all"
-	}
-}
+// The palette's search scope lives in internal/ui/scope: the Find seed picker and
+// the global value search name the same scopes, so none of the three owns it.
 
 // gotoTarget is one selectable palette entry, tagged by kind for colour + routing.
 type gotoTarget struct {
@@ -98,19 +72,19 @@ func (m *Model) recomputeGoto() {
 	needle := strings.ToLower(val)
 	sc := m.gotoScope
 
-	if sc == gsAll || sc == gsAddr {
+	if sc == scope.All || sc == scope.Addr {
 		m.appendAddrTarget(val)
 	}
-	if sc == gsAll || sc == gsSymbols {
+	if sc == scope.All || sc == scope.Symbols {
 		m.appendSymbolMatches(needle)
 	}
-	if sc == gsAll || sc == gsSections {
+	if sc == scope.All || sc == scope.Sections {
 		m.appendSectionMatches(needle)
 	}
-	if sc == gsStrings {
+	if sc == scope.Strings {
 		m.appendStringMatches(needle)
 	}
-	if sc == gsLibs {
+	if sc == scope.Libs {
 		m.appendLibMatches(needle)
 	}
 }
@@ -290,7 +264,7 @@ func (m *Model) closeGoto() {
 	m.gotoResults = m.gotoResults[:0]
 	m.gotoSel = 0
 	m.gotoTop = 0
-	m.gotoScope = gsAll
+	m.gotoScope = scope.All
 	m.gotoAddrPhys = false
 }
 

@@ -120,7 +120,7 @@ func goldenModals(t *testing.T) map[string]string {
 		open func(*Model)
 	}{
 		{"help", func(m *Model) { m.help.Open() }},
-		{"header", func(m *Model) { m.headerActive = true }},
+		{"header", func(m *Model) { m.header.Open() }},
 		{"settings", func(m *Model) { m.openSettings() }},
 		// Field 14 scrolls the list so its window starts on a group header, which
 		// is the one row whose leading blank separator is suppressed. Nothing else

@@ -2,7 +2,10 @@ package settings
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/rabarbra/exex/internal/ui/modal"
 )
 
 // fakeHost records what the overlay asked the shell to do. Before the extraction
@@ -226,6 +229,42 @@ func TestThemeListPutsBuiltinsFirstAndDedupes(t *testing.T) {
 	for _, n := range []string{"nord", "solarized-dark", "solarized-light"} {
 		if seen[n] != 1 {
 			t.Errorf("%q appears %d times; built-ins that are also Chroma styles must be deduped", n, seen[n])
+		}
+	}
+}
+
+// lineWidth counts display columns, skipping ANSI escapes.
+func lineWidth(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		if s[i]&0xc0 != 0x80 { // count only UTF-8 lead bytes
+			n++
+		}
+	}
+	return n
+}
+
+// TestRenderNeverOverrunsTheTerminal: the footer hint used to be written without
+// a width cap, so on a narrow terminal the footer — not the content — set the
+// overlay's minimum width and pushed it past the right edge.
+func TestRenderNeverOverrunsTheTerminal(t *testing.T) {
+	id := func(s string) string { return s }
+	for _, w := range []int{200, 100, 76, 60, 50, 40} {
+		s := &State{}
+		s.Open()
+		ctx := modal.Context{Width: w, Height: 30, Styles: &modal.Styles{Title: id, Frame: id, Hint: id}}
+		out := s.Render(ctx, newHost())
+		for i, line := range strings.Split(out, "\n") {
+			if got := lineWidth(line); got > w {
+				t.Errorf("width %d: line %d is %d columns wide", w, i, got)
+				break
+			}
 		}
 	}
 }

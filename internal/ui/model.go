@@ -21,6 +21,7 @@ import (
 	helpmodal "github.com/rabarbra/exex/internal/ui/modals/help"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
+	rawheadermodal "github.com/rabarbra/exex/internal/ui/modals/rawheader"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 	"github.com/rabarbra/exex/internal/ui/view"
@@ -266,11 +267,6 @@ type interactionState struct {
 	// of overshooting on chrome rows or wrapped multi-line entries.
 	pageRows int
 
-	// headerActive toggles the raw container-header overlay (ELF e_*, Mach-O
-	// mach_header + load commands, PE headers); headerScroll is its scroll offset.
-	headerActive bool
-	headerScroll int
-
 	// View output memoization. Bubble Tea calls View() after every message, so a
 	// burst of wheel events that only accumulate (without changing what's shown)
 	// would each recompute the whole screen. viewDirty defaults to true every
@@ -429,6 +425,8 @@ type Model struct {
 	findResults findresultsmodal.State
 	// help is the keybinding cheat-sheet overlay (internal/ui/modals/help).
 	help helpmodal.State
+	// header is the raw container-header overlay (internal/ui/modals/rawheader).
+	header rawheadermodal.State
 	// xref is the cross-references results overlay (internal/ui/modals/xref).
 	xref xrefmodal.State
 	archiveState

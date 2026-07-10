@@ -224,11 +224,11 @@ func TestKeysSections(t *testing.T) {
 	}
 	// The raw header moved from a Sections sub-mode to the ⇧H overlay.
 	h.press("H")
-	if !h.m().headerActive {
+	if !h.m().header.Active() {
 		t.Fatal("H did not open the raw-header overlay")
 	}
 	h.press("esc") // close it so the rest of the section-key checks run on the table
-	if h.m().headerActive {
+	if h.m().header.Active() {
 		t.Fatal("esc did not close the raw-header overlay")
 	}
 

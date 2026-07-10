@@ -33,8 +33,8 @@ func TestScrollKeysPageTheSheet(t *testing.T) {
 		t.Errorf("down = %d, want 1", s.ScrollOffset())
 	}
 	s.Update("pgdown")
-	if s.ScrollOffset() != 1+PageStep {
-		t.Errorf("pgdown = %d, want %d", s.ScrollOffset(), 1+PageStep)
+	if s.ScrollOffset() != 1+pageStep {
+		t.Errorf("pgdown = %d, want %d", s.ScrollOffset(), 1+pageStep)
 	}
 	s.Update("home")
 	if s.ScrollOffset() != 0 {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
+	"github.com/rabarbra/exex/internal/ui/modals/textoverlay"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
@@ -66,11 +67,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if ms.Button == tea.MouseWheelUp {
 				delta = -wheelScrollLines
 			}
-			if kind == modalHeader {
-				m.headerScroll += delta // clamped where the header overlay is rendered
-			} else {
-				m.help.Scroll(delta)
-			}
+			// Both overlays are textoverlay.Scrollers; the offset is clamped where
+			// they render, since the row count depends on the terminal size.
+			m.scrollableOverlay(kind).Scroll(delta)
 		}
 		return m, nil
 
@@ -148,6 +147,15 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// scrollableOverlay returns the open text overlay's scroller. Only modalHeader
+// and modalHelp reach it.
+func (m *Model) scrollableOverlay(kind modalKind) *textoverlay.Scroller {
+	if kind == modalHeader {
+		return &m.header.Scroller
+	}
+	return &m.help.Scroller
 }
 
 func (m *Model) mouseOverRightPane(x int) bool {

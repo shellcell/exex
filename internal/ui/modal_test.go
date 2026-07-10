@@ -56,7 +56,7 @@ func TestTextOverlaysCaptureMouse(t *testing.T) {
 		open func(*Model)
 	}{
 		{"help", func(m *Model) { m.help.Open() }},
-		{"header", func(m *Model) { m.headerActive = true }},
+		{"header", func(m *Model) { m.header.Open() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := overlayModel()
@@ -97,10 +97,10 @@ func TestTextOverlayWheelScrollsOverlay(t *testing.T) {
 	}
 
 	m = overlayModel()
-	m.headerActive = true
+	m.header.Open()
 	wheel(m, tea.MouseWheelDown)
-	if m.headerScroll != wheelScrollLines {
-		t.Errorf("headerScroll = %d, want %d", m.headerScroll, wheelScrollLines)
+	if m.header.ScrollOffset() != wheelScrollLines {
+		t.Errorf("headerScroll = %d, want %d", m.header.ScrollOffset(), wheelScrollLines)
 	}
 }
 

@@ -2,9 +2,8 @@
 // two-column table of every binding, scrolled when it is taller than the
 // terminal and dismissed by any other key.
 //
-// It has no list and no selection, so unlike the other overlays it exposes a
-// scroll offset rather than a cursor — the shell's shared mouse-wheel and
-// click-to-select handling does not apply to it.
+// It has no list and no selection: its scrolling and dismiss-on-any-key
+// behaviour is textoverlay.Scroller, shared with the raw-header overlay.
 package help
 
 import (
@@ -16,48 +15,21 @@ import (
 
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
+	"github.com/rabarbra/exex/internal/ui/modals/textoverlay"
 )
 
-// PageStep is how many rows PgUp/PgDn move the overlay.
-const PageStep = 8
+// pageStep is how many rows PgUp/PgDn move the sheet. Its rows are dense
+// key/description pairs, so it pages by less than the header overlay.
+const pageStep = 8
 
 // State is the help overlay. The zero value is closed.
 type State struct {
-	active bool
-	scroll int
+	textoverlay.Scroller
 }
 
-func (s *State) Open()        { s.active, s.scroll = true, 0 }
-func (s *State) Close()       { s.active = false }
-func (s *State) Active() bool { return s.active }
-
-// Scroll moves the view by delta rows. The offset is clamped where the overlay
-// is rendered, because the row count depends on the terminal width.
-func (s *State) Scroll(delta int) { s.scroll += delta }
-
-// ScrollOffset is the current top row.
-func (s *State) ScrollOffset() int { return s.scroll }
-
-// Update handles one keypress: scroll keys page through the sheet (it can be
-// taller than the terminal); any other key dismisses it.
-func (s *State) Update(key string) {
-	switch key {
-	case "up", "k":
-		s.scroll--
-	case "down", "j":
-		s.scroll++
-	case "pgup":
-		s.scroll -= PageStep
-	case "pgdown":
-		s.scroll += PageStep
-	case "home", "g":
-		s.scroll = 0
-	case "end", "G":
-		s.scroll = 1 << 20 // clamped to the bottom in Render
-	default:
-		s.Close()
-	}
-}
+// Update handles one keypress: scroll keys page through the sheet, any other key
+// dismisses it.
+func (s *State) Update(key string) { s.Scroller.Update(key, pageStep) }
 
 // renderHelpModal lists the keybindings, grouped by scope, in two columns. The
 // key column is padded by display width (so multibyte arrows align) and the two
@@ -191,18 +163,14 @@ func (s *State) Render(ctx modal.Context) string {
 		bodyRows = append(bodyRows, rightLines...)
 	}
 
-	// Vertically window the body when it is taller than the screen, scrolled by
-	// s.scroll (the title, hint and modal chrome cost ~8 rows).
+	// Vertically window the body when it is taller than the screen.
 	hint := "Mouse: wheel scrolls · over right pane scrolls it · click selects · double-click follows"
 	total := len(bodyRows)
-	maxRows := max(1, ctx.Height-8)
-	if total > maxRows {
-		s.scroll = layout.Clamp(s.scroll, 0, total-maxRows)
-		bodyRows = bodyRows[s.scroll : s.scroll+maxRows]
-		hint = fmt.Sprintf("↑/↓ scroll · %d–%d of %d · Esc/any key closes",
-			s.scroll+1, s.scroll+maxRows, total)
-	} else {
-		s.scroll = 0
+	var from, to int
+	var scrolled bool
+	bodyRows, from, to, scrolled = s.Window(bodyRows, ctx.Height)
+	if scrolled {
+		hint = fmt.Sprintf("↑/↓ scroll · %d–%d of %d · Esc/any key closes", from, to, total)
 	}
 
 	// Never let a row push the modal past the terminal (very narrow windows).

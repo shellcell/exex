@@ -233,6 +233,10 @@ const (
 func (s *State) Render(ctx modal.Context, host Host) string {
 	descW := ctx.Width - modalChrome - leftW - 2
 	showDesc := descW >= minDescW // drop the description column on narrow terminals
+	// Every emitted line is capped to what the terminal can show. Without this the
+	// fixed-width control column, and the footer hint, each set the overlay's
+	// minimum width and pushed it past the right edge on a narrow terminal.
+	rowCap := max(1, ctx.Width-modalChrome)
 
 	// Window the field list to the terminal height (title/hint/border cost ~8
 	// rows) so the popup never overruns a short window; the selection stays
@@ -255,7 +259,7 @@ func (s *State) Render(ctx modal.Context, host Host) string {
 
 	s.lineFields = s.lineFields[:0]
 	emit := func(line string, field int) {
-		b.WriteString(line)
+		b.WriteString(layout.FitANSIWidth(line, rowCap))
 		b.WriteByte('\n')
 		s.lineFields = append(s.lineFields, field)
 	}
@@ -293,6 +297,6 @@ func (s *State) Render(ctx modal.Context, host Host) string {
 	if visible < total {
 		hint += fmt.Sprintf("   (%d/%d)", s.cur+1, FieldCount)
 	}
-	b.WriteString(ctx.Hint(hint))
+	b.WriteString(layout.FitANSIWidth(ctx.Hint(hint), rowCap))
 	return ctx.Frame(b.String())
 }

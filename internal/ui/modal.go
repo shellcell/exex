@@ -41,7 +41,7 @@ var modalOrder = [...]struct {
 	kind   modalKind
 	active func(*Model) bool
 }{
-	{modalHeader, func(m *Model) bool { return m.headerActive }},
+	{modalHeader, func(m *Model) bool { return m.header.Active() }},
 	{modalHelp, func(m *Model) bool { return m.help.Active() }},
 	{modalCPUFeat, func(m *Model) bool { return m.cpufeat.Active() }},
 	{modalXref, func(m *Model) bool { return m.xref.Active() }},
@@ -72,7 +72,7 @@ func (m *Model) activeModal() modalKind {
 func (m *Model) renderActiveModal() string {
 	switch m.activeModal() {
 	case modalHeader:
-		return m.renderHeaderModal()
+		return m.header.Render(m.modalContext())
 	case modalHelp:
 		return m.help.Render(m.modalContext())
 	case modalCPUFeat:

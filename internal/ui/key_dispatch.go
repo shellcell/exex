@@ -32,22 +32,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// of the user rather than cancelling a scan they can't see.
 	switch m.activeModal() {
 	case modalHeader:
-		switch key {
-		case "up", "k":
-			m.headerScroll--
-		case "down", "j":
-			m.headerScroll++
-		case "pgup":
-			m.headerScroll -= headerPageStep
-		case "pgdown":
-			m.headerScroll += headerPageStep
-		case "home", "g":
-			m.headerScroll = 0
-		case "end", "G":
-			m.headerScroll = 1 << 20
-		default:
-			m.headerActive = false
-		}
+		m.header.Update(key)
 		return m, nil
 	case modalHelp:
 		m.help.Update(key)
@@ -431,8 +416,7 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 	case actionCPUFeatures:
 		return m, m.startCPUFeatScan(), true
 	case actionHeader:
-		m.headerActive = true
-		m.headerScroll = 0
+		m.header.Open()
 		return m, nil, true
 	case actionJumpCaret:
 		m.openJumpModal()

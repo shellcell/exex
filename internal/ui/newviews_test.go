@@ -15,16 +15,16 @@ func TestSectionsHeaderMode(t *testing.T) {
 	h.goView(modeSections, "2")
 	// The raw header is now a ⇧H overlay (not a Sections sub-mode).
 	h.press("H")
-	if !h.m().headerActive {
+	if !h.m().header.Active() {
 		t.Fatalf("H did not open the raw-header overlay")
 	}
-	out := h.m().renderHeaderModal()
+	out := h.m().header.Render(h.m().modalContext())
 	if h.m().file.Format == binfile.FormatELF && !strings.Contains(out, "Machine") {
 		t.Errorf("ELF header overlay missing Machine field:\n%s", out)
 	}
 	// Any non-scroll key closes it.
 	h.press("esc")
-	if h.m().headerActive {
+	if h.m().header.Active() {
 		t.Fatal("esc did not close the header overlay")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
 	"github.com/rabarbra/exex/internal/explorer"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 )
 
 // functionInsts decodes the instructions making up sym's extent, fresh from the
@@ -123,32 +124,30 @@ func (m *Model) disasmLoadedAddr(addr uint64) bool {
 // source pane's row cache maps source lines to the decoded instructions, so it
 // falls with the window; the view's own caches are dropped by SetSpan.
 func (m *Model) setDisasmSpan(span explorer.Span) bool {
-	m.sourceAsmRowCache = nil
+	m.DisasmWindowSwapped()
 	return m.dasm.SetSpan(span)
 }
 
 func (m *Model) loadDisasmWindow(addr uint64, before int) bool {
-	if !m.setDisasmSpan(m.decodeDisasmAt(addr, before)) {
-		m.setStatus("no executable code to disassemble", true)
-		return false
-	}
-	m.setMode(modeDisasm)
-	return true
+	return m.dasm.LoadWindow(m.dasmEnv(), addr, before)
 }
 
 func (m *Model) loadDisasmWindowEnding(end int) bool {
-	img := m.file.ExecImage()
-	if end <= 0 || img.Len() == 0 {
-		return false
-	}
-	if end > img.Len() {
-		end = img.Len()
-	}
-	start := max(0, end-m.disasmMaxBytes)
-	if !m.setDisasmSpan(m.disasmService().DecodeSpanWindow(img.Window(start, end-start))) {
-		m.setStatus("no executable code to disassemble", true)
-		return false
-	}
+	return m.dasm.LoadWindowEnding(m.dasmEnv(), end)
+}
+
+// dasmEnv bundles what the disasm view's navigation needs from the shell.
+func (m *Model) dasmEnv() disasmview.Env {
+	return disasmview.Env{File: m.file, Svc: m.disasmService(), Host: m}
+}
+
+// DisasmWindowSwapped implements disasmview.Host: the source pane's asm-row
+// cache is keyed to instruction indices, which a new window invalidates.
+func (m *Model) DisasmWindowSwapped() {
+	m.sourceAsmRowCache = nil
+}
+
+// ShowDisasmView implements disasmview.Host.
+func (m *Model) ShowDisasmView() {
 	m.setMode(modeDisasm)
-	return true
 }

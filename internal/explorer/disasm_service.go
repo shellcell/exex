@@ -54,6 +54,12 @@ func (s *DisasmService) SetOptions(maxBytes, searchWorkers int) {
 	s.searchWorkers = searchWorkers
 }
 
+// MaxBytes returns the current decode budget per window.
+func (s *DisasmService) MaxBytes() int {
+	maxBytes, _ := s.options()
+	return maxBytes
+}
+
 // OverlapBytes returns the context decoded before each visible window.
 func (s *DisasmService) OverlapBytes() int {
 	maxBytes, _ := s.options()

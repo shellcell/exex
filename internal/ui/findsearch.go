@@ -271,7 +271,7 @@ func bytesMatcher(q findQuery) func([]byte) bool {
 // operand references to the address (an address query) and/or instruction text
 // containing the search text (a free-text query). The slowest source.
 func (m *Model) findDisasmCmd(q findQuery, seq int, done <-chan struct{}) tea.Cmd {
-	scan := m.scanDisasmMatching
+	svc := m.disasmService()
 	textMatch := textMatcher(q)
 	return func() tea.Msg {
 		match := func(text string) bool {
@@ -280,10 +280,10 @@ func (m *Model) findDisasmCmd(q findQuery, seq int, done <-chan struct{}) tea.Cm
 			}
 			return textMatch(text)
 		}
-		matches := scan(match, findMaxPerFacet, done)
+		matches := svc.ScanMatching(match, findMaxPerFacet, done)
 		hits := make([]findHit, 0, len(matches))
 		for _, h := range matches {
-			hits = append(hits, findHit{facet: ffDisasm, addr: h.addr, hasAddr: true, text: h.text, sym: h.sym})
+			hits = append(hits, findHit{facet: ffDisasm, addr: h.Addr, hasAddr: true, text: h.Text, sym: h.Sym})
 		}
 		return findPartialMsg{seq: seq, facet: ffDisasm, hits: hits}
 	}

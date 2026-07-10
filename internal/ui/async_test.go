@@ -6,6 +6,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
+	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
 
 func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
@@ -33,8 +34,8 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 
 	m.xrefRunning = true
 	m.xrefSeq = 1
-	if _, _ = m.handleXrefDone(xrefDoneMsg{file: oldFile, seq: 1, target: 0x1000, hits: []xrefHit{{addr: 0x1000}}}); !m.xrefRunning || m.xrefActive {
-		t.Fatalf("stale xref result was applied: running=%v active=%v", m.xrefRunning, m.xrefActive)
+	if _, _ = m.handleXrefDone(xrefDoneMsg{file: oldFile, seq: 1, target: 0x1000, hits: []xrefmodal.Hit{{Addr: 0x1000}}}); !m.xrefRunning || m.xref.Active() {
+		t.Fatalf("stale xref result was applied: running=%v active=%v", m.xrefRunning, m.xref.Active())
 	}
 
 	m.syscallRunning = true

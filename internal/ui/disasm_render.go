@@ -60,7 +60,7 @@ func (m *Model) disasmAddrSpans(text string, instAddr uint64) []disasmAddrSpan {
 
 func (m *Model) instAnnotation(text string, class disasm.InstClass) string {
 	annotate := class == disasm.ClassCall || class == disasm.ClassJumpUnc ||
-		class == disasm.ClassJumpCond || isAddrLoadOp(firstToken(text))
+		class == disasm.ClassJumpCond || disasm.IsAddrLoad(disasm.Mnemonic(text))
 	from := 0
 	var notes []string
 	seen := map[string]bool{}
@@ -118,25 +118,6 @@ func (m *Model) relocNote(addr uint64, n int) string {
 		parts = append(parts, "→ "+target)
 	}
 	return strings.Join(parts, ", ")
-}
-
-// firstToken returns the mnemonic (first whitespace-delimited token), lowered.
-func firstToken(text string) string {
-	text = strings.TrimSpace(text)
-	if i := strings.IndexAny(text, " \t"); i >= 0 {
-		text = text[:i]
-	}
-	return strings.ToLower(text)
-}
-
-// isAddrLoadOp reports whether op materialises an address (so its operand is
-// worth annotating with the symbol/section it points at).
-func isAddrLoadOp(op string) bool {
-	switch op {
-	case "lea", "leaq", "leal", "leaw", "adr", "adrp":
-		return true
-	}
-	return false
 }
 
 // targetAnnotation labels a follow-able address with whatever the reader is

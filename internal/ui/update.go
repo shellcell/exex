@@ -262,12 +262,10 @@ func (m *Model) invalidateSymbolNameState() {
 
 func (m *Model) refreshModalSymbolNames() {
 	m.xrefCache = nil
-	if m.xrefActive {
+	if m.xref.Active() {
 		m.xrefLabel = m.xrefLabelForTarget(m.xrefTarget)
-		for i := range m.xrefResults {
-			m.xrefResults[i].sym = m.symbolDisplayAt(m.xrefResults[i].addr)
-		}
-		m.rebuildXrefRows()
+		m.xref.SetLabel(m.xrefLabel)
+		m.xref.RelabelSymbols(m.symbolDisplayAt)
 	}
 	m.syscallCached = nil
 	if m.syscallActive {

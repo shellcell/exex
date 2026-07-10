@@ -80,7 +80,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalCPUFeat:
 		return m, m.cpufeat.Update(m.modalContext(), m, key)
 	case modalXref:
-		return m.updateXrefModal(msg, key)
+		return m, m.xref.Update(m, msg, key)
 	case modalSyscall:
 		return m.updateSyscallModal(msg, key)
 	case modalJump:

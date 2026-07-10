@@ -160,7 +160,7 @@ func (m *Model) mouseOverRightPane(x int) bool {
 func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
 	switch m.activeModal() {
 	case modalXref:
-		return &m.xrefSel, m.xrefTop, len(m.xrefShown), false, true
+		return m.xref.List()
 	case modalSyscall:
 		return &m.syscallSel, m.syscallTop, len(m.syscallShown), false, true
 	case modalCPUFeat:
@@ -221,6 +221,8 @@ func (m *Model) modalClick(y int) bool {
 		return m.find.ClickRow(listRow)
 	case modalGoto:
 		return m.palette.ClickRow(listRow)
+	case modalXref:
+		return m.xref.ClickRow(listRow)
 	}
 	sel, top, n, _, ok := m.modalList()
 	if !ok {
@@ -233,7 +235,7 @@ func (m *Model) modalClick(y int) bool {
 func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
 	switch m.activeModal() {
 	case modalXref:
-		return m.xrefJump()
+		return m, m.xref.Activate(m)
 	case modalSyscall:
 		return m.syscallJump()
 	case modalCPUFeat:

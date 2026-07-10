@@ -128,6 +128,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	// The palette overlay owns its prompt but not its styling, so the shell builds
 	// the widget and hands it over.
 	m.palette.SetInput(newPromptInput("0x401000 or symbol name", "→ "))
+	m.xref.SetInput(newPromptInput("location · text · 0xaddr", "/ "))
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))

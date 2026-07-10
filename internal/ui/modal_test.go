@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
 
 // tabInfoX is an x coordinate inside the "Info" tab of the row-0 tab strip, for
@@ -127,12 +128,12 @@ func TestFindQueryPromptCapturesMouse(t *testing.T) {
 func TestActiveModalOrdering(t *testing.T) {
 	m := overlayModel()
 	m.settings.Open()
-	m.xrefActive = true
+	m.xref.Open("t", []xrefmodal.Hit{{Addr: 0x1000, Text: "call 0x2000", Sym: "f"}})
 	if got := m.activeModal(); got != modalXref {
 		t.Fatalf("activeModal = %v, want modalXref (higher priority than settings)", got)
 	}
 	// The renderer must draw the same modal the keyboard drives.
-	if got := m.renderActiveModal(); got != m.renderXrefModal() {
+	if got := m.renderActiveModal(); got != m.xref.Render(m.modalContext()) {
 		t.Error("renderActiveModal drew a different modal than activeModal selected")
 	}
 

@@ -20,6 +20,7 @@ import (
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
+	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 	"github.com/rabarbra/exex/internal/ui/view"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 	infoview "github.com/rabarbra/exex/internal/ui/views/info"
@@ -435,6 +436,8 @@ type Model struct {
 	palette palettemodal.State
 	// help is the keybinding cheat-sheet overlay (internal/ui/modals/help).
 	help helpmodal.State
+	// xref is the cross-references results overlay (internal/ui/modals/xref).
+	xref xrefmodal.State
 	archiveState
 	statusState
 	keyState

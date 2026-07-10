@@ -11,6 +11,7 @@ import (
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/dump"
 	"github.com/rabarbra/exex/internal/testbin"
+	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
 
 // Golden-frame tests.
@@ -149,9 +150,9 @@ func goldenModals(t *testing.T) map[string]string {
 			enterMode(t, m, modeDisasm)
 			m.xrefLabel = "helper"
 			m.xrefTarget = 0x401020
-			m.openXrefResults([]xrefHit{
-				{addr: 0x401000, text: "mov rax, 1", sym: "_start"},
-				{addr: 0x40100e, text: "call 0x401020", sym: "_start"},
+			m.xref.Open("helper", []xrefmodal.Hit{
+				{Addr: 0x401000, Text: "mov rax, 1", Sym: "_start"},
+				{Addr: 0x40100e, Text: "call 0x401020", Sym: "_start"},
 			})
 		}},
 		// A populated set, so the frame covers the row layout (name padding, count

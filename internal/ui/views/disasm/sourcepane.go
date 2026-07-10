@@ -59,7 +59,7 @@ func (st *State) AddrMapStyle(ctx *view.Context, addr uint64, curFile string, cu
 	case f == "" || l == 0:
 		return ctx.ShadowStyle
 	case curFile != "" && f == curFile && l == curLine:
-		if cs, ok := columnStyle(ctx, st.SourceLineColumns(ctx, curFile, curLine), c); ok {
+		if cs, ok := columnStyle(ctx, st.SourceLineColumns(ctx.File, curFile, curLine), c); ok {
 			return cs.Bold(true)
 		}
 		return ctx.SrcMapped
@@ -131,7 +131,7 @@ func (st *State) RenderSourceText(ctx *view.Context, w, h int) string {
 		// Beneath the cursor line, point carets at the exact columns code maps
 		// to (a source line can map at several positions).
 		if ln == st.SrcCur && rows < contentH {
-			if caret := coloredCaretRow(ctx, st.SourceLineColumns(ctx, st.SrcFile, ln), gutterWidth, w); caret != "" {
+			if caret := coloredCaretRow(ctx, st.SourceLineColumns(ctx.File, st.SrcFile, ln), gutterWidth, w); caret != "" {
 				b.WriteString(caret)
 				b.WriteString("\n")
 				rows++
@@ -148,7 +148,7 @@ func (st *State) SourceRowHeight(ctx *view.Context, w int) func(int) int {
 	return func(i int) int {
 		ln := i + 1
 		h := st.sourceLineHeight(ctx, ln, w)
-		if ln == st.SrcCur && len(st.SourceLineColumns(ctx, st.SrcFile, ln)) > 0 {
+		if ln == st.SrcCur && len(st.SourceLineColumns(ctx.File, st.SrcFile, ln)) > 0 {
 			h++
 		}
 		return h
@@ -214,7 +214,7 @@ func (st *State) RenderSourceAsm(ctx *view.Context, w, h int) string {
 	}
 
 	anchor := st.sourceAsmAnchorIndex(ctx)
-	cols := st.SourceLineColumns(ctx, st.SrcFile, st.SrcCur)
+	cols := st.SourceLineColumns(ctx.File, st.SrcFile, st.SrcCur)
 	head := st.sourceAsmHeader(ctx, anchor, cols, w)
 
 	contentH := h - 1
@@ -383,7 +383,7 @@ func (st *State) RenderSourcePane(ctx *view.Context, w, h int) string {
 	}
 
 	hl := ctx.HighlightSource(file, src)
-	mapped := st.MappedLines(ctx, file)
+	mapped := st.MappedLines(ctx.File, file)
 
 	suffix := fmt.Sprintf(":%d", line)
 	if col > 0 {
@@ -426,7 +426,7 @@ func (st *State) RenderSourcePane(ctx *view.Context, w, h int) string {
 		// at several positions), each in its column colour — same as the
 		// source-first pane.
 		if i == line {
-			if cols := st.SourceLineColumns(ctx, file, line); len(cols) > 0 {
+			if cols := st.SourceLineColumns(ctx.File, file, line); len(cols) > 0 {
 				rows = append(rows, coloredCaretRow(ctx, cols, gutterW, inner))
 			}
 		}

@@ -108,26 +108,7 @@ func (m *Model) disasmColumns() disasmview.Columns {
 }
 
 func (m *Model) ensureSourceForDisasmCursor() bool {
-	// In source-first mode the source cursor is authoritative — the asm pane
-	// follows it via syncSourceAsm. Re-deriving srcCur from the disasm cursor
-	// here would snap the cursor back whenever it moved onto an unmapped
-	// (shadow) line, which is why "up" sometimes appeared stuck.
-	if m.dasm.SourceFirst && m.dasm.SrcFile != "" && m.file.SourceLines(m.dasm.SrcFile) != nil {
-		return true
-	}
-	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
-		return false
-	}
-	file, line := m.file.LookupAddr(m.dasm.Inst[m.dasm.Cur].Addr)
-	if file == "" || line == 0 || m.file.SourceLines(file) == nil {
-		return false
-	}
-	if m.dasm.SrcFile != file {
-		m.dasm.SrcFile = file
-		m.dasm.SrcCodeLines = m.dasm.MappedLines(m.viewContextPtr(), file)
-	}
-	m.dasm.SrcCur = line
-	return true
+	return m.dasm.EnsureSourceForCursor(m.file)
 }
 
 func (m *Model) hasOpenSourceFile() bool {

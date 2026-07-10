@@ -32,45 +32,7 @@ func (t *Theme) columnStyleAt(i int) lipgloss.Style {
 }
 
 func (m *Model) ensureSourceBelowDisasmCursor() bool {
-	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
-		return false
-	}
-	start := m.dasm.Cur + 1
-	if start >= len(m.dasm.Inst) {
-		return false
-	}
-	if sym, ok := m.file.SymbolAt(m.dasm.Inst[m.dasm.Cur].Addr); ok && sym.Size > 0 {
-		end := sym.Addr + sym.Size
-		if m.selectSourceFromInstRange(start, func(addr uint64) bool { return addr < end }) {
-			return true
-		}
-		for start < len(m.dasm.Inst) && m.dasm.Inst[start].Addr < end {
-			start++
-		}
-	}
-	return m.selectSourceFromInstRange(start, func(uint64) bool { return true })
-}
-
-func (m *Model) selectSourceFromInstRange(start int, inRange func(uint64) bool) bool {
-	for i := start; i < len(m.dasm.Inst); i++ {
-		addr := m.dasm.Inst[i].Addr
-		if !inRange(addr) {
-			return false
-		}
-		file, line := m.file.LookupAddr(addr)
-		if file == "" || line == 0 || m.file.SourceLines(file) == nil {
-			continue
-		}
-		if m.dasm.SrcFile != file {
-			m.dasm.SrcFile = file
-			m.dasm.SrcCodeLines = m.dasm.MappedLines(m.viewContextPtr(), file)
-		}
-		m.dasm.SrcCur = line
-		m.dasm.SrcTop = 0
-		m.syncSourceAsm()
-		return true
-	}
-	return false
+	return m.dasm.EnsureSourceBelowCursor(m.dasmEnv(), m.bodyHeight()-1)
 }
 
 // The Sources view is always just the file list; opening a file (Enter) drops
@@ -157,50 +119,14 @@ func (m *Model) updateSourceOpenSrc(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// gotoMappedLine moves the cursor to the next/previous source line that has
-// machine code mapped to it, skipping the shadowed (unmapped) lines.
 func (m *Model) gotoMappedLine(forward bool) {
-	n := len(m.file.SourceLines(m.dasm.SrcFile))
-	if forward {
-		for ln := m.dasm.SrcCur + 1; ln <= n; ln++ {
-			if m.dasm.SrcCodeLines[ln] {
-				m.dasm.SrcCur = ln
-				m.syncSourceAsm()
-				return
-			}
-		}
-	} else {
-		for ln := m.dasm.SrcCur - 1; ln >= 1; ln-- {
-			if m.dasm.SrcCodeLines[ln] {
-				m.dasm.SrcCur = ln
-				m.syncSourceAsm()
-				return
-			}
-		}
-	}
-	m.setStatus("no more mapped lines", false)
+	m.dasm.GotoMappedLine(m.dasmEnv(), forward, m.bodyHeight()-1)
 }
 
 // openSourceFile switches the source-first pane to file at the given 1-based
 // line. It leaves mode selection to the caller.
 func (m *Model) openSourceFile(file string, line int) bool {
-	src := m.file.SourceLines(file)
-	if src == nil {
-		m.setStatus("source file not found: "+filepath.Base(file), true)
-		return false
-	}
-	m.dasm.SrcFile = file
-	m.dasm.SrcCodeLines = m.dasm.MappedLines(m.viewContextPtr(), file)
-	if line < 1 {
-		line = 1
-	}
-	if line > len(src) {
-		line = len(src)
-	}
-	m.dasm.SrcCur = line
-	m.dasm.SrcTop = 0
-	m.syncSourceAsm()
-	return true
+	return m.dasm.OpenSourceFile(m.dasmEnv(), file, line, m.bodyHeight()-1)
 }
 
 func (m *Model) openSourceFileInDisasm(file string, line int) {
@@ -213,25 +139,7 @@ func (m *Model) openSourceFileInDisasm(file string, line int) {
 // syncSourceAsm points the disasm cursor at the address mapped from the current
 // source line, so the right-hand pane tracks the source cursor.
 func (m *Model) syncSourceAsm() {
-	if m.dis == nil {
-		return
-	}
-	addr, ok := m.file.LineToAddr(m.dasm.SrcFile, m.dasm.SrcCur)
-	if !ok {
-		return
-	}
-	if _, mapped := m.file.ExecImage().PosForAddr(addr); !mapped {
-		return
-	}
-	// The disasm is windowed; load the span around this line's address if it
-	// isn't already loaded. setDisasmSpan leaves m.mode alone (we're in the
-	// Sources view), it just refreshes the instruction window the right pane
-	// renders.
-	if !m.disasmLoadedAddr(addr) {
-		m.dasm.SetSpan(m.decodeDisasmAt(addr, m.disasmLeadBytes()))
-	}
-	m.dasm.Cur = m.dasm.IndexAtOrAfter(addr)
-	m.scrollDisasmContext(4)
+	m.dasm.SyncSourceAsm(m.dasmEnv(), m.bodyHeight()-1)
 }
 
 // ---- cross-source / in-file search (called from runSearch) ----

@@ -71,6 +71,13 @@ func (s *DisasmService) MaxBytes() int {
 	return maxBytes
 }
 
+// CanDecode reports whether a disassembler exists for this file's
+// architecture. Every decode method is a safe no-op without one; callers that
+// would otherwise mutate state on an empty decode check this first.
+func (s *DisasmService) CanDecode() bool {
+	return s != nil && s.dis != nil
+}
+
 // OverlapBytes returns the context decoded before each visible window.
 func (s *DisasmService) OverlapBytes() int {
 	maxBytes, _ := s.options()

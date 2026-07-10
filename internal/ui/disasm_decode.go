@@ -109,15 +109,7 @@ func (m *Model) decodeDisasmCmd(addr uint64) tea.Cmd {
 // disasmLoadedAddr reports whether addr is inside the decoded window *and* lands
 // on an instruction there.
 func (m *Model) disasmLoadedAddr(addr uint64) bool {
-	if len(m.dasm.Inst) == 0 {
-		return false
-	}
-	pos, ok := m.file.ExecImage().PosForAddr(addr)
-	if !ok || pos < m.dasm.PosLo || pos >= m.dasm.PosHi {
-		return false
-	}
-	_, ok = m.dasm.IndexForAddr(addr)
-	return ok
+	return m.dasm.LoadedAddr(m.file, addr)
 }
 
 func (m *Model) loadDisasmWindow(addr uint64, before int) bool {

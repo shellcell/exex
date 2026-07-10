@@ -27,6 +27,9 @@ const wheelQuietInterval = 120 * time.Millisecond
 // all other input (clicks, keys) until it drained.
 const wheelCoalesceInterval = 16 * time.Millisecond
 
+// wheelScrollLines is how many lines one wheel notch moves a scrollable surface.
+const wheelScrollLines = 3
+
 // wheelTickMsg fires after wheelCoalesceInterval to apply any accumulated scroll.
 type wheelTickMsg struct{}
 
@@ -36,14 +39,47 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if shift && ms.Button == tea.MouseLeft {
 		return m, nil
 	}
-	if _, ok := msg.(tea.MouseClickMsg); ok && m.searchActive && ms.Button == tea.MouseLeft {
-		m.handleSearchPopupClick(ms.X, ms.Y)
+	// An open overlay owns the mouse. Anything that reaches past this switch is
+	// aimed at the view, so every overlay must either consume the event or
+	// deliberately let it through — help and header used to be absent here
+	// entirely, which let clicks switch tabs and the wheel scroll the view behind
+	// an overlay that covered it.
+	switch kind := m.activeModal(); kind {
+	case modalNone:
+		// Fall through to the view handling below.
+
+	case modalSearch:
+		// The search prompt is a thin popup, not a full overlay: clicks target its
+		// mode switches, but the wheel deliberately still scrolls the view behind
+		// it so results can be scanned without dismissing the prompt.
+		if _, ok := msg.(tea.MouseClickMsg); ok && ms.Button == tea.MouseLeft {
+			m.handleSearchPopupClick(ms.X, ms.Y)
+			return m, nil
+		}
+
+	case modalHeader, modalHelp:
+		// Scrollable text overlays with no selection: the wheel pages them (as the
+		// arrow keys do), and everything else is swallowed.
+		if _, ok := msg.(tea.MouseWheelMsg); ok {
+			scroll := &m.helpScroll
+			if kind == modalHeader {
+				scroll = &m.headerScroll
+			}
+			switch ms.Button {
+			case tea.MouseWheelUp:
+				*scroll -= wheelScrollLines
+			case tea.MouseWheelDown:
+				*scroll += wheelScrollLines
+			}
+			// Both offsets are clamped where the overlay is rendered.
+		}
 		return m, nil
-	}
-	// A list/field overlay modal (xref, goto, settings) captures the mouse so it
-	// drives the modal, not the view behind it: wheel moves the selection, a click
-	// selects an item, a double-click activates it.
-	if m.modalActive() {
+
+	default:
+		// List/field overlays capture the mouse so it drives the modal, not the
+		// view behind it: wheel moves the selection, a click selects an item, a
+		// double-click activates it. Overlays with no list (findQuery) simply
+		// swallow the event.
 		if _, ok := msg.(tea.MouseWheelMsg); ok {
 			switch ms.Button {
 			case tea.MouseWheelUp:
@@ -57,12 +93,13 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			now := time.Now()
 			isDouble := ms.Y == m.lastClickY && now.Sub(m.lastClickAt) < doubleClickWindow
 			m.lastClickY, m.lastClickAt = ms.Y, now
-			if m.modalClick(ms.X, ms.Y) && isDouble {
+			if m.modalClick(ms.Y) && isDouble {
 				return m.modalActivate()
 			}
 		}
 		return m, nil
 	}
+
 	if _, ok := msg.(tea.MouseWheelMsg); ok {
 		switch ms.Button {
 		case tea.MouseWheelUp:
@@ -118,31 +155,26 @@ func (m *Model) mouseOverRightPane(x int) bool {
 	return m.rightPaneActive() && x >= m.width/2
 }
 
-// modalActive reports whether a list/field overlay modal (not the search prompt,
-// which handles its own clicks) is open.
-func (m *Model) modalActive() bool {
-	return m.xrefActive || m.syscallActive || m.cpufeatActive || m.gotoActive || m.settingsActive || m.jumpActive || m.findActive || m.findResultsActive
-}
-
 // modalList returns the open modal's selection pointer, rendered scroll top, item
-// count and whether the selection wraps (settings cycles).
+// count and whether the selection wraps (settings cycles). ok is false for
+// overlays with no list — they still capture the mouse, they just ignore it.
 func (m *Model) modalList() (sel *int, top, n int, wrap, ok bool) {
-	switch {
-	case m.xrefActive:
+	switch m.activeModal() {
+	case modalXref:
 		return &m.xrefSel, m.xrefTop, len(m.xrefShown), false, true
-	case m.syscallActive:
+	case modalSyscall:
 		return &m.syscallSel, m.syscallTop, len(m.syscallShown), false, true
-	case m.cpufeatActive:
+	case modalCPUFeat:
 		return &m.cpufeatSel, m.cpufeatTop, len(m.cpufeatFeats), false, true
-	case m.gotoActive:
+	case modalGoto:
 		return &m.gotoSel, m.gotoTop, len(m.gotoResults), false, true
-	case m.settingsActive:
+	case modalSettings:
 		return &m.settingsCur, m.settingsTop, settingsFieldCount, true, true
-	case m.jumpActive:
+	case modalJump:
 		return &m.jumpSel, 0, len(m.jumpTargets), false, true
-	case m.findActive:
+	case modalFind:
 		return &m.findSel, 0, len(m.findSeeds), false, true
-	case m.findResultsActive:
+	case modalFindResults:
 		return &m.findResSel, m.findResTop, len(m.findShown), false, true
 	}
 	return nil, 0, 0, false, false
@@ -164,26 +196,9 @@ func (m *Model) modalScrollSel(d int) {
 // modalClick maps a click to an item in the open modal's list and selects it,
 // returning whether it hit one. It re-renders the modal to recompute its centred
 // geometry and the list's starting row (modalListRow).
-func (m *Model) modalClick(x, y int) bool {
-	var modal string
-	switch {
-	case m.xrefActive:
-		modal = m.renderXrefModal()
-	case m.syscallActive:
-		modal = m.renderSyscallModal()
-	case m.cpufeatActive:
-		modal = m.renderCPUFeatModal()
-	case m.gotoActive:
-		modal = m.renderGotoModal()
-	case m.settingsActive:
-		modal = m.renderSettingsModal()
-	case m.jumpActive:
-		modal = m.renderJumpModal()
-	case m.findActive:
-		modal = m.renderFindModal()
-	case m.findResultsActive:
-		modal = m.renderFindResultsModal()
-	default:
+func (m *Model) modalClick(y int) bool {
+	modal := m.renderActiveModal()
+	if modal == "" {
 		return false
 	}
 	mtop := (m.height - lipgloss.Height(modal)) / 2
@@ -195,7 +210,7 @@ func (m *Model) modalClick(x, y int) bool {
 	}
 	// Settings has group headers and separators interleaved, so a rendered line
 	// maps to a field through settingsLineFields (-1 for non-selectable lines).
-	if m.settingsActive {
+	if m.activeModal() == modalSettings {
 		if listRow < len(m.settingsLineFields) {
 			if f := m.settingsLineFields[listRow]; f >= 0 {
 				m.settingsCur = f
@@ -217,26 +232,26 @@ func (m *Model) modalClick(x, y int) bool {
 
 // modalActivate runs the open modal's Enter action (mouse double-click).
 func (m *Model) modalActivate() (tea.Model, tea.Cmd) {
-	switch {
-	case m.xrefActive:
+	switch m.activeModal() {
+	case modalXref:
 		return m.xrefJump()
-	case m.syscallActive:
+	case modalSyscall:
 		return m.syscallJump()
-	case m.cpufeatActive:
+	case modalCPUFeat:
 		return m.cpufeatJump()
-	case m.gotoActive:
+	case modalGoto:
 		m.activateGoto()
 		m.closeGoto()
 		return m, nil
-	case m.settingsActive:
+	case modalSettings:
 		m.cycleSetting(1)
 		return m, nil
-	case m.jumpActive:
+	case modalJump:
 		m.activateJump()
 		return m, nil
-	case m.findActive:
+	case modalFind:
 		return m, m.activateFind()
-	case m.findResultsActive:
+	case modalFindResults:
 		return m.findJump()
 	}
 	return m, nil

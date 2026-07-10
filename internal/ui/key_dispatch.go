@@ -26,9 +26,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// after the user has moved on.
 	m.pendingWheel = 0
 
-	// While the help overlay is up, scroll keys page through it (it can be taller
-	// than the terminal); any other key dismisses it.
-	if m.headerActive {
+	// While a scrollable text overlay is up, scroll keys page through it (it can
+	// be taller than the terminal); any other key dismisses it. These sit above
+	// the running-scan Esc handling below, so Esc dismisses the overlay in front
+	// of the user rather than cancelling a scan they can't see.
+	switch m.activeModal() {
+	case modalHeader:
 		switch key {
 		case "up", "k":
 			m.headerScroll--
@@ -46,8 +49,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.headerActive = false
 		}
 		return m, nil
-	}
-	if m.helpActive {
+	case modalHelp:
 		switch key {
 		case "up", "k":
 			m.helpScroll--
@@ -66,6 +68,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+
 	if m.searchRunning && key == "esc" {
 		m.cancelSearch("search cancelled")
 		return m, nil
@@ -87,37 +90,30 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelCPUFeat()
 		return m, nil
 	}
-	if m.cpufeatActive {
+	// The open modal owns the keyboard. modalHeader/modalHelp returned above.
+	switch m.activeModal() {
+	case modalCPUFeat:
 		return m.updateCPUFeatModal(key)
-	}
-
-	if m.xrefActive {
+	case modalXref:
 		return m.updateXrefModal(msg, key)
-	}
-	if m.syscallActive {
+	case modalSyscall:
 		return m.updateSyscallModal(msg, key)
-	}
-	if m.jumpActive {
+	case modalJump:
 		return m.updateJumpModal(key)
-	}
-	if m.findActive {
+	case modalFind:
 		return m.updateFindModal(key)
-	}
-	if m.findQueryActive {
+	case modalFindQuery:
 		return m.updateFindQuery(msg, key)
-	}
-	if m.findResultsActive {
+	case modalFindResults:
 		return m.updateFindResultsModal(msg, key)
-	}
-	if m.settingsActive {
+	case modalSettings:
 		return m.updateSettings(key)
-	}
-	if m.gotoActive {
+	case modalGoto:
 		return m.updateGotoInput(msg, key)
-	}
-	if m.searchActive {
+	case modalSearch:
 		return m.updateSearchInput(msg, key)
 	}
+
 	if model, cmd, ok := m.handleDisasmPaneKey(key); ok {
 		return model, cmd
 	}

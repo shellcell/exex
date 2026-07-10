@@ -27,31 +27,8 @@ func (m *Model) View() tea.View {
 	body := m.theme.renderViewBackground(m.current().body(), m.width)
 	parts = append(parts, body, m.renderFooter())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	switch {
-	case m.headerActive:
-		out = m.overlayCenter(out, m.renderHeaderModal())
-	case m.helpActive:
-		out = m.overlayCenter(out, m.renderHelpModal())
-	case m.settingsActive:
-		out = m.overlayCenter(out, m.renderSettingsModal())
-	case m.gotoActive:
-		out = m.overlayCenter(out, m.renderGotoModal())
-	case m.searchActive:
-		out = m.overlayCenter(out, m.renderSearchModal())
-	case m.xrefActive:
-		out = m.overlayCenter(out, m.renderXrefModal())
-	case m.syscallActive:
-		out = m.overlayCenter(out, m.renderSyscallModal())
-	case m.cpufeatActive:
-		out = m.overlayCenter(out, m.renderCPUFeatModal())
-	case m.jumpActive:
-		out = m.overlayCenter(out, m.renderJumpModal())
-	case m.findActive:
-		out = m.overlayCenter(out, m.renderFindModal())
-	case m.findResultsActive:
-		out = m.overlayCenter(out, m.renderFindResultsModal())
-	case m.findQueryActive:
-		out = m.overlayCenter(out, m.renderFindQueryModal())
+	if modal := m.renderActiveModal(); modal != "" {
+		out = m.overlayCenter(out, modal)
 	}
 	m.viewCache = out
 	m.viewDirty = false

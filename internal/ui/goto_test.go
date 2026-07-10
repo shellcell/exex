@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 )
 
 func TestResolveSymbolGoto(t *testing.T) {
@@ -34,14 +35,14 @@ func TestAppendSymbolMatchesRanksBeforeTableOrder(t *testing.T) {
 		{Name: "target_helper", Addr: 0x2000},
 		{Name: "target", Addr: 0x1000},
 	}}}
-	m.appendSymbolMatches("target")
-	if got := len(m.gotoResults); got != 3 {
-		t.Fatalf("matches = %d, want 3", got)
+	got := m.appendSymbolMatches(nil, "target")
+	if len(got) != 3 {
+		t.Fatalf("matches = %d, want 3", len(got))
 	}
 	want := []string{"target", "target_helper", "zzz_target"}
 	for i, w := range want {
-		if got := m.gotoResults[i].label; got != w {
-			t.Fatalf("result[%d] = %q, want %q", i, got, w)
+		if got[i].Label != w {
+			t.Fatalf("result[%d] = %q, want %q", i, got[i].Label, w)
 		}
 	}
 }
@@ -52,14 +53,14 @@ func TestAppendSymbolMatchesFlushesWhenExactBucketFillsCap(t *testing.T) {
 		{Name: "needle", Addr: 0x2000},
 		{Name: "needle", Addr: 0x3000},
 	}}}
-	m.gotoResults = make([]gotoTarget, gotoMaxResults-2)
-	m.appendSymbolMatches("needle")
-	if got := len(m.gotoResults); got != gotoMaxResults {
-		t.Fatalf("matches after bounded append = %d, want %d", got, gotoMaxResults)
+	seeded := make([]palettemodal.Target, gotoMaxResults-2)
+	got := m.appendSymbolMatches(seeded, "needle")
+	if len(got) != gotoMaxResults {
+		t.Fatalf("matches after bounded append = %d, want %d", len(got), gotoMaxResults)
 	}
 	for i := gotoMaxResults - 2; i < gotoMaxResults; i++ {
-		if got := m.gotoResults[i].label; got != "needle" {
-			t.Fatalf("result[%d] = %q, want needle", i, got)
+		if got[i].Label != "needle" {
+			t.Fatalf("result[%d] = %q, want needle", i, got[i].Label)
 		}
 	}
 }

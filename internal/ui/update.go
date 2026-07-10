@@ -129,12 +129,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) forwardToFocusedInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch {
-	case m.gotoActive:
-		before := m.gotoInput.Value()
-		m.gotoInput, cmd = m.gotoInput.Update(msg)
-		if m.gotoInput.Value() != before {
-			m.recomputeGoto()
-		}
+	case m.palette.Active():
+		cmd = m.palette.HandleInput(m, msg)
 	case m.searchActive:
 		m.searchInput, cmd = m.searchInput.Update(msg)
 	case m.symbols.Filter.Focused():

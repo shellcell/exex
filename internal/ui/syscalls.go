@@ -24,6 +24,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/dump"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/modal"
 )
 
 // syscallMaxHits caps how many syscall sites are collected (the modal scrolls).
@@ -856,7 +857,7 @@ func (m *Model) renderSyscallModal() string {
 		i := top + row
 		if i >= len(rows) {
 			if emptyMsg != "" && row == visible/2 {
-				sb.WriteString(centeredModalLine(m.theme.srcShadowStyle.Render(emptyMsg), rowW))
+				sb.WriteString(modal.CenterLine(m.theme.srcShadowStyle.Render(emptyMsg), rowW))
 			} else {
 				sb.WriteString(blankRow)
 			}

@@ -127,10 +127,13 @@ func goldenModals(t *testing.T) map[string]string {
 			m.openSettings()
 			m.settings.SetCur(14)
 		}},
-		{"goto", func(m *Model) {
-			m.gotoActive = true
-			m.gotoInput.Focus()
-			m.recomputeGoto()
+		{"goto", func(m *Model) { m.palette.Open(m) }},
+		// A query with results, so the frame covers the badge column, the address
+		// column and the per-kind row colours — an empty prompt renders only the
+		// "type to search" hint.
+		{"goto_results", func(m *Model) {
+			m.palette.Open(m)
+			m.palette.SetQuery(m, "t")
 		}},
 		{"search", func(m *Model) { m.openSearch() }},
 		{"find_query", func(m *Model) { m.openFindQuery() }},

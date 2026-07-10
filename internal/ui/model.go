@@ -17,8 +17,8 @@ import (
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
+	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
-	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/view"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 	infoview "github.com/rabarbra/exex/internal/ui/views/info"
@@ -293,13 +293,6 @@ func (m *Model) setMode(md mode) {
 
 // gotoState stores modal state for address/symbol navigation.
 type gotoState struct {
-	gotoInput    textinput.Model
-	gotoActive   bool
-	gotoResults  []gotoTarget
-	gotoSel      int
-	gotoTop      int         // scroll offset into gotoResults
-	gotoScope    scope.Scope // what the palette searches (all / symbols / sections / …)
-	gotoAddrPhys bool        // interpret a typed address as physical (LMA), resolving to virtual
 }
 
 // jumpState stores what the shell keeps for the "open caret position in another
@@ -442,6 +435,8 @@ type Model struct {
 	jump jumptomodal.State
 	// find is the "Find from here" seed picker (internal/ui/modals/findto).
 	find findtomodal.State
+	// palette is the "Jump to" command palette (internal/ui/modals/palette).
+	palette palettemodal.State
 	archiveState
 	statusState
 	keyState

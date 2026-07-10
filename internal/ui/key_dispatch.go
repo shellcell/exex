@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
@@ -110,7 +109,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalSettings:
 		return m, m.settings.Update(m, key)
 	case modalGoto:
-		return m.updateGotoInput(msg, key)
+		return m, m.palette.Update(m, msg, key)
 	case modalSearch:
 		return m.updateSearchInput(msg, key)
 	}
@@ -357,47 +356,6 @@ func (m *Model) handleDisasmPaneKey(key string) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m *Model) updateGotoInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc":
-		m.closeGoto()
-		return m, nil
-	case "up":
-		if m.gotoSel > 0 {
-			m.gotoSel--
-		}
-		return m, nil
-	case "down":
-		if m.gotoSel < len(m.gotoResults)-1 {
-			m.gotoSel++
-		}
-		return m, nil
-	case "enter":
-		m.activateGoto()
-		m.closeGoto()
-		return m, nil
-	case "tab":
-		m.gotoScope = scope.Next(m.gotoScope)
-		m.recomputeGoto()
-		return m, nil
-	case "shift+tab":
-		m.gotoScope = scope.Prev(m.gotoScope)
-		m.recomputeGoto()
-		return m, nil
-	case "ctrl+p":
-		// Toggle physical-address interpretation (only meaningful when LMA differs).
-		if m.file.HasPhysAddrs() {
-			m.gotoAddrPhys = !m.gotoAddrPhys
-			m.recomputeGoto()
-		}
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.gotoInput, cmd = m.gotoInput.Update(msg)
-	m.recomputeGoto()
-	return m, cmd
-}
-
 func (m *Model) updateSearchInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	if c, ok := m.searchKeyAlias[key]; ok {
 		key = c
@@ -473,9 +431,7 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 	case actionViewRelocs:
 		return m, m.switchMode(modeRelocs), true
 	case actionGoto:
-		m.gotoActive = true
-		m.gotoInput.Focus()
-		m.recomputeGoto()
+		m.palette.Open(m)
 		return m, nil, true
 	case actionToggleSource:
 		m.toggleSourcePane()

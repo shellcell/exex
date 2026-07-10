@@ -310,12 +310,11 @@ func TestGotoChromeMainOnChromiumBinary(t *testing.T) {
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	mm := model.(*Model)
 
-	mm.gotoInput.SetValue("ChromeMain")
-	mm.recomputeGoto()
-	if len(mm.gotoResults) == 0 {
+	mm.palette.SetQuery(mm, "ChromeMain")
+	if len(mm.palette.Results()) == 0 {
 		t.Fatal("expected goto results for ChromeMain")
 	}
-	mm.activateGoto()
+	mm.palette.Activate(mm)
 	if mm.mode != modeDisasm {
 		t.Fatalf("mode = %v, want disasm", mm.mode)
 	}

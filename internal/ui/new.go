@@ -41,7 +41,6 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	strFilter := newPromptInput("type to filter…", "/ ")
 	libFilter := newPromptInput("type to filter…", "/ ")
 	relocFilter := newPromptInput("symbol · type · section", "/ ")
-	gotoInput := newPromptInput("0x401000 or symbol name", "→ ")
 	searchInput := newPromptInput("hex bytes (de ad be ef) or text", "/ ")
 	sysFilter := newPromptInput("name · #num · symbol", "/ ")
 
@@ -85,9 +84,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 		relocs: relocs.State{
 			Filter: relocFilter,
 		},
-		gotoState: gotoState{
-			gotoInput: gotoInput,
-		},
+		gotoState: gotoState{},
 		searchState: searchState{
 			searchInput:      searchInput,
 			searchForward:    true,
@@ -128,6 +125,9 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	}
 	m.disasmSvc = explorer.NewDisasmService(f, d, m.disasmMaxBytes, m.disasmSearchWorkers)
 	m.disasmInitAddr = explorer.DefaultExecAddr(f, m.disasmTarget)
+	// The palette overlay owns its prompt but not its styling, so the shell builds
+	// the widget and hands it over.
+	m.palette.SetInput(newPromptInput("0x401000 or symbol name", "→ "))
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))

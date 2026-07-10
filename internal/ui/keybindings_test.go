@@ -157,11 +157,11 @@ func TestKeysGlobal(t *testing.T) {
 
 	// g opens goto; esc closes.
 	h.press("g")
-	if !h.m().gotoActive {
+	if !h.m().palette.Active() {
 		t.Fatal("g did not open goto modal")
 	}
 	h.press("esc")
-	if h.m().gotoActive {
+	if h.m().palette.Active() {
 		t.Fatal("esc did not close goto modal")
 	}
 

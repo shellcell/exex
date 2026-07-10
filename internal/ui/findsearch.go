@@ -22,6 +22,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/bytesearch"
 	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/rabarbra/exex/internal/ui/modal"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	"github.com/rabarbra/exex/internal/ui/scope"
 	"github.com/rabarbra/exex/internal/ui/views/strs"
@@ -707,7 +708,7 @@ func (m *Model) renderFindResultsModal() string {
 		}
 		for i := 0; i < visible; i++ {
 			if i == visible/2 {
-				sb.WriteString(centeredModalLine(m.theme.modalHint(msg), rowW) + "\n")
+				sb.WriteString(modal.CenterLine(m.theme.modalHint(msg), rowW) + "\n")
 			} else {
 				sb.WriteString(blank + "\n")
 			}

@@ -11,6 +11,7 @@ import (
 	"github.com/rabarbra/exex/internal/ui/modal"
 	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
+	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 	"github.com/rabarbra/exex/internal/ui/view"
 )
@@ -24,6 +25,7 @@ var (
 	_ settingsmodal.Host = (*Model)(nil)
 	_ jumptomodal.Host   = (*Model)(nil)
 	_ findtomodal.Host   = (*Model)(nil)
+	_ palettemodal.Host  = (*Model)(nil)
 )
 
 // modalContext snapshots the current model state for the open overlay. Unlike
@@ -59,6 +61,8 @@ func (m *Model) modalStyles() *modal.Styles {
 		KeyStyle:     t.helpKeyStyle,
 		AccentStyle:  t.headerKey,
 		RowStyle:     t.tableRowStyle,
+		ErrorStyle:   t.errorStyle,
+		SymbolStyle:  t.styleForSymbol,
 	}
 	return m.modalStylesCache
 }

@@ -85,11 +85,6 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 			Filter: relocFilter,
 		},
 		gotoState: gotoState{},
-		searchState: searchState{
-			searchInput:      searchInput,
-			searchForward:    true,
-			searchFromCursor: true,
-		},
 		syscallState: syscallState{
 			syscallFilter: sysFilter,
 		},
@@ -131,6 +126,7 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	m.xref.SetInput(newPromptInput("location · text · 0xaddr", "/ "))
 	m.findQueryModal.SetInput(newPromptInput("symbol · string · 0xaddr", "search "))
 	m.findResults.SetInput(newPromptInput("filter results", "/ "))
+	m.search.Init(searchInput)
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	searchutil "github.com/rabarbra/exex/internal/bytesearch"
+	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
 	"os"
 	"strings"
 	"testing"
@@ -50,10 +52,11 @@ func TestSymbolTypeFilterCyclesAndFilters(t *testing.T) {
 
 func TestOpenSearchClearsInputButKeepsRepeatQuery(t *testing.T) {
 	m := &Model{searchState: searchState{searchQuery: "old"}}
-	m.searchInput = textinput.New()
-	m.searchInput.SetValue("stale")
-	m.openSearch()
-	if got := m.searchInput.Value(); got != "" {
+	m.search.Init(textinput.New())
+	m.search.Open()
+	m.search.HandleInput(tea.PasteMsg{Content: "stale"})
+	m.search.Open()
+	if got := m.search.Value(); got != "" {
 		t.Fatalf("search input = %q, want empty", got)
 	}
 	if got := m.searchQuery; got != "old" {
@@ -388,14 +391,15 @@ func TestHexSearchReattachesViewportAtUnalignedSectionStart(t *testing.T) {
 		file:             &binfile.File{Sections: sections},
 		layoutState:      layoutState{width: 120, height: 10},
 		interactionState: interactionState{viewportDetached: true},
-		searchState:      searchState{searchActive: true, searchMode: searchModeText, searchForward: true, searchFromCursor: false},
 		byteViews: hexraw.State{HexImg: binfile.NewImage(hexData, []binfile.Region{
 			{Addr: sections[0].Addr, Size: sections[0].FileSize, Off: 0, Name: sections[0].Name},
 			{Addr: sections[1].Addr, Size: sections[1].FileSize, Off: 0x4e, Name: sections[1].Name},
 		}), HexCur: 0, HexTop: 0},
 	}
-	m.searchInput = textinput.New()
-	m.searchInput.SetValue("Vibrant")
+	m.search.Init(textinput.New())
+	m.search.SetOptions(searchmodal.Options{Mode: searchutil.ModeText, Forward: true})
+	m.search.Open()
+	m.search.HandleInput(tea.PasteMsg{Content: "Vibrant"})
 	model, _ := m.updateSearchInput(keyPress("enter"), "enter")
 	m = model.(*Model)
 	if m.viewportDetached {
@@ -562,42 +566,42 @@ func TestSearchPopupClickTogglesSwitches(t *testing.T) {
 	m := &Model{
 		theme:       DefaultTheme(),
 		layoutState: layoutState{width: 100, height: 30},
-		searchState: searchState{searchActive: true, searchForward: true, searchFromCursor: true},
 	}
-	m.searchInput = textinput.New()
-	modal := m.renderSearchModal()
+	m.search.Init(textinput.New())
+	m.search.Open()
+	modal := m.search.Render(m.modalContext(), m)
 	left := (m.width - lipgloss.Width(modal)) / 2
 	top := (m.height - lipgloss.Height(modal)) / 2
 
 	// The switch strip lives at content row searchSwitchLine, inside the modal's
 	// border (1) + padding (1,2). Compute the centre x of each segment from the
 	// shared searchSwitches() layout so the test can't drift from the renderer.
-	rowY := top + 2 + searchSwitchLine
-	sepW := lipgloss.Width(searchSwitchSep)
-	sw := m.searchSwitches()
+	rowY := top + 2 + searchmodal.SwitchLine
+	sepW := lipgloss.Width(searchmodal.SwitchSep)
+	sw := m.search.Switches()
 	center := map[string]int{}
 	pos := 1 // the switch strip is indented one column
 	for _, s := range sw {
-		w := lipgloss.Width(s.label())
-		center[s.name] = left + 3 + pos + w/2
+		w := lipgloss.Width(s.Label())
+		center[s.Name] = left + 3 + pos + w/2
 		pos += w + sepW
 	}
 
 	m.handleSearchPopupClick(center["mode"], rowY)
-	if m.searchMode != searchModeText {
-		t.Fatalf("mode click set mode = %s, want text", searchModeName(m.searchMode))
+	if m.search.Mode() != searchutil.ModeText {
+		t.Fatalf("mode click set mode = %s, want text", m.search.Mode())
 	}
 	m.handleSearchPopupClick(center["case"], rowY)
-	if !m.searchCaseSensitive {
-		t.Fatal("case click did not toggle searchCaseSensitive")
+	if !m.search.CaseSensitive() {
+		t.Fatal("case click did not toggle case sensitivity")
 	}
 	m.handleSearchPopupClick(center["dir"], rowY)
-	if m.searchForward {
-		t.Fatal("direction click did not toggle searchForward")
+	if m.search.Forward() {
+		t.Fatal("direction click did not toggle direction")
 	}
 	m.handleSearchPopupClick(center["origin"], rowY)
-	if m.searchFromCursor {
-		t.Fatal("origin click did not toggle searchFromCursor")
+	if m.search.FromCursor() {
+		t.Fatal("origin click did not toggle origin")
 	}
 }
 

@@ -52,7 +52,7 @@ var modalOrder = [...]struct {
 	{modalFindResults, func(m *Model) bool { return m.findResults.Active() }},
 	{modalSettings, func(m *Model) bool { return m.settings.Active() }},
 	{modalGoto, func(m *Model) bool { return m.palette.Active() }},
-	{modalSearch, func(m *Model) bool { return m.searchActive }},
+	{modalSearch, func(m *Model) bool { return m.search.Active() }},
 }
 
 // activeModal returns the overlay currently on top, or modalNone.
@@ -110,7 +110,7 @@ func (m *Model) renderActiveModal() string {
 		m.modalListRow = m.palette.ListRow()
 		return out
 	case modalSearch:
-		return m.renderSearchModal()
+		return m.search.Render(m.modalContext(), m)
 	}
 	return ""
 }

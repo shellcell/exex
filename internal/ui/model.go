@@ -3,7 +3,6 @@ package ui
 import (
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 
@@ -22,6 +21,7 @@ import (
 	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
 	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 	rawheadermodal "github.com/rabarbra/exex/internal/ui/modals/rawheader"
+	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
 	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 	"github.com/rabarbra/exex/internal/ui/view"
@@ -316,21 +316,18 @@ type findState struct {
 }
 
 // searchState stores modal and async state for view searches.
+// searchState holds what the shell keeps for the in-view search: the last query
+// (so n/N can repeat it) and the async disasm-scan bookkeeping. The prompt and
+// its toggles live on m.search (internal/ui/modals/search).
 type searchState struct {
-	searchInput         textinput.Model
-	searchActive        bool
-	searchQuery         string
-	searchSeq           int
-	searchCancel        chan struct{}
-	searchRunning       bool
-	searchCancelable    bool
-	searchResults       disasmSearchCache
-	searchCursorMode    int
-	searchMode          searchMode
-	searchCursorAddr    uint64
-	searchForward       bool
-	searchFromCursor    bool
-	searchCaseSensitive bool // in-view search honours case (default off)
+	searchQuery      string
+	searchSeq        int
+	searchCancel     chan struct{}
+	searchRunning    bool
+	searchCancelable bool
+	searchResults    disasmSearchCache
+	searchCursorMode int
+	searchCursorAddr uint64
 }
 
 // settingsState holds the overlay geometry the shell still tracks. The settings
@@ -427,6 +424,8 @@ type Model struct {
 	help helpmodal.State
 	// header is the raw container-header overlay (internal/ui/modals/rawheader).
 	header rawheadermodal.State
+	// search is the in-view search prompt (internal/ui/modals/search).
+	search searchmodal.State
 	// xref is the cross-references results overlay (internal/ui/modals/xref).
 	xref xrefmodal.State
 	archiveState

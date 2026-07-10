@@ -231,7 +231,7 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		seq:           m.searchSeq,
 		label:         m.searchQuery,
 		query:         canonicalSearchQuery(m.searchQuery),
-		caseSensitive: m.searchCaseSensitive,
+		caseSensitive: m.search.CaseSensitive(),
 		forward:       forward,
 		inclusive:     inclusive,
 		total:         img.Len(),
@@ -304,8 +304,8 @@ func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) 
 		// so checking both covers it); only then the binary-search membership test.
 		// Honour case sensitivity so a sensitive search doesn't fast-path to a
 		// wrong-case symbol.
-		if !nameMatches(q, sym.Name, m.searchCaseSensitive) &&
-			!(sym.Demangled != "" && nameMatches(q, sym.Demangled, m.searchCaseSensitive)) {
+		if !nameMatches(q, sym.Name, m.search.CaseSensitive()) &&
+			!(sym.Demangled != "" && nameMatches(q, sym.Demangled, m.search.CaseSensitive())) {
 			continue
 		}
 		if _, ok := img.PosForAddr(sym.Addr); !ok {

@@ -69,32 +69,6 @@ func (m *Model) overlayCenter(bg, modal string) string {
 	return layout.Overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
 }
 
-func (m *Model) renderSearchModal() string {
-	rowW := modalListWidth(m.width)
-	// Switch strip (content row searchSwitchLine) — clickable; geometry shared with
-	// handleSearchPopupClick via searchSwitches(). Each switch is a dim name plus
-	// the current value in an accent pill. Indented one column to line up with the
-	// other elements (and the goto/find modals).
-	var segs []string
-	for _, sw := range m.searchSwitches() {
-		segs = append(segs, m.theme.srcShadowStyle.Render(sw.name)+" "+m.theme.switchStyle.Render("⟦"+sw.value+"⟧"))
-	}
-	switches := strings.Join(segs, searchSwitchSep)
-	help := m.theme.modalHint("^T mode · ^I case · ^R dir · ^O origin · ↵ find · n/N next/prev · esc cancel")
-
-	var sb strings.Builder
-	sb.WriteString(m.theme.modalTitle("Search"))
-	sb.WriteByte('\n')
-	sb.WriteString(" " + m.theme.modalHint(m.current().searchHint()) + "\n")
-	sb.WriteByte('\n')
-	sb.WriteString(" " + m.searchInput.View() + "\n")
-	sb.WriteByte('\n')
-	sb.WriteString(" " + switches + "\n") // content row searchSwitchLine
-	sb.WriteByte('\n')
-	sb.WriteString(" " + help)
-	return m.theme.modalStyle.Render(layout.PadRight(sb.String(), rowW))
-}
-
 // tabItems is the ordered tab strip, shared by renderTabs (drawing) and
 // tabHitTest (mouse mapping) so the two never drift apart.
 var tabItems = []struct {

@@ -6,8 +6,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
 // handleKey routes a key message through modal, global, and active-view handlers.
@@ -325,47 +323,13 @@ func (m *Model) handleDisasmPaneKey(key string) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+// updateSearchInput applies the user's search-key aliases, then hands the key to
+// the prompt overlay.
 func (m *Model) updateSearchInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	if c, ok := m.searchKeyAlias[key]; ok {
 		key = c
 	}
-	switch key {
-	case "esc":
-		m.searchActive = false
-		m.searchInput.Blur()
-		return m, nil
-	case "ctrl+t":
-		m.cycleSearchMode()
-		return m, nil
-	case "ctrl+r":
-		m.searchForward = !m.searchForward
-		return m, nil
-	case "ctrl+o":
-		m.searchFromCursor = !m.searchFromCursor
-		return m, nil
-	case "ctrl+i":
-		m.toggleSearchCase()
-		return m, nil
-	case "enter":
-		before := m.activeCursorState()
-		m.searchQuery = strings.TrimSpace(m.searchInput.Value())
-		m.searchActive = false
-		m.searchInput.Blur()
-		cmd := m.runSearchFromPrompt()
-		if before != m.activeCursorState() {
-			m.viewportDetached = false
-			switch m.mode {
-			case modeHex:
-				m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Hex)
-			case modeRaw:
-				m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Raw)
-			}
-		}
-		return m, cmd
-	}
-	var cmd tea.Cmd
-	m.searchInput, cmd = m.searchInput.Update(msg)
-	return m, cmd
+	return m, m.search.Update(m, msg, key)
 }
 
 func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {

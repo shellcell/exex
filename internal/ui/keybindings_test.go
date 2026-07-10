@@ -516,7 +516,7 @@ func TestKeysDisasm(t *testing.T) {
 
 	// / opens the search modal.
 	h.press("/")
-	if !h.m().searchActive {
+	if !h.m().search.Active() {
 		t.Fatal("/ did not open the disasm search modal")
 	}
 	h.press("esc")
@@ -599,7 +599,7 @@ func TestKeysHexRaw(t *testing.T) {
 	// / opens the byte search modal.
 	h.goView(modeHex, "5")
 	h.press("/")
-	if !h.m().searchActive {
+	if !h.m().search.Active() {
 		t.Fatal("/ did not open the hex search modal")
 	}
 	h.press("esc")

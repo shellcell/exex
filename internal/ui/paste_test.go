@@ -36,12 +36,11 @@ func TestPasteIntoSearchModal(t *testing.T) {
 		layoutState: layoutState{width: 120, height: 30},
 		file:        &binfile.File{},
 	}
-	m.searchInput = newPromptInput("", "/ ")
-	m.searchActive = true
-	m.searchInput.Focus()
+	m.search.Init(newPromptInput("", "/ "))
+	m.search.Open()
 
 	upd, _ := m.Update(tea.PasteMsg{Content: "de ad be ef"})
-	if v := upd.(*Model).searchInput.Value(); v != "de ad be ef" {
+	if v := upd.(*Model).search.Value(); v != "de ad be ef" {
 		t.Fatalf("search value after paste = %q, want %q", v, "de ad be ef")
 	}
 }

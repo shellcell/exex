@@ -13,6 +13,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
+	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
 	"github.com/rabarbra/exex/internal/ui/modals/textoverlay"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
@@ -479,29 +480,21 @@ func scrollViewportTop(top, n, visible, delta int, rowHeight func(int) int) int 
 	return layout.ViewportTop(top+delta, n, visible, rowHeight)
 }
 
+// handleSearchPopupClick toggles a switch in the search prompt's strip. The
+// overlay is re-rendered to recover its centred geometry, then the click's
+// content column is mapped through the same Switches() the render used.
 func (m *Model) handleSearchPopupClick(x, y int) {
-	modal := m.renderSearchModal()
-	mw := lipgloss.Width(modal)
-	mh := lipgloss.Height(modal)
-	left := (m.width - mw) / 2
-	top := (m.height - mh) / 2
-	// Translate to content coordinates inside modalStyle's RoundedBorder (1) +
-	// Padding(1,2): x offset 3, y offset 2.
+	box := m.search.Render(m.modalContext(), m)
+	left := (m.width - lipgloss.Width(box)) / 2
+	top := (m.height - lipgloss.Height(box)) / 2
+	// Translate to content coordinates inside the frame's border (1) + padding
+	// (1,2): x offset 3, y offset 2.
 	cx := x - (left + 3)
 	cy := y - (top + 2)
-	if cy != searchSwitchLine || cx < 0 {
+	if cy != searchmodal.SwitchLine {
 		return
 	}
-	pos := 1 // the switch strip is indented one column (see renderSearchModal)
-	sepW := lipgloss.Width(searchSwitchSep)
-	for _, sw := range m.searchSwitches() {
-		w := lipgloss.Width(sw.label())
-		if cx >= pos && cx < pos+w {
-			sw.toggle()
-			return
-		}
-		pos += w + sepW
-	}
+	m.search.ClickAt(m, cx)
 }
 
 // handleDoubleClick activates the item under a double-click: follow the address

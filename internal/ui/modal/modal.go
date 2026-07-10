@@ -52,6 +52,7 @@ type Styles struct {
 	AccentStyle  lipgloss.Style // row markers and other small accents
 	RowStyle     lipgloss.Style // ordinary list text
 	DescStyle    lipgloss.Style // descriptive text beside a key or label
+	SwitchStyle  lipgloss.Style // the value pill of a clickable toggle
 	HeadStyle    lipgloss.Style // section headers inside a scrollable overlay
 
 	// SymbolStyle colours a symbol row by its kind and binding, exactly as the

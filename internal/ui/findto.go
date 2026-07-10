@@ -44,8 +44,8 @@ func (m *Model) buildFindSeeds() []findtomodal.Seed {
 	case modeDisasm:
 		// The current instruction's resolved operand target (a call/branch/load
 		// address) — the thing you most often want to chase from a line of code.
-		if len(m.disasmInst) > 0 && m.disasmCur >= 0 && m.disasmCur < len(m.disasmInst) {
-			inst := m.disasmInst[m.disasmCur]
+		if len(m.dasm.Inst) > 0 && m.dasm.Cur >= 0 && m.dasm.Cur < len(m.dasm.Inst) {
+			inst := m.dasm.Inst[m.dasm.Cur]
 			if t, ok := m.followableAddr(inst.Text); ok {
 				prev := fmt.Sprintf("0x%x", t)
 				if ann := m.targetAnnotation(t); ann != "" {

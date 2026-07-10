@@ -21,7 +21,7 @@ import (
 
 // renderInstText colours an instruction's assembly text, caching the result.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
-	return m.disasmAsmCache.Get(disasmAsmCacheKey{text: text, addr: instAddr, cls: class}, func() string {
+	return m.dasm.AsmCache.Get(disasmview.AsmKey{Text: text, Addr: instAddr, Cls: class}, func() string {
 		return m.asmHighlighter().Render(text, class, m.disasmAddrSpans(text, instAddr))
 	})
 }
@@ -32,15 +32,15 @@ func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uin
 // Dropped (set nil) by clearColorCaches, so a theme change rebuilds it rather
 // than leaving its token-style cache stale.
 func (m *Model) asmHighlighter() asmhl.Highlighter {
-	if m.asmHL == nil {
-		m.asmHL = asmhl.New(sourceSyntaxTheme(m.cfg), sourceSyntaxForeground(m.cfg), m.file.Arch(), asmhl.Styles{
+	if m.dasm.AsmHL == nil {
+		m.dasm.AsmHL = asmhl.New(sourceSyntaxTheme(m.cfg), sourceSyntaxForeground(m.cfg), m.file.Arch(), asmhl.Styles{
 			Class:    m.theme.styleForClass,
 			Plain:    m.theme.whiteStyle,
 			Register: m.theme.asmRegisterStyle,
 			Number:   m.theme.asmNumberStyle,
 		})
 	}
-	return m.asmHL
+	return m.dasm.AsmHL
 }
 
 // disasmAddrSpans finds the followable (mapped) address literals in text and the
@@ -150,10 +150,10 @@ func (m *Model) targetAnnotation(addr uint64) string {
 
 func (m *Model) renderDisasm() string {
 	bodyH := m.bodyHeight()
-	if m.disasmDecoding {
+	if m.dasm.Decoding {
 		return m.emptyBody("decoding instructions…")
 	}
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return m.emptyBody("no disassembly loaded — press g to go to an address, or pick a symbol from view 3")
 	}
 	// The source pane only makes sense when the binary actually carries debug
@@ -190,10 +190,10 @@ func (m *Model) renderDisasm() string {
 // renderStickySymbol always shows which symbol (and offset within it) the
 // disasm cursor is currently parked on. Stays pinned regardless of scroll.
 func (m *Model) renderStickySymbol(w int) string {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return layout.PadRight("", w)
 	}
-	addr := m.disasmInst[m.disasmCur].Addr
+	addr := m.dasm.Inst[m.dasm.Cur].Addr
 	var text string
 	if sym, ok := m.file.SymbolAt(addr); ok {
 		off := addr - sym.Addr
@@ -229,23 +229,23 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 		h = 1
 	}
 	rowHeight := m.disasmRowHeight(w)
-	top := m.visualTopForView(m.disasmCur, m.disasmTop, len(m.disasmInst), h, rowHeight)
-	m.disasmTop = top
-	m.renderedDisasmTop = top
+	top := m.visualTopForView(m.dasm.Cur, m.dasm.Top, len(m.dasm.Inst), h, rowHeight)
+	m.dasm.Top = top
+	m.dasm.RenderedTop = top
 
 	jumpTargets := m.currentIntraJumpTargets()
 	// When the source pane is open (disasm-first), addresses are coloured by
 	// their source mapping — identical to the source-first disasm pane — instead
 	// of the intra-function jump-target highlight used in the pure disasm view.
-	sourceActive := m.rightPaneActive() && !m.sourceFirst && len(m.disasmInst) > 0
+	sourceActive := m.rightPaneActive() && !m.sourceFirst && len(m.dasm.Inst) > 0
 	var curFile string
 	var curLine int
 	if sourceActive {
-		curFile, curLine, _ = m.file.LookupAddrCol(m.disasmInst[m.disasmCur].Addr)
+		curFile, curLine, _ = m.file.LookupAddrCol(m.dasm.Inst[m.dasm.Cur].Addr)
 	}
 	var rows []string
-	for i := top; i < len(m.disasmInst) && len(rows) < h; i++ {
-		inst := m.disasmInst[i]
+	for i := top; i < len(m.dasm.Inst) && len(rows) < h; i++ {
+		inst := m.dasm.Inst[i]
 		// A "═══ .section ═══" banner where an executable section begins (like the
 		// hex view). Emitted before the symbol label; its row is accounted for in
 		// disasmInstVisualHeight so scroll/click math stays correct.
@@ -275,7 +275,7 @@ func (m *Model) renderDisasmScroll(w, h int) string {
 			st := m.addrMapStyle(inst.Addr, curFile, curLine)
 			targetStyle = &st
 		}
-		for _, row := range m.disasmInstRows(inst, w, i == m.disasmCur, targetStyle) {
+		for _, row := range m.disasmInstRows(inst, w, i == m.dasm.Cur, targetStyle) {
 			if len(rows) >= h {
 				break
 			}
@@ -293,11 +293,11 @@ func (m *Model) disasmRenderWidth() int {
 }
 
 func (m *Model) disasmInstVisualHeight(i, w int) int {
-	if i < 0 || i >= len(m.disasmInst) {
+	if i < 0 || i >= len(m.dasm.Inst) {
 		return 1
 	}
-	return m.disasmHeightCache.Get(disasmHeightKey{i: i, w: w, wrap: m.wrap}, func() int {
-		inst := m.disasmInst[i]
+	return m.dasm.HeightCache.Get(disasmview.HeightKey{I: i, W: w, Wrap: m.wrap}, func() int {
+		inst := m.dasm.Inst[i]
 		h := m.disasmInstRowCount(inst, w)
 		if _, ok := m.disasmSectionStart(i); ok {
 			h++ // the "═══ .section ═══" separator row
@@ -508,10 +508,10 @@ func (m *Model) selectedDisasmSegment(s string) string {
 
 func (m *Model) currentIntraJumpTargets() map[uint64]lipgloss.Style {
 	out := map[uint64]lipgloss.Style{}
-	if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
+	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
 		return out
 	}
-	cur := m.disasmInst[m.disasmCur]
+	cur := m.dasm.Inst[m.dasm.Cur]
 	if cur.Class != disasm.ClassJumpUnc && cur.Class != disasm.ClassJumpCond {
 		return out
 	}
@@ -540,10 +540,10 @@ func (m *Model) ensureSourceForDisasmCursor() bool {
 	if m.sourceFirst && m.srcFile != "" && m.file.SourceLines(m.srcFile) != nil {
 		return true
 	}
-	if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
+	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
 		return false
 	}
-	file, line := m.file.LookupAddr(m.disasmInst[m.disasmCur].Addr)
+	file, line := m.file.LookupAddr(m.dasm.Inst[m.dasm.Cur].Addr)
 	if file == "" || line == 0 || m.file.SourceLines(file) == nil {
 		return false
 	}
@@ -562,11 +562,11 @@ func (m *Model) hasOpenSourceFile() bool {
 // disasmIsSymbolStart reports whether instruction i begins a symbol (and so is
 // preceded by a "<name>:" label line in the scroller).
 func (m *Model) disasmIsSymbolStart(i int) bool {
-	if i < 0 || i >= len(m.disasmInst) {
+	if i < 0 || i >= len(m.dasm.Inst) {
 		return false
 	}
-	sym, ok := m.file.SymbolAt(m.disasmInst[i].Addr)
-	return ok && sym.Addr == m.disasmInst[i].Addr
+	sym, ok := m.file.SymbolAt(m.dasm.Inst[i].Addr)
+	return ok && sym.Addr == m.dasm.Inst[i].Addr
 }
 
 // disasmSectionStart reports whether instruction i begins an executable section
@@ -574,25 +574,25 @@ func (m *Model) disasmIsSymbolStart(i int) bool {
 // exec-section start addresses are indexed once so this is an O(1) lookup per
 // row, not a scan over all sections on every render.
 func (m *Model) disasmSectionStart(i int) (string, bool) {
-	if i < 0 || i >= len(m.disasmInst) {
+	if i < 0 || i >= len(m.dasm.Inst) {
 		return "", false
 	}
-	if m.execSecStarts == nil {
+	if m.dasm.ExecSecStarts == nil {
 		// Derive banners from the active disasm image's regions, so all-sections
 		// mode labels data/object-file sections too (not just executable ones). When
 		// a section's load address (LMA) differs from its virtual address — a
 		// higher-half kernel, say — note it once here (it's a constant per-section
 		// offset) rather than on every instruction row.
-		m.execSecStarts = make(map[uint64]string)
+		m.dasm.ExecSecStarts = make(map[uint64]string)
 		for _, r := range m.file.ExecImage().Regions {
 			label := r.Name
 			if sec := m.file.SectionAt(r.Addr); sec != nil {
 				label += m.lmaNote(sec.PhysAddr)
 			}
-			m.execSecStarts[r.Addr] = label
+			m.dasm.ExecSecStarts[r.Addr] = label
 		}
 	}
-	name, ok := m.execSecStarts[m.disasmInst[i].Addr]
+	name, ok := m.dasm.ExecSecStarts[m.dasm.Inst[i].Addr]
 	return name, ok
 }
 
@@ -621,10 +621,10 @@ func (m *Model) renderSourcePane(w, h int) string {
 		inner = w
 	}
 
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return border.Render(layout.PadBody("", inner, h))
 	}
-	addr := m.disasmInst[m.disasmCur].Addr
+	addr := m.dasm.Inst[m.dasm.Cur].Addr
 	file, line, col := m.file.LookupAddrCol(addr)
 	if file == "" {
 		body := "no source mapping for 0x" + fmt.Sprintf("%x", addr)

@@ -134,18 +134,18 @@ func (v relocsView) ensure() tea.Cmd {
 }
 
 func (v disasmView) ensure() tea.Cmd {
-	if !v.disasmBuilt {
+	if !v.dasm.Built {
 		// Decode the initial window in the background; later jumps decode a fresh
 		// bounded span synchronously so targeted navigation lands immediately.
-		if !v.disasmDecoding {
-			v.disasmDecoding = true
-			v.disasmPendingAddr = v.disasmInitAddr
+		if !v.dasm.Decoding {
+			v.dasm.Decoding = true
+			v.dasm.PendingAddr = v.disasmInitAddr
 			return v.decodeDisasmCmd(v.disasmInitAddr)
 		}
 		return nil
 	}
 	// Already decoded: land on the entry the first time in.
-	if !v.disasmPositioned && v.disasmInitAddr != 0 {
+	if !v.dasm.Positioned && v.disasmInitAddr != 0 {
 		v.loadDisasmAt(v.disasmInitAddr)
 	}
 	return nil
@@ -254,10 +254,10 @@ func (v sourcesView) lineText() (string, bool) {
 }
 
 func (v disasmView) lineText() (string, bool) {
-	if len(v.disasmInst) == 0 || v.disasmCur < 0 || v.disasmCur >= len(v.disasmInst) {
+	if len(v.dasm.Inst) == 0 || v.dasm.Cur < 0 || v.dasm.Cur >= len(v.dasm.Inst) {
 		return "", true
 	}
-	in := v.disasmInst[v.disasmCur]
+	in := v.dasm.Inst[v.dasm.Cur]
 	addrW := v.file.AddrHexWidth()
 	return cleanCopyLine(fmt.Sprintf("0x%0*x  %s  %s", addrW, in.Addr, ansi.Strip(bytesHex(in.Bytes, len(in.Bytes))), in.Text)), true
 }

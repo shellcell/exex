@@ -21,20 +21,20 @@ func BenchmarkDisasmInstRows(b *testing.B) {
 func BenchmarkDisasmScroll(b *testing.B) {
 	m := benchmarkDisasmModel()
 	seed := benchmarkDisasmInsts()
-	m.disasmInst = make([]disasm.Inst, 0, 1024)
+	m.dasm.Inst = make([]disasm.Inst, 0, 1024)
 	for i := 0; i < 1024; i++ {
 		inst := seed[i%len(seed)]
 		inst.Addr = 0x1000 + uint64(i*4)
-		m.disasmInst = append(m.disasmInst, inst)
+		m.dasm.Inst = append(m.dasm.Inst, inst)
 	}
-	m.disasmCur = 128
+	m.dasm.Cur = 128
 	m.mode = modeDisasm
 	m.width = 120
 	m.height = 40
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.disasmTop = i % 128
+		m.dasm.Top = i % 128
 		_ = m.renderDisasmScroll(120, 32)
 	}
 }

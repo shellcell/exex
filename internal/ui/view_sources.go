@@ -79,19 +79,19 @@ func (m *Model) sourceLineColumns(file string, line int) []int {
 }
 
 func (m *Model) ensureSourceBelowDisasmCursor() bool {
-	if len(m.disasmInst) == 0 || m.disasmCur < 0 || m.disasmCur >= len(m.disasmInst) {
+	if len(m.dasm.Inst) == 0 || m.dasm.Cur < 0 || m.dasm.Cur >= len(m.dasm.Inst) {
 		return false
 	}
-	start := m.disasmCur + 1
-	if start >= len(m.disasmInst) {
+	start := m.dasm.Cur + 1
+	if start >= len(m.dasm.Inst) {
 		return false
 	}
-	if sym, ok := m.file.SymbolAt(m.disasmInst[m.disasmCur].Addr); ok && sym.Size > 0 {
+	if sym, ok := m.file.SymbolAt(m.dasm.Inst[m.dasm.Cur].Addr); ok && sym.Size > 0 {
 		end := sym.Addr + sym.Size
 		if m.selectSourceFromInstRange(start, func(addr uint64) bool { return addr < end }) {
 			return true
 		}
-		for start < len(m.disasmInst) && m.disasmInst[start].Addr < end {
+		for start < len(m.dasm.Inst) && m.dasm.Inst[start].Addr < end {
 			start++
 		}
 	}
@@ -99,8 +99,8 @@ func (m *Model) ensureSourceBelowDisasmCursor() bool {
 }
 
 func (m *Model) selectSourceFromInstRange(start int, inRange func(uint64) bool) bool {
-	for i := start; i < len(m.disasmInst); i++ {
-		addr := m.disasmInst[i].Addr
+	for i := start; i < len(m.dasm.Inst); i++ {
+		addr := m.dasm.Inst[i].Addr
 		if !inRange(addr) {
 			return false
 		}
@@ -277,7 +277,7 @@ func (m *Model) syncSourceAsm() {
 	if !m.disasmLoadedAddr(addr) {
 		m.setDisasmSpan(m.decodeDisasmAt(addr, m.disasmLeadBytes()))
 	}
-	m.disasmCur = m.instIndexAtOrAfterAddr(addr)
+	m.dasm.Cur = m.dasm.IndexAtOrAfter(addr)
 	m.scrollDisasmContext(4)
 }
 
@@ -487,7 +487,7 @@ func (m *Model) renderSourceAsm(w, h int) string {
 	if m.dis == nil {
 		return layout.PadBody("no disassembler for this architecture\n", w, h)
 	}
-	if !m.ensureDisasm() || len(m.disasmInst) == 0 {
+	if !m.ensureDisasm() || len(m.dasm.Inst) == 0 {
 		return layout.PadBody("no executable code\n", w, h)
 	}
 
@@ -499,10 +499,10 @@ func (m *Model) renderSourceAsm(w, h int) string {
 	if contentH < 1 {
 		contentH = 1
 	}
-	top := clampScroll(anchor-4+m.rightScroll, len(m.disasmInst), contentH)
+	top := clampScroll(anchor-4+m.rightScroll, len(m.dasm.Inst), contentH)
 	end := top + contentH
-	if end > len(m.disasmInst) {
-		end = len(m.disasmInst)
+	if end > len(m.dasm.Inst) {
+		end = len(m.dasm.Inst)
 	}
 
 	var b strings.Builder
@@ -527,8 +527,8 @@ func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
 	}
 	origColsPlain := colsPlain
 	name := ""
-	if anchor >= 0 && anchor < len(m.disasmInst) {
-		addr := m.disasmInst[anchor].Addr
+	if anchor >= 0 && anchor < len(m.dasm.Inst) {
+		addr := m.dasm.Inst[anchor].Addr
 		if sym, ok := m.file.SymbolAt(addr); ok {
 			name = m.displaySymbolName(sym)
 			if off := addr - sym.Addr; off > 0 {
@@ -572,27 +572,27 @@ func intsString(v []int) string {
 }
 
 func (m *Model) sourceAsmAnchorIndex() int {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return 0
 	}
 	if addr, ok := m.file.LineToAddr(m.srcFile, m.srcCur); ok {
-		idx := m.instIndexAtOrAfterAddr(addr)
-		if idx >= 0 && idx < len(m.disasmInst) {
+		idx := m.dasm.IndexAtOrAfter(addr)
+		if idx >= 0 && idx < len(m.dasm.Inst) {
 			return idx
 		}
 	}
-	if m.disasmCur < 0 {
+	if m.dasm.Cur < 0 {
 		return 0
 	}
-	if m.disasmCur >= len(m.disasmInst) {
-		return len(m.disasmInst) - 1
+	if m.dasm.Cur >= len(m.dasm.Inst) {
+		return len(m.dasm.Inst) - 1
 	}
-	return m.disasmCur
+	return m.dasm.Cur
 }
 
 func (m *Model) sourceAsmRow(i, addrW, w int) string {
 	return m.sourceAsmRowCache.Get(sourceAsmRowCacheKey{i: i, w: w, file: m.srcFile, line: m.srcCur}, func() string {
-		inst := m.disasmInst[i]
+		inst := m.dasm.Inst[i]
 		// Colour only the address by mapping (shared addrMapStyle policy); the
 		// instruction text keeps its normal class colours so the pane reads like
 		// real disassembly.

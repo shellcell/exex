@@ -58,13 +58,13 @@ type syscallDoneMsg struct {
 // startSyscallScan launches a syscall-site scan over the executable image,
 // remembering the function under the cursor so its sites can be highlighted.
 func (m *Model) startSyscallScan() tea.Cmd {
-	if m.dis == nil || len(m.disasmInst) == 0 {
+	if m.dis == nil || len(m.dasm.Inst) == 0 {
 		m.setStatus("no disassembly to scan", true)
 		return nil
 	}
 	var lo, hi uint64
 	var name string
-	addr := m.disasmInst[m.disasmCur].Addr
+	addr := m.dasm.Inst[m.dasm.Cur].Addr
 	if sym, ok := m.file.SymbolAt(addr); ok && sym.Size > 0 {
 		lo, hi, name = sym.Addr, sym.Addr+sym.Size, sym.Display()
 	}

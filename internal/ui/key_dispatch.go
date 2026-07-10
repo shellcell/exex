@@ -281,7 +281,7 @@ func (m *Model) activeCursorState() cursorState {
 		mode:        m.mode,
 		sectionsCur: m.sections.Cur,
 		symbolsCur:  m.symbols.Cur,
-		disasmCur:   m.disasmCur,
+		disasmCur:   m.dasm.Cur,
 		hexCur:      m.byteViews.HexCur,
 		rawCur:      m.byteViews.RawCur,
 		stringsCur:  m.strs.Cur,

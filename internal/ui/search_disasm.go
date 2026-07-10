@@ -105,10 +105,10 @@ func (m *Model) disasmSearchCacheComplete() bool {
 // cachedDisasmSearchHit answers a repeat search from the cache when it can.
 func (m *Model) cachedDisasmSearchHit(forward, inclusive bool) (explorer.SearchHit, bool) {
 	m.ensureDisasmSearchCache()
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return explorer.SearchHit{}, false
 	}
-	cur := m.disasmInst[m.disasmCur].Addr
+	cur := m.dasm.Inst[m.dasm.Cur].Addr
 	if m.searchCursorAddr != 0 {
 		cur = m.searchCursorAddr
 	}
@@ -121,7 +121,7 @@ func (m *Model) cachedDisasmSearchBoundary(forward bool) (uint64, bool) {
 }
 
 func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		m.setStatus("no disassembly loaded", true)
 		return nil
 	}
@@ -152,7 +152,7 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		return m.prefetchDisasmAroundCmd(hit.addr)
 	}
 	img := m.file.ExecImage()
-	cur := m.disasmInst[m.disasmCur]
+	cur := m.dasm.Inst[m.dasm.Cur]
 	pos, ok := img.PosForAddr(cur.Addr)
 	if !ok {
 		m.setStatus("current disasm address is not in executable image", true)
@@ -220,10 +220,10 @@ func nameMatches(q, name string, caseSensitive bool) bool {
 
 func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) (disasmSearchHit, bool) {
 	q := strings.TrimSpace(m.searchQuery)
-	if q == "" || len(m.disasmInst) == 0 {
+	if q == "" || len(m.dasm.Inst) == 0 {
 		return disasmSearchHit{}, false
 	}
-	cur := m.disasmInst[m.disasmCur].Addr
+	cur := m.dasm.Inst[m.dasm.Cur].Addr
 	if !fromCursor {
 		if forward {
 			cur = 0

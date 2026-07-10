@@ -22,10 +22,10 @@ func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {
 		t.Fatalf("stale demangle mutated current file: %q", got)
 	}
 
-	m.disasmDecoding = true
-	m.disasmPendingAddr = 0x1000
-	if _, _ = m.handleDisasmReady(disasmReadyMsg{file: oldFile, addr: 0x1000, span: explorer.Span{Insts: []disasm.Inst{{Addr: 0x1000}}}}); !m.disasmDecoding || len(m.disasmInst) != 0 {
-		t.Fatalf("stale disasm ready was applied: decoding=%v insts=%d", m.disasmDecoding, len(m.disasmInst))
+	m.dasm.Decoding = true
+	m.dasm.PendingAddr = 0x1000
+	if _, _ = m.handleDisasmReady(disasmReadyMsg{file: oldFile, addr: 0x1000, span: explorer.Span{Insts: []disasm.Inst{{Addr: 0x1000}}}}); !m.dasm.Decoding || len(m.dasm.Inst) != 0 {
+		t.Fatalf("stale disasm ready was applied: decoding=%v insts=%d", m.dasm.Decoding, len(m.dasm.Inst))
 	}
 
 	m.searchRunning = true

@@ -33,12 +33,12 @@ func TestAsmColumnMatchesTheRenderedPrefix(t *testing.T) {
 			m.cfg.Behavior.HideDisasmBytes = tc.hide
 			m.cfg.Behavior.SpacedDisasmBytes = tc.space
 			enterMode(t, m, modeDisasm)
-			if len(m.disasmInst) == 0 {
+			if len(m.dasm.Inst) == 0 {
 				t.Fatal("fixture decoded no instructions")
 			}
 
 			cols := m.disasmColumns()
-			inst := m.disasmInst[0]
+			inst := m.dasm.Inst[0]
 			rows := m.disasmInstRows(inst, m.width, false, nil)
 			if len(rows) == 0 {
 				t.Fatal("disasmInstRows returned nothing")
@@ -74,13 +74,13 @@ func TestByteColumnWidthMatchesTheRenderedBytes(t *testing.T) {
 		m.cfg = config.Config{Theme: defaultThemeName}
 		m.cfg.Behavior.SpacedDisasmBytes = spaced
 		enterMode(t, m, modeDisasm)
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			t.Fatal("fixture decoded no instructions")
 		}
 		cols := m.disasmColumns()
 		// The longest encoding the column is sized for; a shorter instruction pads
 		// to the same width, which is what keeps the assembly column straight.
-		for _, inst := range m.disasmInst {
+		for _, inst := range m.dasm.Inst {
 			if got := ansi.StringWidth(m.disasmBytes(inst.Bytes)); got != cols.ByteColW {
 				t.Fatalf("spaced=%v: disasmBytes(%d bytes) printed width %d, ByteColW = %d",
 					spaced, len(inst.Bytes), got, cols.ByteColW)

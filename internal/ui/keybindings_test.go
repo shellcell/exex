@@ -469,16 +469,16 @@ func selectLibLeaf(t *testing.T, h *keyHarness) {
 func TestKeysDisasm(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
-	if h.m().dis == nil || len(h.m().disasmInst) == 0 {
+	if h.m().dis == nil || len(h.m().dasm.Inst) == 0 {
 		t.Skip("no disassembly for this architecture/binary")
 	}
 
 	// ] / [ jump to the next / previous symbol (cursor moves).
-	c0 := h.m().disasmCur
+	c0 := h.m().dasm.Cur
 	h.press("]")
-	moved := h.m().disasmCur != c0
+	moved := h.m().dasm.Cur != c0
 	h.press("[")
-	if !moved && h.m().disasmCur == c0 {
+	if !moved && h.m().dasm.Cur == c0 {
 		t.Log("symbol jump did not move (few symbols) — tolerated")
 	}
 
@@ -983,7 +983,7 @@ func TestKeysActivate(t *testing.T) {
 	// Disasm: ←/→ walk history, Enter follows an operand address (tolerant: an
 	// instruction may have no in-file target).
 	h.goView(modeDisasm, "4")
-	if len(h.m().disasmInst) > 0 {
+	if len(h.m().dasm.Inst) > 0 {
 		h.press("enter") // follow (or status "no address")
 		h.press("left")  // history back
 		h.press("right") // history forward

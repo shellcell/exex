@@ -67,11 +67,11 @@ type xrefDoneMsg struct {
 // cursor (a symbol start finds its callers; any other address finds branches and
 // loads that target it).
 func (m *Model) startXrefScan() tea.Cmd {
-	if m.dis == nil || len(m.disasmInst) == 0 {
+	if m.dis == nil || len(m.dasm.Inst) == 0 {
 		m.setStatus("no disassembly to cross-reference", true)
 		return nil
 	}
-	target := m.disasmInst[m.disasmCur].Addr
+	target := m.dasm.Inst[m.dasm.Cur].Addr
 	label := m.xrefLabelForTarget(target)
 	m.stopXrefScan()
 	m.xrefSeq++

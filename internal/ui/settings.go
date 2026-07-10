@@ -103,7 +103,7 @@ func (m *Model) CycleSetting(i, dir int) {
 // disasm byte-column and annotation settings, so a toggle shows immediately. The
 // hex view is rendered uncached, so it needs no clear.
 func (m *Model) clearDisasmDisplayCaches() {
-	m.disasmHeightCache = nil
+	m.dasm.HeightCache = nil
 	m.sourceAsmRowCache = nil
 }
 

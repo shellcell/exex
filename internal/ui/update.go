@@ -20,8 +20,8 @@ func (m *Model) Init() tea.Cmd {
 	}
 	// If the configured default view is Disasm, switchMode already flagged a
 	// decode; kick it off here (New can't return a Cmd).
-	if m.disasmDecoding && !m.disasmBuilt && m.dis != nil {
-		cmds = append(cmds, m.decodeDisasmCmd(m.disasmPendingAddr))
+	if m.dasm.Decoding && !m.dasm.Built && m.dis != nil {
+		cmds = append(cmds, m.decodeDisasmCmd(m.dasm.PendingAddr))
 	}
 	// Pre-warm the initial disasm window right after the first frame. This keeps
 	// startup responsive while making the view ready for the common next action.
@@ -39,9 +39,9 @@ type prewarmMsg struct{}
 // remains on-demand because it is large and only source-aware views need it.
 func (m *Model) handlePrewarm() (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.dis != nil && !m.disasmBuilt && !m.disasmDecoding {
-		m.disasmDecoding = true
-		m.disasmPendingAddr = m.disasmInitAddr
+	if m.dis != nil && !m.dasm.Built && !m.dasm.Decoding {
+		m.dasm.Decoding = true
+		m.dasm.PendingAddr = m.disasmInitAddr
 		cmds = append(cmds, m.decodeDisasmCmd(m.disasmInitAddr))
 	}
 	return m, tea.Batch(cmds...)
@@ -173,27 +173,27 @@ func (m *Model) resize(width, height int) {
 
 func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	// Ignore late delivery if a synchronous jump already loaded a newer span.
-	if (msg.file != nil && msg.file != m.file) || !m.disasmDecoding || msg.addr != m.disasmPendingAddr {
+	if (msg.file != nil && msg.file != m.file) || !m.dasm.Decoding || msg.addr != m.dasm.PendingAddr {
 		return m, nil
 	}
-	m.disasmInst = msg.span.Insts
-	m.disasmPosLo, m.disasmPosHi = msg.span.PosLo, msg.span.PosHi
+	m.dasm.Inst = msg.span.Insts
+	m.dasm.PosLo, m.dasm.PosHi = msg.span.PosLo, msg.span.PosHi
 	m.sourceAsmRowCache = nil
-	m.disasmHeightCache = nil
-	m.disasmBuilt = true
-	m.disasmDecoding = false
-	m.disasmPendingAddr = 0
+	m.dasm.HeightCache = nil
+	m.dasm.Built = true
+	m.dasm.Decoding = false
+	m.dasm.PendingAddr = 0
 	// A prewarm decode (the user isn't in the disasm view yet) only stores the
 	// window — it must not switch the view or post a status. Positioning happens
 	// when the user actually opens disasm (switchMode sees disasmBuilt).
 	if m.mode != modeDisasm {
 		return m, nil
 	}
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		m.setStatus("no executable code to disassemble", true)
 		return m, nil
 	}
-	if !m.disasmPositioned && m.disasmInitAddr != 0 {
+	if !m.dasm.Positioned && m.disasmInitAddr != 0 {
 		m.loadDisasmAt(m.disasmInitAddr)
 	}
 	return m, nil
@@ -211,9 +211,9 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		m.searchCancel = nil
 		if msg.hit != nil {
 			m.setDisasmSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
-			m.disasmCur = msg.hit.idx
-			m.disasmTop = msg.hit.idx
-			m.disasmPositioned = true
+			m.dasm.Cur = msg.hit.idx
+			m.dasm.Top = msg.hit.idx
+			m.dasm.Positioned = true
 			m.setMode(modeDisasm)
 			m.searchCursorMode = searchCursorAtMatch
 			m.searchCursorAddr = msg.hit.addr

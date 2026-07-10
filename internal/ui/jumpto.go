@@ -80,8 +80,8 @@ func (m *Model) caretPos() (caret, bool) {
 			return m.caretFromAddr(a), true
 		}
 	case modeDisasm:
-		if len(m.disasmInst) > 0 && m.disasmCur >= 0 && m.disasmCur < len(m.disasmInst) {
-			return m.caretFromAddr(m.disasmInst[m.disasmCur].Addr), true
+		if len(m.dasm.Inst) > 0 && m.dasm.Cur >= 0 && m.dasm.Cur < len(m.dasm.Inst) {
+			return m.caretFromAddr(m.dasm.Inst[m.dasm.Cur].Addr), true
 		}
 	case modeHex:
 		if a, ok := m.byteViews.HexCaretAddr(); ok {

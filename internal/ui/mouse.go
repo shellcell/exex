@@ -418,11 +418,11 @@ func (m *Model) captureDisasmViewportTop() {
 		m.srcTop = top + 1
 		return
 	}
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return
 	}
 	visible := m.disasmViewportHeight()
-	m.disasmTop = layout.ViewportTop(m.renderedDisasmTop, len(m.disasmInst), visible, m.disasmRowHeight(m.disasmRenderWidth()))
+	m.dasm.Top = layout.ViewportTop(m.dasm.RenderedTop, len(m.dasm.Inst), visible, m.disasmRowHeight(m.disasmRenderWidth()))
 }
 
 func (m *Model) scrollDisasmViewport(delta int) {
@@ -439,39 +439,39 @@ func (m *Model) scrollDisasmViewport(delta int) {
 		m.srcTop = top + 1
 		return
 	}
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return
 	}
 	w := m.disasmRenderWidth()
 	visible := m.disasmViewportHeight()
 	rowHeight := m.disasmRowHeight(w)
-	next := scrollViewportTop(m.disasmTop, len(m.disasmInst), visible, delta, rowHeight)
-	if next == m.disasmTop && delta < 0 && m.disasmTop == 0 && m.disasmPosLo > 0 {
+	next := scrollViewportTop(m.dasm.Top, len(m.dasm.Inst), visible, delta, rowHeight)
+	if next == m.dasm.Top && delta < 0 && m.dasm.Top == 0 && m.dasm.PosLo > 0 {
 		if m.loadDisasmWindowAboveForScroll(delta, visible) {
 			return
 		}
 	}
-	m.disasmTop = next
+	m.dasm.Top = next
 }
 
 func (m *Model) loadDisasmWindowAboveForScroll(delta, visible int) bool {
-	if len(m.disasmInst) == 0 || m.disasmPosLo <= 0 {
+	if len(m.dasm.Inst) == 0 || m.dasm.PosLo <= 0 {
 		return false
 	}
 	img := m.file.ExecImage()
-	oldFirst := m.disasmInst[0].Addr
-	curAddr := m.disasmInst[m.disasmCur].Addr
-	if !m.loadDisasmWindow(img.AddrAt(m.disasmPosLo-1), m.disasmMaxBytes-m.disasmOverlapBytes()) {
+	oldFirst := m.dasm.Inst[0].Addr
+	curAddr := m.dasm.Inst[m.dasm.Cur].Addr
+	if !m.loadDisasmWindow(img.AddrAt(m.dasm.PosLo-1), m.disasmMaxBytes-m.disasmOverlapBytes()) {
 		return false
 	}
-	m.disasmCur = m.instIndexAtOrAfterAddr(curAddr)
-	top := m.disasmCur + delta
-	if idx, found := m.instIndexForAddr(oldFirst); found {
+	m.dasm.Cur = m.dasm.IndexAtOrAfter(curAddr)
+	top := m.dasm.Cur + delta
+	if idx, found := m.dasm.IndexForAddr(oldFirst); found {
 		top = idx + delta
 	}
 	w := m.disasmRenderWidth()
 	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, w) }
-	m.disasmTop = layout.ViewportTop(top, len(m.disasmInst), visible, rowHeight)
+	m.dasm.Top = layout.ViewportTop(top, len(m.dasm.Inst), visible, rowHeight)
 	return true
 }
 
@@ -515,10 +515,10 @@ func (m *Model) handleDoubleClick() {
 // followCurrentDisasm follows the first in-file address on the current disasm
 // line — the mouse equivalent of pressing Enter in the disasm view.
 func (m *Model) followCurrentDisasm() {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return
 	}
-	inst := m.disasmInst[m.disasmCur]
+	inst := m.dasm.Inst[m.dasm.Cur]
 	if target, ok := m.followableAddr(inst.Text); ok {
 		m.loadDisasmAt(target)
 	} else {
@@ -577,7 +577,7 @@ func (m *Model) handleClick(x, y int) bool {
 				m.syncSourceAsm()
 			}
 		} else if i, ok := m.instAtBodyRow(bodyRow); ok {
-			m.disasmCur = i
+			m.dasm.Cur = i
 		}
 	}
 	return false
@@ -616,6 +616,6 @@ func (m *Model) instAtBodyRow(bodyRow int) (int, bool) {
 	}
 	visible := max(1, m.bodyHeight()-1)
 	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
-	top := m.visualTopForView(m.disasmCur, m.disasmTop, len(m.disasmInst), visible, rowHeight)
-	return layout.VisualItemAtRow(top, len(m.disasmInst), r, rowHeight)
+	top := m.visualTopForView(m.dasm.Cur, m.dasm.Top, len(m.dasm.Inst), visible, rowHeight)
+	return layout.VisualItemAtRow(top, len(m.dasm.Inst), r, rowHeight)
 }

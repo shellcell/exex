@@ -10,7 +10,6 @@ import (
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
-	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
@@ -26,6 +25,7 @@ import (
 	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 	"github.com/rabarbra/exex/internal/ui/view"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 	infoview "github.com/rabarbra/exex/internal/ui/views/info"
 	"github.com/rabarbra/exex/internal/ui/views/libs"
@@ -94,7 +94,7 @@ type layoutState struct {
 // toggle. (Hex/raw and the disasm annotations themselves render live; the asm
 // colour cache is keyed by raw instruction text, which carries no symbol name.)
 func (m *Model) clearSymbolNameCaches() {
-	m.disasmHeightCache = nil
+	m.dasm.HeightCache = nil
 	m.relocs.DropCaches() // reloc bind targets render demangled/abbreviated names
 }
 
@@ -113,31 +113,23 @@ func (m *Model) clearColorCaches() {
 	m.viewStylesCache = nil
 	m.modalStylesCache = nil
 	m.clearAllViewCaches()
-	m.disasmAsmCache = nil
-	m.asmHL = nil
+	m.dasm.AsmCache = nil
+	m.dasm.AsmHL = nil
 	m.sourceAsmRowCache = nil
 	m.relocs.DropCaches()
 	m.info.DropCaches() // restyle the Info page on the next render
 }
 
-// disasmState holds the currently loaded decode window only. The first window
-// is loaded lazily on first open; later jumps replace it with a bounded span
-// around the requested address so large binaries never expand into a whole-image
-// instruction slice.
+// disasmState holds the shell's side of the disassembly view: the decode
+// engine and its budget/strategy settings, plus the source split pane. The
+// view's own state — the decoded window, cursor, history, render caches —
+// lives in views/disasm.State (the dasm field).
 type disasmState struct {
-	disasmInst          []disasm.Inst
-	disasmBuilt         bool
-	disasmDecoding      bool // background decode in flight
+	dasm                disasmview.State
 	disasmMaxBytes      int
 	disasmSearchWorkers int
-	disasmPendingAddr   uint64
 	disasmInitAddr      uint64
 	disasmTarget        string // configured landing/redirect strategy
-	disasmPositioned    bool
-	disasmCur           int
-	disasmTop           int
-	disasmPosLo         int
-	disasmPosHi         int
 	disasmSvc           *explorer.DisasmService
 	showSource          bool
 	sourceFirst         bool
@@ -145,26 +137,6 @@ type disasmState struct {
 	srcVP               viewport.Model
 	srcHighlighter      *syntax.Highlighter
 	sourceAsmRowCache   layout.RowMemo[sourceAsmRowCacheKey, string]
-	disasmAsmCache      layout.RowMemo[disasmAsmCacheKey, string]
-	// asmHL highlights instruction text. Which implementation it is depends on the
-	// build tag (Chroma or the lite scanner); the shell only holds the interface.
-	// Rebuilt, not mutated, when the theme changes.
-	asmHL asmhl.Highlighter
-	// disasmHeightCache memoizes per-instruction rendered height (it otherwise
-	// re-renders each instruction to count rows, which the scroll math calls
-	// dozens of times per wheel tick). Reset whenever disasmInst is replaced.
-	disasmHeightCache layout.RowMemo[disasmHeightKey, int]
-	// execSecStarts maps each executable section's start address to its name, so
-	// the disasm scroller's per-row section-separator check is an O(1) lookup
-	// instead of a scan over all sections. Built once (sections are immutable).
-	execSecStarts map[uint64]string
-}
-
-// disasmHeightKey identifies a cached instruction height for one layout.
-type disasmHeightKey struct {
-	i    int
-	w    int
-	wrap bool
 }
 
 // sourceAsmRowCacheKey identifies a cached source/assembly mapping row.
@@ -173,21 +145,6 @@ type sourceAsmRowCacheKey struct {
 	w    int
 	file string
 	line int
-}
-
-// disasmAsmCacheKey identifies one highlighted instruction/comment string.
-type disasmAsmCacheKey struct {
-	text string
-	addr uint64
-	cls  disasm.InstClass
-}
-
-// historyState stores disassembly navigation history.
-type historyState struct {
-	// Last `historyCap` disasm jump targets. historyPos indicates where in that
-	// ring we are; left arrow steps back, right arrow steps forward.
-	history    []uint64
-	historyPos int
 }
 
 // sourcePaneState stores the source-first disasm pane state. The Sources file
@@ -384,12 +341,11 @@ type Model struct {
 	// demangledNames caches the background ComputeDemangled result so the
 	// demangle setting can be toggled live without recomputing.
 	demangledNames []string
-	historyState
-	byteViews hexraw.State
-	libs      libs.State
-	relocs    relocs.State
-	strs      strs.State
-	sources   sources.State
+	byteViews      hexraw.State
+	libs           libs.State
+	relocs         relocs.State
+	strs           strs.State
+	sources        sources.State
 	sourcePaneState
 	interactionState
 	gotoState

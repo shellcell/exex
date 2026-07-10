@@ -73,12 +73,12 @@ func (m *Model) decodeDisasmAt(addr uint64, before int) explorer.Span {
 // can't defer. Returns false when there's no disassembler or no code. The
 // view-switch path uses the asynchronous decodeDisasmCmd instead.
 func (m *Model) ensureDisasm() bool {
-	if m.disasmBuilt {
-		return m.dis != nil && len(m.disasmInst) > 0
+	if m.dasm.Built {
+		return m.dis != nil && len(m.dasm.Inst) > 0
 	}
-	m.disasmBuilt = true
-	m.disasmDecoding = false
-	m.disasmPendingAddr = 0
+	m.dasm.Built = true
+	m.dasm.Decoding = false
+	m.dasm.PendingAddr = 0
 	if m.dis == nil {
 		return false
 	}
@@ -87,10 +87,10 @@ func (m *Model) ensureDisasm() bool {
 		target = explorer.DefaultExecAddr(m.file, m.disasmTarget)
 	}
 	span := m.decodeDisasmAt(target, m.disasmLeadBytes())
-	m.disasmInst = span.Insts
-	m.disasmPosLo, m.disasmPosHi = span.PosLo, span.PosHi
-	m.disasmHeightCache = nil
-	return len(m.disasmInst) > 0
+	m.dasm.Inst = span.Insts
+	m.dasm.PosLo, m.dasm.PosHi = span.PosLo, span.PosHi
+	m.dasm.HeightCache = nil
+	return len(m.dasm.Inst) > 0
 }
 
 // decodeDisasmCmd decodes a bounded executable span off the main goroutine and
@@ -108,46 +108,23 @@ func (m *Model) decodeDisasmCmd(addr uint64) tea.Cmd {
 // disasmLoadedAddr reports whether addr is inside the decoded window *and* lands
 // on an instruction there.
 func (m *Model) disasmLoadedAddr(addr uint64) bool {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		return false
 	}
 	pos, ok := m.file.ExecImage().PosForAddr(addr)
-	if !ok || pos < m.disasmPosLo || pos >= m.disasmPosHi {
+	if !ok || pos < m.dasm.PosLo || pos >= m.dasm.PosHi {
 		return false
 	}
-	_, ok = m.instIndexForAddr(addr)
+	_, ok = m.dasm.IndexForAddr(addr)
 	return ok
 }
 
-func (m *Model) disasmHasExactInst(addr uint64) bool {
-	return disasm.HasExact(m.disasmInst, addr)
-}
-
-// instIndexForAddr finds the instruction covering addr, or the nearest one below.
-func (m *Model) instIndexForAddr(addr uint64) (idx int, ok bool) {
-	return disasm.IndexForAddr(m.disasmInst, addr)
-}
-
-// instIndexAtOrAfterAddr returns the first instruction at or after addr.
-func (m *Model) instIndexAtOrAfterAddr(addr uint64) int {
-	return disasm.IndexAtOrAfter(m.disasmInst, addr)
-}
-
-// setDisasmSpan installs a freshly decoded span as the visible window.
+// setDisasmSpan installs a freshly decoded span as the visible window. The
+// source pane's row cache maps source lines to the decoded instructions, so it
+// falls with the window; the view's own caches are dropped by SetSpan.
 func (m *Model) setDisasmSpan(span explorer.Span) bool {
-	// Never clobber a good window with an empty decode (e.g. a step that ran off
-	// the end): keep what we have so the cursor stays valid.
-	if span.Empty() && len(m.disasmInst) > 0 {
-		return false
-	}
-	m.disasmInst = span.Insts
-	m.disasmPosLo, m.disasmPosHi = span.PosLo, span.PosHi
-	m.disasmBuilt = true
-	m.disasmDecoding = false
-	m.disasmPendingAddr = 0
 	m.sourceAsmRowCache = nil
-	m.disasmHeightCache = nil
-	return !span.Empty()
+	return m.dasm.SetSpan(span)
 }
 
 func (m *Model) loadDisasmWindow(addr uint64, before int) bool {

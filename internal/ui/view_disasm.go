@@ -83,36 +83,36 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.jumpDisasmBoundary(true)
 	case "enter":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		inst := m.disasmInst[m.disasmCur]
+		inst := m.dasm.Inst[m.dasm.Cur]
 		if target, ok := m.followableAddr(inst.Text); ok {
 			m.loadDisasmAt(target)
 		} else {
 			m.setStatus("no in-file address to follow", true)
 		}
 	case "h":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		m.jumpHexAtAddr(m.disasmInst[m.disasmCur].Addr)
+		m.jumpHexAtAddr(m.dasm.Inst[m.dasm.Cur].Addr)
 	case "m":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		m.jumpRawAtAddr(m.disasmInst[m.disasmCur].Addr)
+		m.jumpRawAtAddr(m.dasm.Inst[m.dasm.Cur].Addr)
 	case "A":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		addr := m.disasmInst[m.disasmCur].Addr
+		addr := m.dasm.Inst[m.dasm.Cur].Addr
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
 	case "S":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		addr := m.disasmInst[m.disasmCur].Addr
+		addr := m.dasm.Inst[m.dasm.Cur].Addr
 		if sym, ok := m.file.SymbolAt(addr); ok {
 			m.copyToClipboard(sym.Name, "symbol")
 		} else {
@@ -153,8 +153,8 @@ func (m *Model) toggleDisasmAll() {
 		return
 	}
 	var addr uint64
-	if len(m.disasmInst) > 0 && m.disasmCur >= 0 && m.disasmCur < len(m.disasmInst) {
-		addr = m.disasmInst[m.disasmCur].Addr
+	if len(m.dasm.Inst) > 0 && m.dasm.Cur >= 0 && m.dasm.Cur < len(m.dasm.Inst) {
+		addr = m.dasm.Inst[m.dasm.Cur].Addr
 	}
 	m.file.SetDisasmAll(on)
 	m.resetDisasmImageState()
@@ -172,14 +172,14 @@ func (m *Model) toggleDisasmAll() {
 func (m *Model) resetDisasmImageState() {
 	m.invalidateDisasmDerivedJobs()
 	m.disasmSvc = nil // rebuilt over the new ExecImage()
-	m.disasmInst = nil
-	m.disasmBuilt = false
-	m.disasmDecoding = false
-	m.disasmPosLo, m.disasmPosHi = 0, 0
-	m.disasmCur, m.disasmTop = 0, 0
-	m.disasmPositioned = false
-	m.execSecStarts = nil
-	m.disasmAsmCache = nil
+	m.dasm.Inst = nil
+	m.dasm.Built = false
+	m.dasm.Decoding = false
+	m.dasm.PosLo, m.dasm.PosHi = 0, 0
+	m.dasm.Cur, m.dasm.Top = 0, 0
+	m.dasm.Positioned = false
+	m.dasm.ExecSecStarts = nil
+	m.dasm.AsmCache = nil
 	m.clearDisasmDisplayCaches()
 }
 
@@ -206,11 +206,11 @@ func (m *Model) invalidateDisasmDerivedJobs() {
 // the clipboard as plain "addr: bytes  text" lines — the natural unit for bug
 // reports, diffs and pasting into an LLM. The range comes from the symbol extent.
 func (m *Model) copyFunctionDisasm() {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		m.setStatus("no disassembly loaded", true)
 		return
 	}
-	sym, ok := m.file.SymbolAt(m.disasmInst[m.disasmCur].Addr)
+	sym, ok := m.file.SymbolAt(m.dasm.Inst[m.dasm.Cur].Addr)
 	if !ok || sym.Size == 0 {
 		m.setStatus("cursor is not inside a sized function", true)
 		return

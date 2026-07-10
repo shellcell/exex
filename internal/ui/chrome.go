@@ -21,9 +21,15 @@ func (m *Model) View() tea.View {
 	if !m.viewDirty && m.viewCache != "" {
 		return m.screenView(m.viewCache)
 	}
-	parts := []string{m.renderTabs()}
-	body := m.theme.renderViewBackground(m.current().body(), m.width)
-	parts = append(parts, body, m.renderFooter())
+	// The panel background fills the whole frame, not just the body: the tab strip
+	// and the footer belong to the panel too. renderViewBackground re-applies the
+	// fill after every style reset, so a tab's own colours and the status badge
+	// still win over it, and it is a no-op when behavior.background is off.
+	parts := []string{
+		m.theme.renderViewBackground(m.renderTabs(), m.width),
+		m.theme.renderViewBackground(m.current().body(), m.width),
+		m.theme.renderViewBackground(m.renderFooter(), m.width),
+	}
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	if modal := m.renderActiveModal(); modal != "" {
 		out = m.overlayCenter(out, modal)

@@ -110,6 +110,20 @@ func goldenViews(t *testing.T) map[string]string {
 	return frames
 }
 
+// goldenBackground renders a view with behavior.background on. The panel fill
+// covers the whole frame — tab strip and footer included — and it used to stop
+// at the body, leaving those two rows on the terminal's own background.
+func goldenBackground(t *testing.T) map[string]string {
+	t.Helper()
+	m := goldenModel(t)
+	cfg := config.Config{Theme: defaultThemeName}
+	cfg.Behavior.Background = true
+	m.cfg = cfg
+	m.applyThemeChange()
+	enterMode(t, m, modeSections)
+	return map[string]string{"view_sections_background": frame(m)}
+}
+
 // goldenModals renders each overlay. The scan-backed modals (xref, syscalls,
 // cpu-features) are opened with injected results rather than by running their
 // background scans, so the frames stay deterministic and the test stays fast.
@@ -219,6 +233,9 @@ func allGoldenFrames(t *testing.T) map[string]string {
 	t.Helper()
 	frames := goldenViews(t)
 	for k, v := range goldenModals(t) {
+		frames[k] = v
+	}
+	for k, v := range goldenBackground(t) {
 		frames[k] = v
 	}
 	return frames

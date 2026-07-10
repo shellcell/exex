@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/disasm"
 	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
 )
 
@@ -138,7 +139,7 @@ func (m *Model) xrefScanCmd(target uint64, seq int, done <-chan struct{}) tea.Cm
 // address literal equal to target.
 func instReferences(text string, target uint64) bool {
 	for from := 0; ; {
-		addr, _, end, ok := extractTargetAt(text, from)
+		addr, _, end, ok := disasm.FindAddrOperand(text, from)
 		if !ok {
 			return false
 		}

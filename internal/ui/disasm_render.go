@@ -52,7 +52,7 @@ func (m *Model) disasmAddrSpans(text string, instAddr uint64) []asmhl.Span {
 	from := 0
 	var spans []asmhl.Span
 	for {
-		addr, start, end, ok := extractTargetAt(text, from)
+		addr, start, end, ok := disasm.FindAddrOperand(text, from)
 		if !ok {
 			return spans
 		}
@@ -82,7 +82,7 @@ func (m *Model) instAnnotation(text string, class disasm.InstClass) string {
 		notes = append(notes, note)
 	}
 	for {
-		addr, _, end, ok := extractTargetAt(text, from)
+		addr, _, end, ok := disasm.FindAddrOperand(text, from)
 		if !ok {
 			break
 		}
@@ -545,7 +545,7 @@ func (m *Model) currentIntraJumpTargets() map[uint64]lipgloss.Style {
 	}
 	from := 0
 	for {
-		addr, _, end, ok := extractTargetAt(cur.Text, from)
+		addr, _, end, ok := disasm.FindAddrOperand(cur.Text, from)
 		if !ok {
 			return out
 		}

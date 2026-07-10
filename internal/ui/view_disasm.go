@@ -7,11 +7,10 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
 )
 
@@ -225,52 +224,12 @@ func (m *Model) copyFunctionDisasm() {
 	m.copyBlob(text, fmt.Sprintf("copied %d instructions of %s", len(insts), sym.Display()))
 }
 
-// extractTargetAt finds the first 0x-prefixed hex number in text starting at
-// or after `from`. Returns the address, the byte range it occupied in text,
-// and whether anything was found. A "0x…" immediately preceded by "#" is an ARM
-// immediate (e.g. "[sp,#0x8]"), never a followable address, so it is skipped —
-// without this, hex immediates would be mis-coloured as links and annotated.
-func extractTargetAt(text string, from int) (addr uint64, start, end int, ok bool) {
-	search := from
-	var idx int
-	for {
-		rel := strings.Index(text[search:], "0x")
-		if rel < 0 {
-			return 0, 0, 0, false
-		}
-		idx = search + rel
-		if idx > 0 && text[idx-1] == '#' {
-			search = idx + 2 // ARM immediate, not an address — keep looking
-			continue
-		}
-		break
-	}
-	rest := text[idx+2:]
-	n := 0
-	for n < len(rest) {
-		c := rest[n]
-		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
-			n++
-			continue
-		}
-		break
-	}
-	if n == 0 {
-		return 0, 0, 0, false
-	}
-	v, err := strconv.ParseUint(rest[:n], 16, 64)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	return v, idx, idx + 2 + n, true
-}
-
 // followableAddr returns the first hex literal in text that maps to somewhere
 // inside this binary.
 func (m *Model) followableAddr(text string) (uint64, bool) {
 	from := 0
 	for {
-		addr, _, end, ok := extractTargetAt(text, from)
+		addr, _, end, ok := disasm.FindAddrOperand(text, from)
 		if !ok {
 			return 0, false
 		}

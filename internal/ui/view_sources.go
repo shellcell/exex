@@ -335,7 +335,9 @@ func (m *Model) openSrcMatch(i int) {
 // grepSources scans every source file for the query (capped).
 func (m *Model) grepSources(query string) []srcMatch {
 	const cap = 1000
-	return sourceutil.Grep(m.sources.Files, m.file.SourceLines, query, cap)
+	return sourceutil.GrepStream(m.sources.Files, func(file string, yield func(string) bool) {
+		m.file.ScanSourceLines(file, yield)
+	}, query, cap)
 }
 
 // ---- rendering ----

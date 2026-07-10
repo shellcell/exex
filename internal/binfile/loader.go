@@ -52,7 +52,6 @@ func Open(path string, opts ...Option) (*File, error) {
 		layoutOnly: o.layoutOnly,
 		raw:        raw,
 		unmap:      closer,
-		sources:    map[string][]string{},
 	}
 	if err := f.load(); err != nil {
 		f.Close()
@@ -67,9 +66,8 @@ func Open(path string, opts ...Option) (*File, error) {
 // alive for the lifetime of the returned File (its sections slice into it).
 func OpenBytes(name string, raw []byte) (*File, error) {
 	f := &File{
-		Path:    name,
-		raw:     raw,
-		sources: map[string][]string{},
+		Path: name,
+		raw:  raw,
 	}
 	if err := f.load(); err != nil {
 		return nil, err

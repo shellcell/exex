@@ -130,6 +130,22 @@ func TestHighlighterCachesByFilename(t *testing.T) {
 	}
 }
 
+func TestHighlighterEvictsLeastRecentlyUsed(t *testing.T) {
+	h := NewHighlighter("")
+	h.maxEntries = 2
+	h.budget = 1 << 20
+	h.Highlight("a.go", []string{"package a"})
+	h.Highlight("b.go", []string{"package b"})
+	h.Highlight("a.go", []string{"package changed"}) // refresh a.go
+	h.Highlight("c.go", []string{"package c"})
+	if h.cache["a.go"] == nil || h.cache["c.go"] == nil {
+		t.Fatal("recent highlights were evicted")
+	}
+	if h.cache["b.go"] != nil {
+		t.Fatal("least recently used highlight remained cached")
+	}
+}
+
 // TestChromaDefaultTokenUsesThemeForeground covers the converter shared by the
 // source pane and the disassembly pane (internal/ui/disasm_syntax.go).
 func TestChromaDefaultTokenUsesThemeForeground(t *testing.T) {

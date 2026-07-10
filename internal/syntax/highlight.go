@@ -5,9 +5,14 @@
 // dropping Chroma while keeping basic source colours.
 package syntax
 
-import "sync"
+import (
+	"sync"
 
-const defaultTheme = "nord"
+	"github.com/rabarbra/exex/internal/theme"
+)
+
+// defaultTheme is the style used when the caller names none.
+const defaultTheme = theme.DefaultName
 
 // Highlighter tokenises source files once and caches their per-line ANSI output.
 type Highlighter struct {

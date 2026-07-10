@@ -24,11 +24,5 @@ func sourceSyntaxTheme(cfg config.Config) string {
 }
 
 func sourceSyntaxForeground(cfg config.Config) string {
-	if p, ok := theme.PaletteFor(sourceSyntaxTheme(cfg)); ok {
-		return p.Foreground
-	}
-	if p, ok := theme.PaletteFor(defaultThemeName); ok {
-		return p.Foreground
-	}
-	return ""
+	return theme.ForegroundFor(sourceSyntaxTheme(cfg))
 }

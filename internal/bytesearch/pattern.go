@@ -34,47 +34,68 @@ func NextMode(m Mode) Mode {
 	return (m + 1) % 3
 }
 
+// kind is how a query is to be interpreted, decided once by classify.
+type kind uint8
+
+const (
+	kindQuoted kind = iota // "quoted text" -> the bytes between the quotes
+	kindText               // literal text bytes of the raw query
+	kindHex                // hex byte pattern
+)
+
+// classify decides how q is read under mode. ParsePattern and IsTextPattern both
+// consult it, so the two can't disagree about what a query means — they used to
+// duplicate this rule set, and a change to one silently skipped the other.
+//
+// It returns the trimmed query and its compacted hex form so callers don't
+// recompute them.
+func classify(q string, mode Mode) (k kind, trimmed, compact string) {
+	trimmed = strings.TrimSpace(q)
+	quoted := len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"'
+
+	switch mode {
+	case ModeText:
+		if quoted {
+			return kindQuoted, trimmed, ""
+		}
+		return kindText, trimmed, ""
+	case ModeHex:
+		return kindHex, trimmed, compactHexPattern(trimmed)
+	}
+
+	// ModeAuto: quotes force text; otherwise an untrimmed-clean, even-length run
+	// of hex digits is a byte pattern. Requiring q == trimmed means a query with
+	// surrounding spaces stays a text search (the spaces are searchable).
+	if quoted {
+		return kindQuoted, trimmed, ""
+	}
+	compact = compactHexPattern(trimmed)
+	if q == trimmed && len(compact) >= 2 && len(compact)%2 == 0 && isHexStr(compact) {
+		return kindHex, trimmed, compact
+	}
+	return kindText, trimmed, compact
+}
+
 // ParsePattern interprets a query as bytes or text:
 //   - "quoted text"   -> literal bytes of the text
 //   - hex digits / 0x -> byte pattern (spaces allowed: "de ad be ef")
 //   - anything else   -> literal text bytes
 func ParsePattern(q string, mode Mode) []byte {
-	trimmed := strings.TrimSpace(q)
-	if mode == ModeText {
-		if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
-			return []byte(trimmed[1 : len(trimmed)-1])
-		}
+	switch k, trimmed, compact := classify(q, mode); k {
+	case kindQuoted:
+		return []byte(trimmed[1 : len(trimmed)-1])
+	case kindHex:
+		return parseHexPattern(compact)
+	default:
 		return []byte(q)
 	}
-	if mode == ModeHex {
-		compact := compactHexPattern(trimmed)
-		return parseHexPattern(compact)
-	}
-	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
-		return []byte(trimmed[1 : len(trimmed)-1])
-	}
-	compact := compactHexPattern(trimmed)
-	if q == trimmed && len(compact) >= 2 && len(compact)%2 == 0 && isHexStr(compact) {
-		return parseHexPattern(compact)
-	}
-	return []byte(q)
 }
 
 // IsTextPattern reports whether ParsePattern would treat q as literal text (so
 // case-folding is meaningful) rather than a hex byte pattern (where it isn't).
 func IsTextPattern(q string, mode Mode) bool {
-	trimmed := strings.TrimSpace(q)
-	if mode == ModeText {
-		return true
-	}
-	if mode == ModeHex {
-		return false
-	}
-	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
-		return true // quoted is always text
-	}
-	compact := compactHexPattern(trimmed)
-	return !(q == trimmed && len(compact) >= 2 && len(compact)%2 == 0 && isHexStr(compact))
+	k, _, _ := classify(q, mode)
+	return k != kindHex
 }
 
 // compactHexPattern removes whitespace and an optional 0x/0X prefix.

@@ -56,7 +56,8 @@ const (
 	nord15 = "#b48ead" // purple
 )
 
-const defaultThemeName = "nord"
+// defaultThemeName is the theme applied when the config names none.
+const defaultThemeName = theme.DefaultName
 
 func effectiveThemeName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))

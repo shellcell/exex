@@ -5,19 +5,11 @@ package ui
 import (
 	"testing"
 
-	"charm.land/lipgloss/v2"
-	"github.com/alecthomas/chroma/v2"
-
 	"github.com/rabarbra/exex/internal/disasm"
 )
 
-func TestDisasmChromaDefaultTokenUsesSyntaxForeground(t *testing.T) {
-	got := chromaStyleEntryToLipgloss(chroma.StyleEntry{}, "#586e75").Render("x")
-	want := lipgloss.NewStyle().Foreground(lipgloss.Color("#586e75")).Render("x")
-	if got != want {
-		t.Fatalf("default disasm token style = %q, want %q", got, want)
-	}
-}
+// The disasm pane's token→style conversion is syntax.StyleEntryToLipgloss, which
+// internal/syntax covers directly (TestChromaDefaultTokenUsesThemeForeground).
 
 func TestDisasmChromaAsmLexerForArch(t *testing.T) {
 	tests := []struct {

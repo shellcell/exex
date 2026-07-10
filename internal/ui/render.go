@@ -55,24 +55,10 @@ func bytesHexSpaced(b []byte, maxN int) string {
 	return sb.String()
 }
 
-// placeCentred renders msg as a dim, centred block within w_view × h, wrapping the
-// text to the window width (capped for readability) so it stays inside narrow or
-// short terminals instead of overflowing.
-func (m *Model) placeCentred(msg string, h int) string {
-	return m.viewContext().PlaceCentred(msg, h)
-}
-
 // emptyBody centres a dim message in the whole body area, for a view that has no
 // entries at all (no filter/header rows to keep).
 func (m *Model) emptyBody(msg string) string {
 	return m.viewContext().EmptyBody(msg)
-}
-
-// emptyList renders a list view's empty state: the leading rows (filter / column
-// header) are kept and a dim message is centred in the body below them, so an
-// empty (or fully-filtered) table reads clearly instead of as a blank area.
-func (m *Model) emptyList(msg string, leading ...string) string {
-	return m.viewContext().EmptyList(msg, leading...)
 }
 
 // wrapStatus returns the footer label for the current wrap setting.

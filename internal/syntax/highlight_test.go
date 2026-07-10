@@ -130,11 +130,25 @@ func TestHighlighterCachesByFilename(t *testing.T) {
 	}
 }
 
+// TestChromaDefaultTokenUsesThemeForeground covers the converter shared by the
+// source pane and the disassembly pane (internal/ui/disasm_syntax.go).
 func TestChromaDefaultTokenUsesThemeForeground(t *testing.T) {
-	got := chromaToLipgloss(chroma.StyleEntry{}, "#586e75").Render("x")
+	got := StyleEntryToLipgloss(chroma.StyleEntry{}, "#586e75").Render("x")
 	want := lipgloss.NewStyle().Foreground(lipgloss.Color("#586e75")).Render("x")
 	if got != want {
 		t.Fatalf("default token style = %q, want %q", got, want)
+	}
+}
+
+func TestChromaStyledTokenAttributes(t *testing.T) {
+	e := chroma.StyleEntry{Bold: chroma.Yes, Italic: chroma.Yes, Underline: chroma.Yes}
+	got := StyleEntryToLipgloss(e, "#586e75").Render("x")
+	want := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#586e75")).
+		Bold(true).Italic(true).Underline(true).
+		Render("x")
+	if got != want {
+		t.Fatalf("styled token = %q, want %q", got, want)
 	}
 }
 

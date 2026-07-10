@@ -34,7 +34,7 @@ func HighlightLines(filename string, src []string, themeName string) []string {
 		return minimalHighlight(filename, src, themeName)
 	}
 	lexer = chroma.Coalesce(lexer)
-	fallbackFG := chromaFallbackForeground(themeName)
+	fallbackFG := theme.ForegroundFor(themeName)
 
 	if lines, ok := chromaHighlight(lexer, joined, st, fallbackFG, len(src)); ok {
 		return lines
@@ -67,7 +67,7 @@ func chromaHighlight(lexer chroma.Lexer, joined string, st *chroma.Style, fallba
 	for _, tok := range it.Tokens() {
 		ls, ok := styleFor[tok.Type]
 		if !ok {
-			ls = chromaToLipgloss(st.Get(tok.Type), fallbackFG)
+			ls = StyleEntryToLipgloss(st.Get(tok.Type), fallbackFG)
 			styleFor[tok.Type] = ls
 		}
 		// Most tokens have no newline: render straight into the current line
@@ -109,32 +109,3 @@ func lexerFor(filename, src string) chroma.Lexer {
 	return chromalexers.Analyse(src)
 }
 
-// chromaToLipgloss converts the subset of Chroma style attributes used here.
-func chromaToLipgloss(e chroma.StyleEntry, fallbackFG string) lipgloss.Style {
-	s := lipgloss.NewStyle()
-	if e.Colour.IsSet() {
-		s = s.Foreground(lipgloss.Color(e.Colour.String()))
-	} else if fallbackFG != "" {
-		s = s.Foreground(lipgloss.Color(fallbackFG))
-	}
-	if e.Bold == chroma.Yes {
-		s = s.Bold(true)
-	}
-	if e.Italic == chroma.Yes {
-		s = s.Italic(true)
-	}
-	if e.Underline == chroma.Yes {
-		s = s.Underline(true)
-	}
-	return s
-}
-
-func chromaFallbackForeground(name string) string {
-	if p, ok := theme.PaletteFor(strings.TrimSpace(name)); ok {
-		return p.Foreground
-	}
-	if p, ok := theme.PaletteFor(defaultTheme); ok {
-		return p.Foreground
-	}
-	return ""
-}

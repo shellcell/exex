@@ -16,6 +16,7 @@ import (
 	"github.com/rabarbra/exex/internal/chromalexers"
 	"github.com/rabarbra/exex/internal/chromastyles"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/syntax"
 )
 
 // disasmAsmLexers caches the Chroma asm lexer per architecture. Keying by arch
@@ -145,26 +146,7 @@ func (m *Model) disasmTokenStyle(tt chroma.TokenType) lipgloss.Style {
 	if !ok || chromaStyle == nil {
 		chromaStyle = chromastyles.Fallback()
 	}
-	st := chromaStyleEntryToLipgloss(chromaStyle.Get(tt), sourceSyntaxForeground(m.cfg))
+	st := syntax.StyleEntryToLipgloss(chromaStyle.Get(tt), sourceSyntaxForeground(m.cfg))
 	m.disasmTokenStyles[int(tt)] = st
-	return st
-}
-
-func chromaStyleEntryToLipgloss(e chroma.StyleEntry, fallbackFG string) lipgloss.Style {
-	st := lipgloss.NewStyle()
-	if e.Colour.IsSet() {
-		st = st.Foreground(lipgloss.Color(e.Colour.String()))
-	} else if fallbackFG != "" {
-		st = st.Foreground(lipgloss.Color(fallbackFG))
-	}
-	if e.Bold == chroma.Yes {
-		st = st.Bold(true)
-	}
-	if e.Italic == chroma.Yes {
-		st = st.Italic(true)
-	}
-	if e.Underline == chroma.Yes {
-		st = st.Underline(true)
-	}
 	return st
 }

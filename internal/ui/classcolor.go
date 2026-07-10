@@ -141,32 +141,3 @@ func sectionColorCategory(s *binfile.Section) binfile.SectionCategory {
 	return s.Category
 }
 
-// kindString / bindString render neutral symbol kinds and bindings for the
-// symbol table's Type and Bind columns.
-func kindString(k binfile.SymKind) string {
-	switch k {
-	case binfile.SymFunc:
-		return "FUNC"
-	case binfile.SymObject:
-		return "OBJECT"
-	case binfile.SymSection:
-		return "SECTION"
-	case binfile.SymFile:
-		return "FILE"
-	case binfile.SymTLS:
-		return "TLS"
-	case binfile.SymCommon:
-		return "COMMON"
-	}
-	return "NOTYPE"
-}
-
-func bindString(b binfile.SymBind) string {
-	switch b {
-	case binfile.BindGlobal:
-		return "GLOBAL"
-	case binfile.BindWeak:
-		return "WEAK"
-	}
-	return "LOCAL"
-}

@@ -73,6 +73,10 @@ type Styles struct {
 	PtrStyle    lipgloss.Style // mapped pointer words in hex/raw
 	LinkStyle   lipgloss.Style // active/followable pointer words (inter-function in disasm)
 	LinkIntra   lipgloss.Style // followable addresses inside the current function
+	PlainStyle  lipgloss.Style // plain (mapped) text — the source gutter's mapped lines
+	SrcCurLine  lipgloss.Style // the current (caret) source line's gutter
+	SrcMapped   lipgloss.Style // source-mapped elements without a per-column colour
+	PaneBorder  lipgloss.Style // thin left divider between side-by-side panes
 
 	// DisasmSelSeq is the raw SGR prefix the disasm view re-arms after every
 	// reset inside a selected row, so the selection bar survives the embedded
@@ -119,6 +123,16 @@ type Styles struct {
 	// StickyTitle renders the pinned title row above a scroller (the disasm
 	// view's "symbol @ addr" line), theme-styled and padded to w.
 	StickyTitle func(text string, w int) string
+	// ViewTitle renders a pane's title row (the source pane's "file:line").
+	ViewTitle func(s string, w int) string
+	// ColumnStyleAt is the highlight style for the i-th distinct column on a
+	// source line: the column, its caret, and the instructions mapped to it all
+	// share columnPalette[i], so the correlation reads across both panes.
+	ColumnStyleAt func(i int) lipgloss.Style
+	// HighlightSource returns file's source highlighted line-by-line, or nil
+	// when no lexer matches (the caller then renders the plain text). Cached by
+	// the shell's highlighter.
+	HighlightSource func(file string, src []string) []string
 	// NewAsmHighlighter builds the assembly highlighter for the current theme
 	// and architecture. The disasm view caches the result (the shell drops that
 	// cache on a theme change), so this runs once per theme, not per frame.

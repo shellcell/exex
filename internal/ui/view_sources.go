@@ -8,15 +8,12 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/dump"
 	sourceutil "github.com/rabarbra/exex/internal/sourcefiles"
 	"github.com/rabarbra/exex/internal/ui/layout"
-	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
 )
 
 // srcMatch is one hit from a cross-source grep.
@@ -25,23 +22,13 @@ type srcMatch = sourceutil.Match
 // columnStyleAt returns the highlight style for the i-th distinct column on a
 // source line. The Nth column, its caret, and the instruction addresses mapped
 // to it all share columnPalette[N] (drawn from the theme), so carets and
-// disassembly line up visually and follow the active colour preset.
+// disassembly line up visually and follow the active colour preset. The view
+// consumes it through the ColumnStyleAt closure on view.Styles.
 func (t *Theme) columnStyleAt(i int) lipgloss.Style {
 	if len(t.columnPalette) == 0 {
 		return lipgloss.NewStyle()
 	}
 	return t.columnPalette[i%len(t.columnPalette)]
-}
-
-// columnStyle returns the style assigned to column value col among the line's
-// sorted distinct columns.
-func (t *Theme) columnStyle(cols []int, col int) (lipgloss.Style, bool) {
-	for i, c := range cols {
-		if c == col {
-			return t.columnStyleAt(i), true
-		}
-	}
-	return lipgloss.Style{}, false
 }
 
 func (m *Model) ensureSourceBelowDisasmCursor() bool {
@@ -324,281 +311,30 @@ func (t Theme) leftBorderPane(content string) string {
 	return t.paneBorderStyle.Render(content)
 }
 
-// gutterWidth is the visible width of the source line-number gutter
-// ("12345 ▸ ").
-const gutterWidth = 8
-
+// renderSourceText renders the leading source pane and records its page step
+// for the shell's pgup/pgdn keys. The rendering lives on the view state.
 func (m *Model) renderSourceText(w, h int) string {
-	src := m.file.SourceLines(m.dasm.SrcFile)
-	if len(src) == 0 {
-		return layout.PadBody("(source file not found on disk)\n", w, h)
-	}
-	hl := m.highlightedSource(m.dasm.SrcFile, src)
-
-	contentH := h - 1
-	if contentH < 1 {
-		contentH = 1
-	}
-	top := max(0, m.dasm.SrcTop-1)
-	top = m.visualTopForView(m.dasm.SrcCur-1, top, len(src), contentH, m.sourceRowHeight(w))
-	m.dasm.SrcTop = top + 1
-	m.dasm.RenderedSrcTop = top
-	m.pageRows = layout.PageStep(top, len(src), contentH, m.sourceRowHeight(w))
-
-	var b strings.Builder
-	suffix := fmt.Sprintf(":%d", m.dasm.SrcCur)
-	b.WriteString(m.theme.viewTitleLine(layout.TruncateMiddle(m.dasm.SrcFile, max(1, w-lipgloss.Width(suffix)))+suffix, w))
-	b.WriteString("\n")
-
-	rows := 0
-	for ln := top + 1; ln <= len(src) && rows < contentH; ln++ {
-		// The code is always shown syntax-highlighted; only the gutter colour
-		// reflects the mapping (shared srcGutter policy, used by both panes).
-		content := src[ln-1]
-		if hl != nil && ln-1 < len(hl) {
-			content = hl[ln-1]
-		}
-
-		prefix := m.srcGutter(ln, m.dasm.SrcCur, m.dasm.SrcCodeLines, 5)
-		avail := w - lipgloss.Width(prefix)
-		line := prefix + layout.FitANSIWidth(content, avail)
-		if m.wrap {
-			line = prefix + content
-		}
-		for _, row := range layout.RenderLineRowsIndented(line, w, m.wrap, gutterWidth) {
-			if rows >= contentH {
-				break
-			}
-			b.WriteString(row)
-			b.WriteString("\n")
-			rows++
-		}
-
-		// Beneath the cursor line, point carets at the exact columns code maps
-		// to (a source line can map at several positions).
-		if ln == m.dasm.SrcCur && rows < contentH {
-			if caret := m.theme.coloredCaretRow(m.dasm.SourceLineColumns(m.viewContextPtr(), m.dasm.SrcFile, ln), gutterWidth, w); caret != "" {
-				b.WriteString(caret)
-				b.WriteString("\n")
-				rows++
-			}
-		}
-	}
-	return layout.PadBody(b.String(), w, h)
+	out := m.dasm.RenderSourceText(m.viewContextPtr(), w, h)
+	m.pageRows = m.dasm.SrcPageRows
+	return out
 }
 
-// sourceRowHeight returns the per-line rendered-height function for the source
-// pane at width w (the cursor line is one taller when it carries a caret row).
-// Shared by every place that runs the source-pane scroll math.
-func (m *Model) sourceRowHeight(w int) func(int) int {
-	return func(i int) int {
-		ln := i + 1
-		h := m.sourceLineHeight(ln, w)
-		if ln == m.dasm.SrcCur && len(m.dasm.SourceLineColumns(m.viewContextPtr(), m.dasm.SrcFile, ln)) > 0 {
-			h++
-		}
-		return h
-	}
-}
-
-func (m *Model) sourceTextTop(w, contentH int) int {
-	src := m.file.SourceLines(m.dasm.SrcFile)
-	return m.visualTopForView(m.dasm.SrcCur-1, max(0, m.dasm.SrcTop-1), len(src), contentH, m.sourceRowHeight(w))
-}
-
-func (m *Model) sourceLineHeight(line, w int) int {
-	if !m.wrap {
-		return 1
-	}
-	src := m.file.SourceLines(m.dasm.SrcFile)
-	if line < 1 || line > len(src) {
-		return 1
-	}
-	key := disasmview.SourceLineHeightKey{File: m.dasm.SrcFile, Line: line, W: w}
-	if h, ok := m.dasm.SrcLineHeightCache[key]; ok {
-		return h
-	}
-	plainPrefix := fmt.Sprintf("%5d   ", line)
-	h := len(layout.RenderLineRowsIndented(plainPrefix+src[line-1], w, true, gutterWidth))
-	if m.dasm.SrcLineHeightCache == nil {
-		m.dasm.SrcLineHeightCache = make(map[disasmview.SourceLineHeightKey]int)
-	}
-	m.dasm.SrcLineHeightCache[key] = h
-	return h
-}
-
-// coloredCaretRow renders a '^' under each mapped column, each in that column's
-// assigned colour (so it matches the highlighted instructions in the asm pane).
-func (t *Theme) coloredCaretRow(cols []int, gutterW, w int) string {
-	if len(cols) == 0 {
-		return ""
-	}
-	maxc := cols[len(cols)-1]
-	cells := make([]string, maxc)
-	for i := range cells {
-		cells[i] = " "
-	}
-	for i, c := range cols {
-		if c >= 1 && c <= maxc {
-			cells[c-1] = t.columnStyleAt(i).Bold(true).Render("^")
-		}
-	}
-	row := strings.Repeat(" ", gutterW) + strings.Join(cells, "")
-	return layout.FitANSIWidth(row, w)
-}
-
-// renderSourceAsm renders the disassembly beside the source. Instructions that
-// map to the current source line are highlighted in their column's colour (so
-// they correlate with the carets under the line); a line can map to several,
-// non-contiguous instructions and they're all shown.
+// renderSourceAsm ensures a decode happened (the follower pane may be the
+// first thing to need one), then delegates to the view.
 func (m *Model) renderSourceAsm(w, h int) string {
 	if m.dis == nil {
 		return layout.PadBody("no disassembler for this architecture\n", w, h)
 	}
-	if !m.ensureDisasm() || len(m.dasm.Inst) == 0 {
+	if !m.ensureDisasm() {
 		return layout.PadBody("no executable code\n", w, h)
 	}
-
-	anchor := m.sourceAsmAnchorIndex()
-	cols := m.dasm.SourceLineColumns(m.viewContextPtr(), m.dasm.SrcFile, m.dasm.SrcCur)
-	head := m.sourceAsmHeader(anchor, cols, w)
-
-	contentH := h - 1
-	if contentH < 1 {
-		contentH = 1
-	}
-	top := clampScroll(anchor-4+m.dasm.RightScroll, len(m.dasm.Inst), contentH)
-	end := top + contentH
-	if end > len(m.dasm.Inst) {
-		end = len(m.dasm.Inst)
-	}
-
-	var b strings.Builder
-	b.WriteString(head)
-	b.WriteString("\n")
-	addrW := m.file.AddrHexWidth()
-	for i := top; i < end; i++ {
-		b.WriteString(m.sourceAsmRow(i, addrW, w))
-		b.WriteString("\n")
-	}
-	return layout.PadBody(b.String(), w, h)
+	return m.dasm.RenderSourceAsm(m.viewContextPtr(), w, h)
 }
 
-func (m *Model) sourceAsmHeader(anchor int, cols []int, w int) string {
-	const minSymbolHeaderWidth = 12
-	sep := "  ·  "
-	sepW := lipgloss.Width(sep)
-	linePlain := fmt.Sprintf("line %d", m.dasm.SrcCur)
-	colsPlain := ""
-	if len(cols) > 0 {
-		colsPlain = "cols " + intsString(cols)
-	}
-	origColsPlain := colsPlain
-	name := ""
-	if anchor >= 0 && anchor < len(m.dasm.Inst) {
-		addr := m.dasm.Inst[anchor].Addr
-		if sym, ok := m.file.SymbolAt(addr); ok {
-			name = m.displaySymbolName(sym)
-			if off := addr - sym.Addr; off > 0 {
-				name = fmt.Sprintf("%s+0x%x", name, off)
-			}
-		}
-	}
-
-	lineW := lipgloss.Width(linePlain)
-	if name != "" && colsPlain != "" {
-		colsBudget := w - lineW - sepW - sepW - minSymbolHeaderWidth
-		colsPlain = layout.TruncateMiddle(colsPlain, max(1, colsBudget))
-	}
-	fixedW := lineW
-	if colsPlain != "" {
-		fixedW += sepW + lipgloss.Width(colsPlain)
-	}
-
-	var parts []string
-	if name != "" {
-		name = layout.TruncateMiddle(name, max(1, w-fixedW-sepW))
-		parts = append(parts, m.theme.symbolNameStyle.Render(name))
-	}
-	parts = append(parts, linePlain)
-	if colsPlain != "" {
-		if colsPlain == origColsPlain {
-			parts = append(parts, "cols "+m.theme.coloredCols(cols))
-		} else {
-			parts = append(parts, colsPlain)
-		}
-	}
-	return m.theme.viewTitleLine(strings.Join(parts, sep), w)
+func (m *Model) sourceRowHeight(w int) func(int) int {
+	return m.dasm.SourceRowHeight(m.viewContextPtr(), w)
 }
 
-func intsString(v []int) string {
-	parts := make([]string, len(v))
-	for i, n := range v {
-		parts[i] = fmt.Sprintf("%d", n)
-	}
-	return strings.Join(parts, " ")
-}
-
-func (m *Model) sourceAsmAnchorIndex() int {
-	if len(m.dasm.Inst) == 0 {
-		return 0
-	}
-	if addr, ok := m.file.LineToAddr(m.dasm.SrcFile, m.dasm.SrcCur); ok {
-		idx := m.dasm.IndexAtOrAfter(addr)
-		if idx >= 0 && idx < len(m.dasm.Inst) {
-			return idx
-		}
-	}
-	if m.dasm.Cur < 0 {
-		return 0
-	}
-	if m.dasm.Cur >= len(m.dasm.Inst) {
-		return len(m.dasm.Inst) - 1
-	}
-	return m.dasm.Cur
-}
-
-func (m *Model) sourceAsmRow(i, addrW, w int) string {
-	return m.dasm.SourceAsmRowCache.Get(disasmview.SourceAsmRowKey{I: i, W: w, File: m.dasm.SrcFile, Line: m.dasm.SrcCur}, func() string {
-		inst := m.dasm.Inst[i]
-		// Colour only the address by mapping (shared addrMapStyle policy); the
-		// instruction text keeps its normal class colours so the pane reads like
-		// real disassembly.
-		addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
-		addr := m.addrMapStyle(inst.Addr, m.dasm.SrcFile, m.dasm.SrcCur).Render(addrText)
-		ctx := m.viewContextPtr()
-		asm := m.dasm.RenderInstText(ctx, dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
-		var line string
-		if m.disasmColumns().ByteColW > 0 {
-			line = fmt.Sprintf(" %s  %s  %s", addr, disasmview.InstBytes(ctx, inst.Bytes), asm)
-		} else {
-			line = fmt.Sprintf(" %s  %s", addr, asm)
-		}
-		return layout.FitANSIWidth(line, w)
-	})
-}
-
-// clampScroll keeps a viewport top within [0, n-h] so an independent-scroll
-// offset can't run the follower pane off either end.
-func clampScroll(top, n, h int) int {
-	maxTop := n - h
-	if maxTop < 0 {
-		maxTop = 0
-	}
-	if top > maxTop {
-		top = maxTop
-	}
-	if top < 0 {
-		top = 0
-	}
-	return top
-}
-
-// coloredCols renders the line's column numbers, each in its assigned colour.
-func (t *Theme) coloredCols(cols []int) string {
-	parts := make([]string, len(cols))
-	for i, c := range cols {
-		parts[i] = t.columnStyleAt(i).Render(fmt.Sprintf("%d", c))
-	}
-	return strings.Join(parts, " ")
+func (m *Model) sourceTextTop(w, contentH int) int {
+	return m.dasm.SourceTextTop(m.viewContextPtr(), w, contentH)
 }

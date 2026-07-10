@@ -68,6 +68,10 @@ func (m *Model) viewStyles() *view.Styles {
 		PtrStyle:    m.theme.hexPointerStyle,
 		LinkStyle:   m.theme.linkAddrInterStyle,
 		LinkIntra:   m.theme.linkAddrIntraStyle,
+		PlainStyle:  m.theme.whiteStyle,
+		SrcCurLine:  m.theme.srcCurLineStyle,
+		SrcMapped:   m.theme.srcMappedStyle,
+		PaneBorder:  m.theme.paneBorderStyle,
 
 		DisasmSelSeq: m.theme.disasmSelSeq,
 
@@ -96,6 +100,9 @@ func (m *Model) viewStyles() *view.Styles {
 		AddrForOffset:    func(off uint64) (uint64, bool) { return m.addrForOffset(off) },
 		CanDisasmAt:      func(addr uint64) bool { return m.canDisasmAt(addr) },
 		StickyTitle:      func(text string, w int) string { return m.theme.stickyTitleLine(text, w) },
+		ViewTitle:        func(s string, w int) string { return m.theme.viewTitleLine(s, w) },
+		ColumnStyleAt:    func(i int) lipgloss.Style { return m.theme.columnStyleAt(i) },
+		HighlightSource:  func(file string, src []string) []string { return m.highlightedSource(file, src) },
 		NewAsmHighlighter: func() asmhl.Highlighter {
 			return asmhl.New(sourceSyntaxTheme(m.cfg), sourceSyntaxForeground(m.cfg), m.file.Arch(), asmhl.Styles{
 				Class:    m.theme.styleForClass,

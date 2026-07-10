@@ -26,6 +26,9 @@ type SourceState struct {
 	// RightScroll is the follower (right) pane's extra scroll offset;
 	// 0 = auto-follow the leading cursor.
 	RightScroll int
+	// SrcPageRows is the page step recorded at the last source-text render, so
+	// the shell's pgup/pgdn advance one screen of (possibly wrapped) lines.
+	SrcPageRows int
 
 	// SrcCodeLines are SrcFile's lines that have machine code mapped to them
 	// (the gutter/shadow policy reads it per visible line).

@@ -4,13 +4,13 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
-	"charm.land/lipgloss/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
+	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/modal"
 	cpufeatmodal "github.com/rabarbra/exex/internal/ui/modals/cpufeat"
@@ -114,8 +114,7 @@ func (m *Model) clearColorCaches() {
 	m.modalStylesCache = nil
 	m.clearAllViewCaches()
 	m.disasmAsmCache = nil
-	m.disasmTokenStyles = nil
-	m.disasmStyledMode = 0
+	m.asmHL = nil
 	m.sourceAsmRowCache = nil
 	m.relocs.DropCaches()
 	m.info.DropCaches() // restyle the Info page on the next render
@@ -147,13 +146,10 @@ type disasmState struct {
 	srcHighlighter      *syntax.Highlighter
 	sourceAsmRowCache   layout.RowMemo[sourceAsmRowCacheKey, string]
 	disasmAsmCache      layout.RowMemo[disasmAsmCacheKey, string]
-	// disasmTokenStyles caches Chroma token-type → style (default build only); it
-	// is keyed by int(chroma.TokenType) so the model stays chroma-free for `lite`.
-	disasmTokenStyles map[int]lipgloss.Style
-	// disasmStyledMode caches whether the current theme has a bundled Chroma
-	// style (default build only): 0 = unknown, 1 = yes, -1 = no. It keeps the
-	// per-instruction render from re-resolving the theme name on every row.
-	disasmStyledMode int8
+	// asmHL highlights instruction text. Which implementation it is depends on the
+	// build tag (Chroma or the lite scanner); the shell only holds the interface.
+	// Rebuilt, not mutated, when the theme changes.
+	asmHL asmhl.Highlighter
 	// disasmHeightCache memoizes per-instruction rendered height (it otherwise
 	// re-renders each instruction to count rows, which the scroll math calls
 	// dozens of times per wheel tick). Reset whenever disasmInst is replaced.

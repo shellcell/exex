@@ -14,33 +14,43 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/ui/asmhl"
 	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // renderInstText colours an instruction's assembly text, caching the result.
 func (m *Model) renderInstText(text string, class disasm.InstClass, instAddr uint64) string {
 	return m.disasmAsmCache.Get(disasmAsmCacheKey{text: text, addr: instAddr, cls: class}, func() string {
-		return m.renderInstTextStyled(text, class, instAddr)
+		return m.asmHighlighter().Render(text, class, m.disasmAddrSpans(text, instAddr))
 	})
 }
 
-// disasmAddrSpan marks a run of instruction text (a followable mapped address)
-// that should be drawn in a link colour rather than the operand-token colours.
-type disasmAddrSpan struct {
-	start int
-	end   int
-	style lipgloss.Style
+// asmHighlighter returns the assembly highlighter for the current theme and
+// architecture, building it on first use. Which implementation that is depends on
+// the build tag, and internal/ui deliberately doesn't know: see internal/ui/asmhl.
+// Dropped (set nil) by clearColorCaches, so a theme change rebuilds it rather
+// than leaving its token-style cache stale.
+func (m *Model) asmHighlighter() asmhl.Highlighter {
+	if m.asmHL == nil {
+		m.asmHL = asmhl.New(sourceSyntaxTheme(m.cfg), sourceSyntaxForeground(m.cfg), m.file.Arch(), asmhl.Styles{
+			Class:    m.theme.styleForClass,
+			Plain:    m.theme.whiteStyle,
+			Register: m.theme.asmRegisterStyle,
+			Number:   m.theme.asmNumberStyle,
+		})
+	}
+	return m.asmHL
 }
 
 // disasmAddrSpans finds the followable (mapped) address literals in text and the
 // link style each should use (intra- vs inter-function).
-func (m *Model) disasmAddrSpans(text string, instAddr uint64) []disasmAddrSpan {
+func (m *Model) disasmAddrSpans(text string, instAddr uint64) []asmhl.Span {
 	if m.file == nil {
 		return nil
 	}
 	curSym, hasCur := m.file.SymbolAt(instAddr)
 	from := 0
-	var spans []disasmAddrSpan
+	var spans []asmhl.Span
 	for {
 		addr, start, end, ok := extractTargetAt(text, from)
 		if !ok {
@@ -52,7 +62,7 @@ func (m *Model) disasmAddrSpans(text string, instAddr uint64) []disasmAddrSpan {
 			if isIntra {
 				linkSt = m.theme.linkAddrIntraStyle
 			}
-			spans = append(spans, disasmAddrSpan{start: start, end: end, style: linkSt})
+			spans = append(spans, asmhl.Span{Start: start, End: end, Style: linkSt})
 		}
 		from = end
 	}

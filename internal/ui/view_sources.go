@@ -238,11 +238,3 @@ func (m *Model) renderSourceAsm(w, h int) string {
 	}
 	return m.dasm.RenderSourceAsm(m.viewContextPtr(), w, h)
 }
-
-func (m *Model) sourceRowHeight(w int) func(int) int {
-	return m.dasm.SourceRowHeight(m.viewContextPtr(), w)
-}
-
-func (m *Model) sourceTextTop(w, contentH int) int {
-	return m.dasm.SourceTextTop(m.viewContextPtr(), w, contentH)
-}

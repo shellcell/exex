@@ -379,7 +379,7 @@ func (m *Model) routeScroll(delta int) (tea.Model, tea.Cmd) {
 	case modeStrings: // compact · flow (the table is handled via listGeometry above)
 		m.strs.ScrollFlow(m.viewContext(), delta)
 	case modeDisasm:
-		m.scrollDisasmViewport(delta)
+		m.dasm.Scroll(m.viewContextPtr(), m.dasmEnv(), delta)
 	case modeHex:
 		m.byteViews.Scroll(m.viewContextPtr(), hexraw.Hex, delta)
 	case modeRaw:
@@ -397,79 +397,12 @@ func (m *Model) captureViewportTop() {
 	}
 	switch m.mode {
 	case modeDisasm:
-		m.captureDisasmViewportTop()
+		m.dasm.CaptureViewportTop(m.viewContextPtr())
 	case modeHex:
 		m.byteViews.CaptureViewportTop(m.viewContextPtr(), hexraw.Hex)
 	case modeRaw:
 		m.byteViews.CaptureViewportTop(m.viewContextPtr(), hexraw.Raw)
 	}
-}
-
-func (m *Model) captureDisasmViewportTop() {
-	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
-		src := m.file.SourceLines(m.dasm.SrcFile)
-		if len(src) == 0 {
-			return
-		}
-		contentH := max(1, m.bodyHeight()-1)
-		top := layout.ViewportTop(m.dasm.RenderedSrcTop, len(src), contentH, m.sourceRowHeight(m.sourcePaneWidth()))
-		m.dasm.SrcTop = top + 1
-		return
-	}
-	if len(m.dasm.Inst) == 0 {
-		return
-	}
-	visible := m.disasmViewportHeight()
-	m.dasm.Top = layout.ViewportTop(m.dasm.RenderedTop, len(m.dasm.Inst), visible, m.disasmRowHeight(m.disasmRenderWidth()))
-}
-
-func (m *Model) scrollDisasmViewport(delta int) {
-	if delta == 0 {
-		return
-	}
-	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
-		src := m.file.SourceLines(m.dasm.SrcFile)
-		if len(src) == 0 {
-			return
-		}
-		contentH := max(1, m.bodyHeight()-1)
-		top := scrollViewportTop(max(0, m.dasm.SrcTop-1), len(src), contentH, delta, m.sourceRowHeight(m.sourcePaneWidth()))
-		m.dasm.SrcTop = top + 1
-		return
-	}
-	if len(m.dasm.Inst) == 0 {
-		return
-	}
-	w := m.disasmRenderWidth()
-	visible := m.disasmViewportHeight()
-	rowHeight := m.disasmRowHeight(w)
-	next := scrollViewportTop(m.dasm.Top, len(m.dasm.Inst), visible, delta, rowHeight)
-	if next == m.dasm.Top && delta < 0 && m.dasm.Top == 0 && m.dasm.PosLo > 0 {
-		if m.loadDisasmWindowAboveForScroll(delta, visible) {
-			return
-		}
-	}
-	m.dasm.Top = next
-}
-
-func (m *Model) loadDisasmWindowAboveForScroll(delta, visible int) bool {
-	if len(m.dasm.Inst) == 0 || m.dasm.PosLo <= 0 {
-		return false
-	}
-	img := m.file.ExecImage()
-	oldFirst := m.dasm.Inst[0].Addr
-	curAddr := m.dasm.Inst[m.dasm.Cur].Addr
-	if !m.loadDisasmWindow(img.AddrAt(m.dasm.PosLo-1), m.disasmMaxBytes-m.disasmOverlapBytes()) {
-		return false
-	}
-	m.dasm.Cur = m.dasm.IndexAtOrAfter(curAddr)
-	top := m.dasm.Cur + delta
-	if idx, found := m.dasm.IndexForAddr(oldFirst); found {
-		top = idx + delta
-	}
-	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
-	m.dasm.Top = layout.ViewportTop(top, len(m.dasm.Inst), visible, rowHeight)
-	return true
 }
 
 func scrollViewportTop(top, n, visible, delta int, rowHeight func(int) int) int {
@@ -568,51 +501,7 @@ func (m *Model) handleClick(x, y int) bool {
 	case modeRaw:
 		m.byteViews.Click(m.viewContextPtr(), hexraw.Raw, x, bodyRow)
 	case modeDisasm:
-		if m.dasm.SourceFirst && m.dasm.SrcFile != "" && m.clickInSourcePane(x) {
-			if ln, ok := m.sourceLineAtBodyRow(bodyRow, m.sourcePaneWidth()); ok {
-				m.dasm.SrcCur = ln
-				m.syncSourceAsm()
-			}
-		} else if i, ok := m.instAtBodyRow(bodyRow); ok {
-			m.dasm.Cur = i
-		}
+		m.dasm.Click(m.viewContextPtr(), m.dasmEnv(), x, bodyRow)
 	}
 	return false
-}
-
-func (m *Model) clickInSourcePane(x int) bool {
-	// In the disasm view's source-first split, the source pane is on the left.
-	return x < m.width/2
-}
-
-func (m *Model) sourcePaneWidth() int {
-	if m.width <= 1 {
-		return m.width
-	}
-	return m.width / 2
-}
-
-func (m *Model) sourceLineAtBodyRow(bodyRow, paneW int) (int, bool) {
-	r := bodyRow - 1 // strip source header row
-	if r < 0 {
-		return 0, false
-	}
-	src := m.file.SourceLines(m.dasm.SrcFile)
-	contentH := max(1, m.bodyHeight()-1)
-	idx, ok := layout.VisualItemAtRow(m.sourceTextTop(paneW, contentH), len(src), r, m.sourceRowHeight(paneW))
-	return idx + 1, ok
-}
-
-// instAtBodyRow maps a click in the disasm scroller to an instruction index.
-// It replays renderDisasmScroll's emit order: a symbol-start instruction is
-// preceded by a "<name>:" label line, so rows aren't 1:1 with instructions.
-func (m *Model) instAtBodyRow(bodyRow int) (int, bool) {
-	r := bodyRow - 1 // strip the sticky-symbol row
-	if r < 0 {
-		return 0, false
-	}
-	visible := max(1, m.bodyHeight()-1)
-	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
-	top := m.visualTopForView(m.dasm.Cur, m.dasm.Top, len(m.dasm.Inst), visible, rowHeight)
-	return layout.VisualItemAtRow(top, len(m.dasm.Inst), r, rowHeight)
 }

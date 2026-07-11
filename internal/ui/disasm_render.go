@@ -94,11 +94,14 @@ func (m *Model) disasmRowHeight(w int) func(int) int {
 	return m.dasm.RowHeight(m.viewContextPtr(), w)
 }
 
+// disasmRenderWidth is the view's render width, except outside the disasm view
+// (a jump can position the window before the user ever switches to it), where
+// no pane is open and the scroller would have the screen to itself.
 func (m *Model) disasmRenderWidth() int {
-	if m.mode == modeDisasm && m.dasm.ShowSource && m.file.HasDWARF() && !m.dasm.SourceFirst {
-		return m.width / 2
+	if m.mode != modeDisasm {
+		return m.width
 	}
-	return m.width
+	return m.dasm.RenderWidth(m.viewContextPtr())
 }
 
 // disasmColumns is the row geometry for the current file and byte-column

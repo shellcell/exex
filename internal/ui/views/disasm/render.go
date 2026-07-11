@@ -389,7 +389,7 @@ func annotationContinuationRowCount(ctx *view.Context, note string, annCol, w in
 func (st *State) InstRows(ctx *view.Context, inst dis.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {
 	var addrBuf [18]byte // "0x" + 16 hex digits
 	addrText := string(layout.AppendAddr(addrBuf[:0], inst.Addr, ctx.File.AddrHexWidth()))
-	addrCol := ctx.AddrStyle.Render(addrText)
+	addrCol := ctx.AddrPainter.Text(addrText)
 	if targetStyle != nil {
 		addrCol = targetStyle.Render(addrText)
 	}
@@ -425,7 +425,7 @@ func (st *State) InstRows(ctx *view.Context, inst dis.Inst, w int, selected bool
 	if inlineAvail > 0 {
 		first, rest := splitPlainWidth(note, inlineAvail)
 		if first != "" {
-			line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + ctx.AddrStyle.Render(first)
+			line := asmRow + strings.Repeat(" ", inlineStart-asmEnd) + ctx.AddrPainter.Text(first)
 			rows := []string{layout.PadRight(line, w)}
 			if rest == "" || !ctx.Wrap {
 				return rows
@@ -450,7 +450,7 @@ func annotationContinuationRows(ctx *view.Context, note string, annCol, w int) [
 	indent := strings.Repeat(" ", annCol)
 	rows := make([]string, 0, len(parts))
 	for _, p := range parts {
-		rows = append(rows, layout.PadRight(indent+ctx.AddrStyle.Render(p), w))
+		rows = append(rows, layout.PadRight(indent+ctx.AddrPainter.Text(p), w))
 	}
 	return rows
 }

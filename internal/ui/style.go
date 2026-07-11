@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/rabarbra/exex/internal/ui/layout"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -45,6 +46,12 @@ type Theme struct {
 	treeNodeStyle lipgloss.Style // collapsible group rows in the symbols/sources/libs trees
 
 	viewStyle lipgloss.Style
+	// The painters for the styles that fill a whole line on every frame: the
+	// panel background behind the frame, the table-header line, the sticky title.
+	// Derived with the theme, not per frame — see derivePainters.
+	viewPainter   layout.Painter
+	headerPainter layout.Painter
+	stickyPainter layout.Painter
 
 	errorStyle lipgloss.Style
 	infoStyle  lipgloss.Style
@@ -193,6 +200,18 @@ func (t *Theme) ApplyColors(c config.Colors) {
 		t.pathPalette = stylePalette(c.PathPalette...)
 	}
 	t.deriveDisasmSel()
+	t.derivePainters()
+}
+
+// derivePainters rebuilds the line-filling painters from the current theme. The
+// background is applied to all three bands of every frame (tabs, body, footer),
+// and the header/sticky lines are drawn every frame too — while deriving a
+// style's SGR sequence costs a full lipgloss render. So they are derived once,
+// with the theme, like disasmSelSeq below.
+func (t *Theme) derivePainters() {
+	t.viewPainter = layout.NewPainter(t.viewStyle)
+	t.headerPainter = layout.NewPainter(t.tableHeaderStyle)
+	t.stickyPainter = layout.NewPainter(t.stickySymStyle)
 }
 
 // deriveDisasmSel recomputes disasmSelSeq from the current tableSelStyle so the

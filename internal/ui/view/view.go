@@ -83,6 +83,15 @@ type Styles struct {
 	// per-token colour resets. "" when the theme didn't derive one.
 	DisasmSelSeq string
 
+	// AddrPainter wraps plain text in AddrStyle's colour. The disasm scroller
+	// colours an address and an annotation for every visible row, every frame.
+	AddrPainter layout.Painter
+	// HeaderPainter fills the table-header line with HeaderStyle's colour. Built
+	// with the Styles (i.e. once per theme), because deriving a style's SGR
+	// sequence costs a lipgloss render and every table view draws a header on
+	// every frame.
+	HeaderPainter layout.Painter
+
 	DisassemblerName  string // empty when this architecture has no decoder
 	HexBytesPerRow    int
 	HideAnnotations   bool
@@ -166,7 +175,7 @@ func AvailLabel(f AvailFilter) string {
 // TableHeader renders a full-width, middle-truncated table header line.
 func (c Context) TableHeader(s string) string {
 	line := layout.PadRight(layout.FitANSIWidth(layout.TruncateMiddle(s, c.Width), c.Width), c.Width)
-	return layout.RenderStyle(line, c.Width, c.HeaderStyle)
+	return c.HeaderPainter.Fill(line, c.Width)
 }
 
 // PlaceCentred renders msg as a dim, centred block within the view width × h.

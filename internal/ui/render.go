@@ -94,7 +94,7 @@ func (t *Theme) pathPrefixStyle(prefix string) lipgloss.Style {
 }
 
 func (t Theme) renderViewBackground(s string, w int) string {
-	return renderBackground(s, w, t.viewStyle)
+	return t.viewPainter.Fill(s, w)
 }
 
 func renderBackground(s string, w int, st lipgloss.Style) string {
@@ -102,11 +102,11 @@ func renderBackground(s string, w int, st lipgloss.Style) string {
 }
 
 func (t Theme) viewTitleLine(s string, w int) string {
-	return renderBackground(layout.PadRight(layout.FitANSIWidth(s, w), w), w, t.tableHeaderStyle)
+	return t.headerPainter.Fill(layout.PadRight(layout.FitANSIWidth(s, w), w), w)
 }
 
 func (t Theme) stickyTitleLine(s string, w int) string {
-	return renderBackground(layout.PadRight(layout.FitANSIWidth(s, w), w), w, t.stickySymStyle)
+	return t.stickyPainter.Fill(layout.PadRight(layout.FitANSIWidth(s, w), w), w)
 }
 
 // tableHeader renders a full-width table header line.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/ui/asmhl"
+	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/view"
 )
 
@@ -47,31 +48,33 @@ func (m *Model) viewStyles() *view.Styles {
 		disName = m.dis.Name()
 	}
 	m.viewStylesCache = &view.Styles{
-		HeaderStyle: m.theme.tableHeaderStyle,
-		AddrStyle:   m.theme.addrStyle,
-		RowStyle:    m.theme.tableRowStyle,
-		SelStyle:    m.theme.tableSelStyle,
-		SymStyle:    m.theme.symbolNameStyle,
-		ShadowStyle: m.theme.srcShadowStyle,
-		FooterStyle: m.theme.footerStyle,
-		KeyStyle:    m.theme.helpKeyStyle,
-		TreeStyle:   m.theme.treeNodeStyle,
-		LabelStyle:  m.theme.headerKey,
-		PanelStyle:  m.theme.panelStyle,
-		NumberStyle: m.theme.asmNumberStyle,
-		HeadStyle:   m.theme.helpHeadStyle,
-		InfoStyle:   m.theme.infoStyle,
-		WarnStyle:   m.theme.warnStyle,
-		ErrorStyle:  m.theme.errorStyle,
-		StickyStyle: m.theme.stickySymStyle,
-		BannerStyle: m.theme.sectionStyle,
-		PtrStyle:    m.theme.hexPointerStyle,
-		LinkStyle:   m.theme.linkAddrInterStyle,
-		LinkIntra:   m.theme.linkAddrIntraStyle,
-		PlainStyle:  m.theme.whiteStyle,
-		SrcCurLine:  m.theme.srcCurLineStyle,
-		SrcMapped:   m.theme.srcMappedStyle,
-		PaneBorder:  m.theme.paneBorderStyle,
+		HeaderStyle:   m.theme.tableHeaderStyle,
+		HeaderPainter: layout.NewPainter(m.theme.tableHeaderStyle),
+		AddrPainter:   layout.NewPainter(m.theme.addrStyle),
+		AddrStyle:     m.theme.addrStyle,
+		RowStyle:      m.theme.tableRowStyle,
+		SelStyle:      m.theme.tableSelStyle,
+		SymStyle:      m.theme.symbolNameStyle,
+		ShadowStyle:   m.theme.srcShadowStyle,
+		FooterStyle:   m.theme.footerStyle,
+		KeyStyle:      m.theme.helpKeyStyle,
+		TreeStyle:     m.theme.treeNodeStyle,
+		LabelStyle:    m.theme.headerKey,
+		PanelStyle:    m.theme.panelStyle,
+		NumberStyle:   m.theme.asmNumberStyle,
+		HeadStyle:     m.theme.helpHeadStyle,
+		InfoStyle:     m.theme.infoStyle,
+		WarnStyle:     m.theme.warnStyle,
+		ErrorStyle:    m.theme.errorStyle,
+		StickyStyle:   m.theme.stickySymStyle,
+		BannerStyle:   m.theme.sectionStyle,
+		PtrStyle:      m.theme.hexPointerStyle,
+		LinkStyle:     m.theme.linkAddrInterStyle,
+		LinkIntra:     m.theme.linkAddrIntraStyle,
+		PlainStyle:    m.theme.whiteStyle,
+		SrcCurLine:    m.theme.srcCurLineStyle,
+		SrcMapped:     m.theme.srcMappedStyle,
+		PaneBorder:    m.theme.paneBorderStyle,
 
 		DisasmSelSeq: m.theme.disasmSelSeq,
 

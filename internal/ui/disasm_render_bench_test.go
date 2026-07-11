@@ -10,32 +10,59 @@ import (
 func BenchmarkDisasmInstRows(b *testing.B) {
 	m := benchmarkDisasmModel()
 	insts := benchmarkDisasmInsts()
+	ctx := m.viewContextPtr()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		inst := insts[i%len(insts)]
-		_ = m.disasmInstRows(inst, 120, i%17 == 0, nil)
+		_ = m.dasm.InstRows(ctx, inst, 120, i%17 == 0, nil)
 	}
 }
 
 func BenchmarkDisasmScroll(b *testing.B) {
 	m := benchmarkDisasmModel()
 	seed := benchmarkDisasmInsts()
-	m.disasmInst = make([]disasm.Inst, 0, 1024)
+	m.dasm.Inst = make([]disasm.Inst, 0, 1024)
 	for i := 0; i < 1024; i++ {
 		inst := seed[i%len(seed)]
 		inst.Addr = 0x1000 + uint64(i*4)
-		m.disasmInst = append(m.disasmInst, inst)
+		m.dasm.Inst = append(m.dasm.Inst, inst)
 	}
-	m.disasmCur = 128
+	m.dasm.Cur = 128
 	m.mode = modeDisasm
 	m.width = 120
 	m.height = 40
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.disasmTop = i % 128
+		m.dasm.Top = i % 128
 		_ = m.renderDisasmScroll(120, 32)
+	}
+}
+
+// TestDisasmInstRowCountMatches pins the cheap height counter to the real
+// renderer: for every instruction across a range of widths and both wrap modes,
+// disasmInstRowCount must equal the number of rows disasmInstRows emits, or the
+// scroll/click math (which trusts the counter via the height cache) breaks.
+func TestDisasmInstRowCountMatches(t *testing.T) {
+	m := benchmarkDisasmModel()
+	m.height = 40
+	insts := benchmarkDisasmInsts()
+	widths := []int{20, 28, 40, 60, 120, 200}
+	for _, wrap := range []bool{false, true} {
+		m.wrap = wrap
+		for _, w := range widths {
+			m.width = w
+			// The context snapshots wrap at build time, so rebuild it per setting.
+			ctx := m.viewContextPtr()
+			for _, inst := range insts {
+				want := len(m.dasm.InstRows(ctx, inst, w, false, nil))
+				got := m.dasm.InstRowCount(ctx, inst, w)
+				if got != want {
+					t.Errorf("wrap=%v w=%d %q: rowCount=%d, rendered %d rows", wrap, w, inst.Text, got, want)
+				}
+			}
+		}
 	}
 }
 

@@ -66,7 +66,7 @@ func (t Theme) styleForSymbol(k binfile.SymKind, b binfile.SymBind) lipgloss.Sty
 // styleForSection picks the row colour for a section based on its type/flags,
 // with the loader's neutral category as a fallback. This keeps section colours
 // useful across ELF, Mach-O, and PE even when format-specific type labels vary.
-func (t Theme) styleForSection(s *binfile.Section) lipgloss.Style {
+func (t *Theme) styleForSection(s *binfile.Section) lipgloss.Style {
 	if s == nil {
 		return t.tableRowStyle
 	}
@@ -91,6 +91,20 @@ func (t Theme) styleForSection(s *binfile.Section) lipgloss.Style {
 		return t.secRodataStyle
 	}
 	return t.tableRowStyle
+}
+
+// styleForSegment picks the row colour for a segment from its permissions:
+// executable segments reuse the .text row colour, writable ones the data
+// colour, the rest read-only data — so segment colours read like the section
+// table.
+func (t *Theme) styleForSegment(exec, write bool) lipgloss.Style {
+	switch {
+	case exec:
+		return t.secTextStyle
+	case write:
+		return t.secDataStyle
+	}
+	return t.secRodataStyle
 }
 
 func sectionColorCategory(s *binfile.Section) binfile.SectionCategory {
@@ -125,34 +139,4 @@ func sectionColorCategory(s *binfile.Section) binfile.SectionCategory {
 		return binfile.CatRodata
 	}
 	return s.Category
-}
-
-// kindString / bindString render neutral symbol kinds and bindings for the
-// symbol table's Type and Bind columns.
-func kindString(k binfile.SymKind) string {
-	switch k {
-	case binfile.SymFunc:
-		return "FUNC"
-	case binfile.SymObject:
-		return "OBJECT"
-	case binfile.SymSection:
-		return "SECTION"
-	case binfile.SymFile:
-		return "FILE"
-	case binfile.SymTLS:
-		return "TLS"
-	case binfile.SymCommon:
-		return "COMMON"
-	}
-	return "NOTYPE"
-}
-
-func bindString(b binfile.SymBind) string {
-	switch b {
-	case binfile.BindGlobal:
-		return "GLOBAL"
-	case binfile.BindWeak:
-		return "WEAK"
-	}
-	return "LOCAL"
 }

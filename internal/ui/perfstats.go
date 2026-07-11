@@ -57,10 +57,9 @@ func RenderViewStats(f *binfile.File, w, h, runs int) []PerfStat {
 		mm.switchMode(v.mode)
 		// Finish any background decode the disasm view kicked off so the frame is
 		// measured fully rendered, not mid-"decoding…".
-		for mm.disasmDecoding {
-			addr := mm.disasmPendingAddr
-			win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-			m, _ = mm.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
+		for mm.dasm.Decoding {
+			addr := mm.dasm.PendingAddr
+			m, _ = mm.Update(disasmReadyMsg{addr: addr, span: mm.decodeDisasmAt(addr, mm.disasmLeadBytes())})
 			mm = m.(*Model)
 		}
 

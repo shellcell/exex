@@ -17,9 +17,12 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/metrics"
 	"strconv"
 	"strings"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
@@ -39,6 +42,8 @@ func main() {
 		os.Exit(2)
 	}
 	path := flag.Arg(0)
+
+	heapPeak := startHeapPeakSampler()
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -124,6 +129,27 @@ func main() {
 		func(v any) { v.(*binfile.File).Close() },
 	)
 	rows = append(rows, row{"TUI startup cold-model (ui.New)", tui})
+	// Model.Init starts the immediate demangle and disassembly prewarm. Measure it
+	// separately from ui.New so startup reports include the work users pay before
+	// the first Disasm switch becomes instant.
+	tuiInit := measurePrepared(*runs,
+		func() any {
+			f := mustOpen(path)
+			m, err := ui.New(f, ui.Options{Config: cfg})
+			if err != nil {
+				f.Close()
+				fmt.Fprintf(os.Stderr, "perfreport: ui.New: %v\n", err)
+				os.Exit(1)
+			}
+			return &preparedTUI{file: f, model: m}
+		},
+		func(v any) {
+			p := v.(*preparedTUI)
+			p.model = settleProgram(p.model, p.model.Init())
+		},
+		func(v any) { v.(*preparedTUI).file.Close() },
+	)
+	rows = append(rows, row{"TUI startup background (Init settled)", tuiInit})
 
 	// Per-view interactive render cost (a full 160×48 frame, decode completed).
 	for _, v := range ui.RenderViewStats(loaded, 160, 48, *runs) {
@@ -131,6 +157,7 @@ func main() {
 	}
 
 	peak := peakRSS()
+	livePeak := heapPeak()
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Performance (sample: %s, %s)\n\n", path, humanBytes(uint64(info.Size())))
@@ -140,7 +167,7 @@ func main() {
 	for _, r := range rows {
 		fmt.Fprintf(&b, "| %s | %s | %s |\n", r.stage, humanDur(r.stat.dur), humanBytes(r.stat.alloc))
 	}
-	fmt.Fprintf(&b, "\n**Peak resident memory:** %s\n", humanBytes(peak))
+	fmt.Fprintf(&b, "\n**Peak heap in use:** %s  ·  **Peak resident memory:** %s\n", humanBytes(livePeak), humanBytes(peak))
 
 	out := b.String()
 	fmt.Print(out)
@@ -157,6 +184,43 @@ func main() {
 type stat struct {
 	dur   time.Duration
 	alloc uint64
+}
+
+type preparedTUI struct {
+	file  *binfile.File
+	model tea.Model
+}
+
+// settleProgram executes a command and every command it schedules, running
+// Batch children concurrently like Bubble Tea does while serialising Update.
+func settleProgram(model tea.Model, initial tea.Cmd) tea.Model {
+	if initial == nil {
+		return model
+	}
+	results := make(chan tea.Msg)
+	active := 0
+	start := func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		active++
+		go func() { results <- cmd() }()
+	}
+	start(initial)
+	for active > 0 {
+		msg := <-results
+		active--
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, cmd := range batch {
+				start(cmd)
+			}
+			continue
+		}
+		var next tea.Cmd
+		model, next = model.Update(msg)
+		start(next)
+	}
+	return model
 }
 
 // measure times fn over `runs` iterations (reporting the fastest, to suppress
@@ -238,6 +302,47 @@ func runView(f *binfile.File, view string) {
 	if _, err := dump.View(f, view); err != nil {
 		fmt.Fprintf(os.Stderr, "perfreport: view %s: %v\n", view, err)
 		os.Exit(1)
+	}
+}
+
+// startHeapPeakSampler tracks the peak Go heap actually in use — the stable
+// memory gauge for regression comparisons. Peak *resident* memory (below) also
+// counts arena over-reservation and not-yet-returned pages, which on macOS
+// swings ±40 MB run-to-run with identical heap behaviour, so it can't tell a
+// real regression from allocator timing. The sampler polls the runtime/metrics
+// heap-objects gauge (no stop-the-world) every millisecond; the returned
+// function stops it and reports the maximum observed.
+func startHeapPeakSampler() func() uint64 {
+	const objBytes = "/memory/classes/heap/objects:bytes"
+	sample := make([]metrics.Sample, 1)
+	sample[0].Name = objBytes
+	var peak uint64
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		tick := time.NewTicker(time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				metrics.Read(sample)
+				if v := sample[0].Value.Uint64(); v > peak {
+					peak = v
+				}
+			}
+		}
+	}()
+	return func() uint64 {
+		close(done)
+		<-stopped
+		metrics.Read(sample)
+		if v := sample[0].Value.Uint64(); v > peak {
+			peak = v
+		}
+		return peak
 	}
 }
 

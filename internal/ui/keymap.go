@@ -31,6 +31,9 @@ const (
 	actionBack        // pop the cross-file stack (return to the file we came from)
 	actionCPUFeatures // scan & show the CPU features the binary requires
 	actionHeader      // show the raw container-header overlay
+	actionJumpCaret   // open the caret's address in another view (cross-nav modal)
+	actionFindCaret   // search the binary for the value under the caret (find modal)
+	actionFindQuery   // free-text global content search (find results modal)
 )
 
 // keyMap maps key strings (as returned by tea.KeyMsg.String()) to the
@@ -59,6 +62,10 @@ func defaultKeyMap() keyMap {
 		"ctrl+o": actionBack,
 		"F":      actionCPUFeatures,
 		"H":      actionHeader,
+		">":      actionJumpCaret,
+		"space":  actionJumpCaret, // open the caret address in another view
+		"f":      actionFindCaret, // search the binary for the value under the caret
+		"l":      actionFindQuery, // free-text global content search
 	}
 }
 

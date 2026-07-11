@@ -34,30 +34,68 @@ func NextMode(m Mode) Mode {
 	return (m + 1) % 3
 }
 
+// kind is how a query is to be interpreted, decided once by classify.
+type kind uint8
+
+const (
+	kindQuoted kind = iota // "quoted text" -> the bytes between the quotes
+	kindText               // literal text bytes of the raw query
+	kindHex                // hex byte pattern
+)
+
+// classify decides how q is read under mode. ParsePattern and IsTextPattern both
+// consult it, so the two can't disagree about what a query means — they used to
+// duplicate this rule set, and a change to one silently skipped the other.
+//
+// It returns the trimmed query and its compacted hex form so callers don't
+// recompute them.
+func classify(q string, mode Mode) (k kind, trimmed, compact string) {
+	trimmed = strings.TrimSpace(q)
+	quoted := len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"'
+
+	switch mode {
+	case ModeText:
+		if quoted {
+			return kindQuoted, trimmed, ""
+		}
+		return kindText, trimmed, ""
+	case ModeHex:
+		return kindHex, trimmed, compactHexPattern(trimmed)
+	}
+
+	// ModeAuto: quotes force text; otherwise an untrimmed-clean, even-length run
+	// of hex digits is a byte pattern. Requiring q == trimmed means a query with
+	// surrounding spaces stays a text search (the spaces are searchable).
+	if quoted {
+		return kindQuoted, trimmed, ""
+	}
+	compact = compactHexPattern(trimmed)
+	if q == trimmed && len(compact) >= 2 && len(compact)%2 == 0 && isHexStr(compact) {
+		return kindHex, trimmed, compact
+	}
+	return kindText, trimmed, compact
+}
+
 // ParsePattern interprets a query as bytes or text:
 //   - "quoted text"   -> literal bytes of the text
 //   - hex digits / 0x -> byte pattern (spaces allowed: "de ad be ef")
 //   - anything else   -> literal text bytes
 func ParsePattern(q string, mode Mode) []byte {
-	trimmed := strings.TrimSpace(q)
-	if mode == ModeText {
-		if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
-			return []byte(trimmed[1 : len(trimmed)-1])
-		}
+	switch k, trimmed, compact := classify(q, mode); k {
+	case kindQuoted:
+		return []byte(trimmed[1 : len(trimmed)-1])
+	case kindHex:
+		return parseHexPattern(compact)
+	default:
 		return []byte(q)
 	}
-	if mode == ModeHex {
-		compact := compactHexPattern(trimmed)
-		return parseHexPattern(compact)
-	}
-	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
-		return []byte(trimmed[1 : len(trimmed)-1])
-	}
-	compact := compactHexPattern(trimmed)
-	if q == trimmed && len(compact) >= 2 && len(compact)%2 == 0 && isHexStr(compact) {
-		return parseHexPattern(compact)
-	}
-	return []byte(q)
+}
+
+// IsTextPattern reports whether ParsePattern would treat q as literal text (so
+// case-folding is meaningful) rather than a hex byte pattern (where it isn't).
+func IsTextPattern(q string, mode Mode) bool {
+	k, _, _ := classify(q, mode)
+	return k != kindHex
 }
 
 // compactHexPattern removes whitespace and an optional 0x/0X prefix.
@@ -107,6 +145,61 @@ func FindBytes(data, pat []byte, start int, forward bool) int {
 		return -1
 	}
 	return bytes.LastIndex(data[:end], pat)
+}
+
+// FindBytesFold is FindBytes with optional ASCII case-insensitive matching. With
+// fold=false it is FindBytes (the fast exact bytes.Index). With fold=true it
+// matches letters ignoring ASCII case — for text patterns; a byte-value pattern
+// (hex) simply won't contain letters to fold, so callers can always pass the
+// view's case flag.
+func FindBytesFold(data, pat []byte, start int, forward, fold bool) int {
+	if !fold {
+		return FindBytes(data, pat, start, forward)
+	}
+	if len(pat) == 0 || len(pat) > len(data) {
+		return -1
+	}
+	if forward {
+		if start < 0 {
+			start = 0
+		}
+		for i := start; i <= len(data)-len(pat); i++ {
+			if equalFoldASCII(data[i:i+len(pat)], pat) {
+				return i
+			}
+		}
+		return -1
+	}
+	end := start + len(pat)
+	if end > len(data) {
+		end = len(data)
+	}
+	for i := end - len(pat); i >= 0; i-- {
+		if equalFoldASCII(data[i:i+len(pat)], pat) {
+			return i
+		}
+	}
+	return -1
+}
+
+// equalFoldASCII reports whether a and b are equal ignoring ASCII letter case.
+func equalFoldASCII(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if lowerASCII(a[i]) != lowerASCII(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
 }
 
 // isHexStr reports whether s is non-empty and contains only hex digits.

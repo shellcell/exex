@@ -24,46 +24,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// after the user has moved on.
 	m.pendingWheel = 0
 
-	// While the help overlay is up, scroll keys page through it (it can be taller
-	// than the terminal); any other key dismisses it.
-	if m.headerActive {
-		switch key {
-		case "up", "k":
-			m.headerScroll--
-		case "down", "j":
-			m.headerScroll++
-		case "pgup":
-			m.headerScroll -= headerPageStep
-		case "pgdown":
-			m.headerScroll += headerPageStep
-		case "home", "g":
-			m.headerScroll = 0
-		case "end", "G":
-			m.headerScroll = 1 << 20
-		default:
-			m.headerActive = false
-		}
+	// While a scrollable text overlay is up, scroll keys page through it (it can
+	// be taller than the terminal); any other key dismisses it. These sit above
+	// the running-scan Esc handling below, so Esc dismisses the overlay in front
+	// of the user rather than cancelling a scan they can't see.
+	switch m.activeModal() {
+	case modalHeader:
+		m.header.Update(key)
+		return m, nil
+	case modalHelp:
+		m.help.Update(key)
 		return m, nil
 	}
-	if m.helpActive {
-		switch key {
-		case "up", "k":
-			m.helpScroll--
-		case "down", "j":
-			m.helpScroll++
-		case "pgup":
-			m.helpScroll -= helpPageStep
-		case "pgdown":
-			m.helpScroll += helpPageStep
-		case "home", "g":
-			m.helpScroll = 0
-		case "end", "G":
-			m.helpScroll = 1 << 20 // clamped to the bottom in renderHelpModal
-		default:
-			m.helpActive = false
-		}
-		return m, nil
-	}
+
 	if m.searchRunning && key == "esc" {
 		m.cancelSearch("search cancelled")
 		return m, nil
@@ -77,7 +50,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.syscallFullRunning && key == "esc" {
-		m.cancelSyscallFullScan()
+		m.CancelFullScan()
 		m.setStatus("syscall scan cancelled", false)
 		return m, nil
 	}
@@ -85,25 +58,30 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelCPUFeat()
 		return m, nil
 	}
-	if m.cpufeatActive {
-		return m.updateCPUFeatModal(key)
-	}
-
-	if m.xrefActive {
-		return m.updateXrefModal(msg, key)
-	}
-	if m.syscallActive {
-		return m.updateSyscallModal(msg, key)
-	}
-	if m.settingsActive {
-		return m.updateSettings(key)
-	}
-	if m.gotoActive {
-		return m.updateGotoInput(msg, key)
-	}
-	if m.searchActive {
+	// The open modal owns the keyboard. modalHeader/modalHelp returned above.
+	switch m.activeModal() {
+	case modalCPUFeat:
+		return m, m.cpufeat.Update(m.modalContext(), m, key)
+	case modalXref:
+		return m, m.xref.Update(m, msg, key)
+	case modalSyscall:
+		return m, m.syscalls.Update(m, msg, key)
+	case modalJump:
+		return m, m.jump.Update(m, key)
+	case modalFind:
+		return m, m.find.Update(m, key)
+	case modalFindQuery:
+		return m, m.findQueryModal.Update(m, msg, key)
+	case modalFindResults:
+		return m, m.findResults.Update(m, msg, key)
+	case modalSettings:
+		return m, m.settings.Update(m, key)
+	case modalGoto:
+		return m, m.palette.Update(m, msg, key)
+	case modalSearch:
 		return m.updateSearchInput(msg, key)
 	}
+
 	if model, cmd, ok := m.handleDisasmPaneKey(key); ok {
 		return model, cmd
 	}
@@ -114,8 +92,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// '?' toggles the keybinding cheat-sheet (after modal/filter capture, so it
 	// still types into inputs).
 	if key == "?" {
-		m.helpActive = true
-		m.helpScroll = 0
+		m.help.Open()
 		return m, nil
 	}
 	// `tab` doubles as the mode-toggle (the `t` key) in every non-disasm view —
@@ -302,17 +279,17 @@ type cursorState struct {
 func (m *Model) activeCursorState() cursorState {
 	return cursorState{
 		mode:        m.mode,
-		sectionsCur: m.sectionsCur,
-		symbolsCur:  m.symbolsCur,
-		disasmCur:   m.disasmCur,
-		hexCur:      m.hexCur,
-		rawCur:      m.rawCur,
-		stringsCur:  m.stringsCur,
-		sourcesCur:  m.sourcesCur,
-		libsCur:     m.libsCur,
+		sectionsCur: m.sections.Cur,
+		symbolsCur:  m.symbols.Cur,
+		disasmCur:   m.dasm.Cur,
+		hexCur:      m.byteViews.HexCur,
+		rawCur:      m.byteViews.RawCur,
+		stringsCur:  m.strs.Cur,
+		sourcesCur:  m.sources.Cur,
+		libsCur:     m.libs.Cur,
 		memberSel:   m.memberSel,
-		srcFile:     m.srcFile,
-		srcCur:      m.srcCur,
+		srcFile:     m.dasm.SrcFile,
+		srcCur:      m.dasm.SrcCur,
 	}
 }
 
@@ -346,103 +323,20 @@ func (m *Model) handleDisasmPaneKey(key string) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m *Model) updateGotoInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc":
-		m.closeGoto()
-		return m, nil
-	case "up":
-		if m.gotoSel > 0 {
-			m.gotoSel--
-		}
-		return m, nil
-	case "down":
-		if m.gotoSel < len(m.gotoResults)-1 {
-			m.gotoSel++
-		}
-		return m, nil
-	case "enter":
-		m.activateGoto()
-		m.closeGoto()
-		return m, nil
-	case "tab":
-		m.gotoScope = (m.gotoScope + 1) % gsScopeCount
-		m.recomputeGoto()
-		return m, nil
-	case "shift+tab":
-		m.gotoScope = (m.gotoScope + gsScopeCount - 1) % gsScopeCount
-		m.recomputeGoto()
-		return m, nil
-	case "ctrl+p":
-		// Toggle physical-address interpretation (only meaningful when LMA differs).
-		if m.file.HasPhysAddrs() {
-			m.gotoAddrPhys = !m.gotoAddrPhys
-			m.recomputeGoto()
-		}
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.gotoInput, cmd = m.gotoInput.Update(msg)
-	m.recomputeGoto()
-	return m, cmd
-}
-
+// updateSearchInput applies the user's search-key aliases, then hands the key to
+// the prompt overlay.
 func (m *Model) updateSearchInput(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
 	if c, ok := m.searchKeyAlias[key]; ok {
 		key = c
 	}
-	switch key {
-	case "esc":
-		m.searchActive = false
-		m.searchInput.Blur()
-		return m, nil
-	case "ctrl+t":
-		m.cycleSearchMode()
-		return m, nil
-	case "ctrl+r":
-		m.searchForward = !m.searchForward
-		return m, nil
-	case "ctrl+o":
-		m.searchFromCursor = !m.searchFromCursor
-		return m, nil
-	case "enter":
-		before := m.activeCursorState()
-		m.searchQuery = strings.TrimSpace(m.searchInput.Value())
-		m.searchActive = false
-		m.searchInput.Blur()
-		cmd := m.runSearchFromPrompt()
-		if before != m.activeCursorState() {
-			m.viewportDetached = false
-			m.pinCurrentByteSectionStart()
-		}
-		return m, cmd
-	}
-	var cmd tea.Cmd
-	m.searchInput, cmd = m.searchInput.Update(msg)
-	return m, cmd
+	return m, m.search.Update(m, msg, key)
 }
 
 func (m *Model) captureActiveFilter(key string, msg tea.KeyMsg) (tea.Cmd, bool) {
 	// A focused filter input captures typing keys (esc/enter blur it); navigation
 	// keys fall through so they still drive the list. Shared across the three
 	// filterable views via filterCapture.
-	switch m.mode {
-	case modeSymbols:
-		return filterCapture(&m.symbolsFilter, key, msg, m.recomputeSymbols)
-	case modeSections:
-		return filterCapture(&m.sectionsFilter, key, msg, m.recomputeSections)
-	case modeStrings:
-		return filterCapture(&m.stringsFilter, key, msg, m.recomputeStrings)
-	case modeLibs:
-		return filterCapture(&m.libsFilter, key, msg, m.buildLibRows)
-	case modeRelocs:
-		return filterCapture(&m.relocFilter, key, msg, m.recomputeRelocs)
-	case modeSources:
-		if m.srcFile == "" {
-			return filterCapture(&m.sourcesFilter, key, msg, m.recomputeSourceFiles)
-		}
-	}
-	return nil, false
+	return m.current().captureFilter(key, msg)
 }
 
 func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
@@ -470,9 +364,7 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 	case actionViewRelocs:
 		return m, m.switchMode(modeRelocs), true
 	case actionGoto:
-		m.gotoActive = true
-		m.gotoInput.Focus()
-		m.recomputeGoto()
+		m.palette.Open(m)
 		return m, nil, true
 	case actionToggleSource:
 		m.toggleSourcePane()
@@ -488,8 +380,16 @@ func (m *Model) handleGlobalAction(key string) (tea.Model, tea.Cmd, bool) {
 	case actionCPUFeatures:
 		return m, m.startCPUFeatScan(), true
 	case actionHeader:
-		m.headerActive = true
-		m.headerScroll = 0
+		m.header.Open()
+		return m, nil, true
+	case actionJumpCaret:
+		m.openJumpModal()
+		return m, nil, true
+	case actionFindCaret:
+		m.openFindModal()
+		return m, nil, true
+	case actionFindQuery:
+		m.findQueryModal.Open()
 		return m, nil, true
 	}
 	return m, nil, false
@@ -503,8 +403,8 @@ func (m *Model) toggleSourcePane() {
 		m.setStatus("no debug info — source pane unavailable", true)
 		return
 	}
-	m.showSource = !m.showSource
-	m.rightScroll = 0
+	m.dasm.ShowSource = !m.dasm.ShowSource
+	m.dasm.RightScroll = 0
 }
 
 func (m *Model) switchSourcePane() {
@@ -515,14 +415,14 @@ func (m *Model) switchSourcePane() {
 		m.setStatus("no debug info — source pane unavailable", true)
 		return
 	}
-	if m.sourceFirst {
-		m.sourceFirst = false
-		m.rightScroll = 0
+	if m.dasm.SourceFirst {
+		m.dasm.SourceFirst = false
+		m.dasm.RightScroll = 0
 		return
 	}
 	if m.ensureSourcePaneAvailable() {
-		m.sourceFirst = true
-		m.rightScroll = 0
+		m.dasm.SourceFirst = true
+		m.dasm.RightScroll = 0
 		return
 	}
 	m.setStatus("no source mapping for current instruction", true)
@@ -538,31 +438,24 @@ func (m *Model) ensureSourcePaneAvailable() bool {
 	if m.hasOpenSourceFile() {
 		return true
 	}
-	m.ensureSources()
-	if len(m.sourcesFiltered) == 0 {
+	ctx := m.viewContext()
+	m.sources.Ensure(ctx)
+	if len(m.sources.Filtered) == 0 {
 		return false
 	}
-	start := m.sourcesCur
-	if start < 0 || start >= len(m.sourcesFiltered) {
-		start = 0
+	selected := ""
+	if f, ok := m.sources.CurrentFile(); ok {
+		selected = f
+		if m.file.SourceLines(f) != nil && m.openSourceFile(f, 1) {
+			return true
+		}
 	}
-	for offset := 0; offset < len(m.sourcesFiltered); offset++ {
-		idx := (start + offset) % len(m.sourcesFiltered)
-		file := m.sourcesFiles[m.sourcesFiltered[idx]]
-		src := m.file.SourceLines(file)
-		if src == nil {
+	for _, idx := range m.sources.Filtered {
+		file := m.sources.Files[idx]
+		if file == selected || m.file.SourceLines(file) == nil {
 			continue
 		}
-		m.sourcesCur = idx
-		m.srcFile = file
-		m.srcCodeLines = m.mappedSourceLines(file)
-		m.srcCur = 1
-		if len(src) == 0 {
-			m.srcCur = 0
-		}
-		m.srcTop = 0
-		m.syncSourceAsm()
-		return true
+		return m.openSourceFile(file, 1)
 	}
 	return false
 }
@@ -591,27 +484,5 @@ func (m *Model) normalizeNavKey(key string) string {
 }
 
 func (m *Model) dispatchViewKey(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {
-	switch m.mode {
-	case modeSections:
-		return m.updateSections(key)
-	case modeSymbols:
-		return m.updateSymbols(key)
-	case modeDisasm:
-		return m.updateDisasm(key)
-	case modeHex:
-		return m.updateHex(key)
-	case modeRaw:
-		return m.updateRaw(key)
-	case modeStrings:
-		return m.updateStrings(key)
-	case modeSources:
-		return m.updateSources(key)
-	case modeLibs:
-		return m.updateLibs(key)
-	case modeRelocs:
-		return m.updateRelocs(key)
-	case modeInfo:
-		return m.updateInfo(msg, key)
-	}
-	return m, nil
+	return m.current().handleKey(msg, key)
 }

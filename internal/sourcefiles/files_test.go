@@ -82,6 +82,24 @@ func TestGrep(t *testing.T) {
 	}
 }
 
+func TestGrepStream(t *testing.T) {
+	files := []string{"a.go", "b.go"}
+	contents := map[string][]string{
+		"a.go": {"one", "needle"},
+		"b.go": {"Needle again", "needle third"},
+	}
+	matches := GrepStream(files, func(file string, yield func(string) bool) {
+		for _, line := range contents[file] {
+			if !yield(line) {
+				return
+			}
+		}
+	}, "needle", 2)
+	if len(matches) != 2 || matches[0] != (Match{File: "a.go", Line: 2}) || matches[1] != (Match{File: "b.go", Line: 1}) {
+		t.Fatalf("matches = %#v", matches)
+	}
+}
+
 func containsSame(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

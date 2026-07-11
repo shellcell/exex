@@ -7,11 +7,10 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/dump"
 )
 
@@ -29,15 +28,15 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	m.rightScroll = 0
+	m.dasm.RightScroll = 0
 
-	if m.sourceFirst && m.srcFile != "" {
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
 		switch key {
 		case "esc", "backspace":
-			m.sourceFirst = false
+			m.dasm.SourceFirst = false
 			return m, nil
 		case "tab":
-			m.sourceFirst = false
+			m.dasm.SourceFirst = false
 			return m, nil
 		}
 		return m.updateSourceOpenSrc(key)
@@ -84,36 +83,36 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.jumpDisasmBoundary(true)
 	case "enter":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		inst := m.disasmInst[m.disasmCur]
+		inst := m.dasm.Inst[m.dasm.Cur]
 		if target, ok := m.followableAddr(inst.Text); ok {
 			m.loadDisasmAt(target)
 		} else {
 			m.setStatus("no in-file address to follow", true)
 		}
 	case "h":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		m.jumpHexAtAddr(m.disasmInst[m.disasmCur].Addr)
+		m.jumpHexAtAddr(m.dasm.Inst[m.dasm.Cur].Addr)
 	case "m":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		m.jumpRawAtAddr(m.disasmInst[m.disasmCur].Addr)
+		m.jumpRawAtAddr(m.dasm.Inst[m.dasm.Cur].Addr)
 	case "A":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		addr := m.disasmInst[m.disasmCur].Addr
+		addr := m.dasm.Inst[m.dasm.Cur].Addr
 		m.copyToClipboard(fmt.Sprintf("0x%0*x", m.file.AddrHexWidth(), addr), "address")
 	case "S":
-		if len(m.disasmInst) == 0 {
+		if len(m.dasm.Inst) == 0 {
 			return m, nil
 		}
-		addr := m.disasmInst[m.disasmCur].Addr
+		addr := m.dasm.Inst[m.dasm.Cur].Addr
 		if sym, ok := m.file.SymbolAt(addr); ok {
 			m.copyToClipboard(sym.Name, "symbol")
 		} else {
@@ -122,7 +121,7 @@ func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {
 	case "C":
 		m.copyFunctionDisasm()
 	case "e":
-		m.toggleSymbolAbbrevAll()
+		m.symbols.ToggleAbbrevAll(m)
 	case "a":
 		m.toggleDisasmAll()
 	}
@@ -154,8 +153,8 @@ func (m *Model) toggleDisasmAll() {
 		return
 	}
 	var addr uint64
-	if len(m.disasmInst) > 0 && m.disasmCur >= 0 && m.disasmCur < len(m.disasmInst) {
-		addr = m.disasmInst[m.disasmCur].Addr
+	if len(m.dasm.Inst) > 0 && m.dasm.Cur >= 0 && m.dasm.Cur < len(m.dasm.Inst) {
+		addr = m.dasm.Inst[m.dasm.Cur].Addr
 	}
 	m.file.SetDisasmAll(on)
 	m.resetDisasmImageState()
@@ -173,14 +172,14 @@ func (m *Model) toggleDisasmAll() {
 func (m *Model) resetDisasmImageState() {
 	m.invalidateDisasmDerivedJobs()
 	m.disasmSvc = nil // rebuilt over the new ExecImage()
-	m.disasmInst = nil
-	m.disasmBuilt = false
-	m.disasmDecoding = false
-	m.disasmPosLo, m.disasmPosHi = 0, 0
-	m.disasmCur, m.disasmTop = 0, 0
-	m.disasmPositioned = false
-	m.execSecStarts = nil
-	m.disasmAsmCache = nil
+	m.dasm.Inst = nil
+	m.dasm.Built = false
+	m.dasm.Decoding = false
+	m.dasm.PosLo, m.dasm.PosHi = 0, 0
+	m.dasm.Cur, m.dasm.Top = 0, 0
+	m.dasm.Positioned = false
+	m.dasm.ExecSecStarts = nil
+	m.dasm.AsmCache = nil
 	m.clearDisasmDisplayCaches()
 }
 
@@ -207,11 +206,11 @@ func (m *Model) invalidateDisasmDerivedJobs() {
 // the clipboard as plain "addr: bytes  text" lines — the natural unit for bug
 // reports, diffs and pasting into an LLM. The range comes from the symbol extent.
 func (m *Model) copyFunctionDisasm() {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		m.setStatus("no disassembly loaded", true)
 		return
 	}
-	sym, ok := m.file.SymbolAt(m.disasmInst[m.disasmCur].Addr)
+	sym, ok := m.file.SymbolAt(m.dasm.Inst[m.dasm.Cur].Addr)
 	if !ok || sym.Size == 0 {
 		m.setStatus("cursor is not inside a sized function", true)
 		return
@@ -225,52 +224,12 @@ func (m *Model) copyFunctionDisasm() {
 	m.copyBlob(text, fmt.Sprintf("copied %d instructions of %s", len(insts), sym.Display()))
 }
 
-// extractTargetAt finds the first 0x-prefixed hex number in text starting at
-// or after `from`. Returns the address, the byte range it occupied in text,
-// and whether anything was found. A "0x…" immediately preceded by "#" is an ARM
-// immediate (e.g. "[sp,#0x8]"), never a followable address, so it is skipped —
-// without this, hex immediates would be mis-coloured as links and annotated.
-func extractTargetAt(text string, from int) (addr uint64, start, end int, ok bool) {
-	search := from
-	var idx int
-	for {
-		rel := strings.Index(text[search:], "0x")
-		if rel < 0 {
-			return 0, 0, 0, false
-		}
-		idx = search + rel
-		if idx > 0 && text[idx-1] == '#' {
-			search = idx + 2 // ARM immediate, not an address — keep looking
-			continue
-		}
-		break
-	}
-	rest := text[idx+2:]
-	n := 0
-	for n < len(rest) {
-		c := rest[n]
-		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
-			n++
-			continue
-		}
-		break
-	}
-	if n == 0 {
-		return 0, 0, 0, false
-	}
-	v, err := strconv.ParseUint(rest[:n], 16, 64)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	return v, idx, idx + 2 + n, true
-}
-
 // followableAddr returns the first hex literal in text that maps to somewhere
 // inside this binary.
 func (m *Model) followableAddr(text string) (uint64, bool) {
 	from := 0
 	for {
-		addr, _, end, ok := extractTargetAt(text, from)
+		addr, _, end, ok := disasm.FindAddrOperand(text, from)
 		if !ok {
 			return 0, false
 		}

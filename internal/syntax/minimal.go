@@ -25,6 +25,8 @@ var (
 	mhFunctionName = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	mhType         = lipgloss.NewStyle().Foreground(lipgloss.Color("176"))
 	mhLiteral      = lipgloss.NewStyle().Foreground(lipgloss.Color("215"))
+	mhOperator     = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	mhPreproc      = lipgloss.NewStyle().Foreground(lipgloss.Color("173"))
 )
 
 type minimalPalette struct {
@@ -38,6 +40,8 @@ type minimalPalette struct {
 	functionName lipgloss.Style
 	typ          lipgloss.Style
 	literal      lipgloss.Style
+	operator     lipgloss.Style // operators / punctuation
+	preproc      lipgloss.Style // C preprocessor directives (#include, #define, …)
 }
 
 var defaultMinimalPalette = minimalPalette{
@@ -51,6 +55,8 @@ var defaultMinimalPalette = minimalPalette{
 	functionName: mhFunctionName,
 	typ:          mhType,
 	literal:      mhLiteral,
+	operator:     mhOperator,
+	preproc:      mhPreproc,
 }
 
 var (
@@ -65,6 +71,8 @@ var (
 		functionName: lipgloss.NewStyle().Foreground(lipgloss.Color("#8fbcbb")),
 		typ:          lipgloss.NewStyle().Foreground(lipgloss.Color("#ebcb8b")),
 		literal:      lipgloss.NewStyle().Foreground(lipgloss.Color("#d08770")),
+		operator:     lipgloss.NewStyle().Foreground(lipgloss.Color("#81a1c1")),
+		preproc:      lipgloss.NewStyle().Foreground(lipgloss.Color("#5e81ac")),
 	}
 	solarizedDarkMinimalPalette  = solarizedMinimalPalette("#93a1a1", "#586e75")
 	solarizedLightMinimalPalette = solarizedMinimalPalette("#586e75", "#93a1a1")
@@ -93,6 +101,12 @@ func minimalPaletteForTheme(name string) minimalPalette {
 // styles.
 func minimalPaletteFromChroma(p theme.Palette) minimalPalette {
 	fg := func(hex string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)) }
+	or := func(a, b string) string {
+		if a != "" {
+			return a
+		}
+		return b
+	}
 	return minimalPalette{
 		text:         fg(p.Foreground),
 		comment:      fg(p.Comment),
@@ -104,6 +118,8 @@ func minimalPaletteFromChroma(p theme.Palette) minimalPalette {
 		functionName: fg(p.Function),
 		typ:          fg(p.Type),
 		literal:      fg(p.Number),
+		operator:     fg(or(p.Operator, p.Foreground)),
+		preproc:      fg(or(p.Comment, p.Keyword)),
 	}
 }
 
@@ -119,6 +135,8 @@ func solarizedMinimalPalette(text, comment string) minimalPalette {
 		functionName: lipgloss.NewStyle().Foreground(lipgloss.Color("#268bd2")),
 		typ:          lipgloss.NewStyle().Foreground(lipgloss.Color("#6c71c5")),
 		literal:      lipgloss.NewStyle().Foreground(lipgloss.Color("#cb4b16")),
+		operator:     lipgloss.NewStyle().Foreground(lipgloss.Color(comment)),
+		preproc:      lipgloss.NewStyle().Foreground(lipgloss.Color("#cb4b16")),
 	}
 }
 
@@ -207,7 +225,30 @@ func mhLine(line string, cs commentSyntax, inBlock bool, pal minimalPalette) (st
 	var b strings.Builder
 	n := len(line)
 	wantFuncName := false
-	for i := 0; i < n; {
+	i := 0
+	// Preprocessor directive: a line whose first non-blank character is '#' in a
+	// C-style (block-comment) language — #include, #define, #pragma, #ifdef, … —
+	// colours the whole "#directive" token. Hash-comment languages handle '#' as a
+	// comment instead (see commentFor), so this only fires for C-family sources.
+	if !inBlock && cs.block {
+		ws := i
+		for ws < n && (line[ws] == ' ' || line[ws] == '\t') {
+			ws++
+		}
+		if ws < n && line[ws] == '#' {
+			j := ws + 1
+			for j < n && (line[j] == ' ' || line[j] == '\t') {
+				j++
+			}
+			for j < n && isIdentChar(line[j]) {
+				j++
+			}
+			b.WriteString(line[i:ws]) // leading whitespace, unstyled
+			b.WriteString(pal.preproc.Render(line[ws:j]))
+			i = j
+		}
+	}
+	for i < n {
 		if inBlock {
 			if j := strings.Index(line[i:], "*/"); j >= 0 {
 				b.WriteString(pal.comment.Render(line[i : i+j+2]))
@@ -260,12 +301,31 @@ func mhLine(line string, cs commentSyntax, inBlock bool, pal minimalPalette) (st
 				wantFuncName = false
 			}
 			i = j
+		case isOperatorByte(c):
+			j := i + 1
+			for j < n && isOperatorByte(line[j]) {
+				j++
+			}
+			b.WriteString(pal.operator.Render(line[i:j]))
+			i = j
 		default:
 			b.WriteString(pal.text.Render(line[i : i+1]))
 			i++
 		}
 	}
 	return b.String(), inBlock
+}
+
+// isOperatorByte reports whether c is an operator or punctuation byte. Runs of
+// these share the operator colour, so multi-byte operators (==, &&, ::) read as
+// one unit. '/' reaches here only when the comment cases above did not consume it.
+func isOperatorByte(c byte) bool {
+	switch c {
+	case '+', '-', '*', '/', '%', '=', '<', '>', '!', '&', '|', '^', '~',
+		'?', ':', ';', ',', '.', '(', ')', '[', ']', '{', '}', '@':
+		return true
+	}
+	return false
 }
 
 func mhStyleForCategory(cat mhKeywordCategory, pal minimalPalette) lipgloss.Style {

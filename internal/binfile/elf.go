@@ -192,11 +192,13 @@ func (f *File) loadELF() error {
 
 	staticSyms, _ := ef.Symbols()
 	dynSyms, _ := ef.DynamicSymbols()
+	symCount := len(staticSyms) + len(dynSyms)
 	type symKey struct {
 		name string
 		addr uint64
 	}
-	seen := map[symKey]bool{}
+	seen := make(map[symKey]bool, symCount)
+	f.Symbols = make([]Symbol, 0, symCount)
 	add := func(s elf.Symbol) {
 		if s.Name == "" || isELFMappingSymbol(s.Name) || isELFLocalLabel(s) {
 			return
@@ -233,7 +235,7 @@ func (f *File) loadELF() error {
 	for _, s := range dynSyms {
 		add(s)
 	}
-	f.appendELFImportSymbols(ef)
+	f.appendELFImportSymbols(ef, dynSyms)
 
 	if f.elfHasDWARF(ef) {
 		f.dwarfAvail = true
@@ -267,9 +269,8 @@ func decodeReloc(data []byte, off int, is64 bool, bo binary.ByteOrder) (roff uin
 // slot (and, by pairing .rela.plt with .plt, each PLT stub) is named after the
 // imported dynamic symbol it binds to. This resolves calls/jumps to imported
 // functions in the disassembly for x86-64 and 386.
-func (f *File) appendELFImportSymbols(ef *elf.File) {
-	dyn, err := ef.DynamicSymbols()
-	if err != nil || len(dyn) == 0 {
+func (f *File) appendELFImportSymbols(ef *elf.File, dyn []elf.Symbol) {
+	if len(dyn) == 0 {
 		return
 	}
 	is64 := ef.Class == elf.ELFCLASS64

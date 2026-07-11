@@ -1,149 +1,92 @@
 package ui
 
+// The shell half of the "Jump to" command palette (internal/ui/modals/palette),
+// plus the address/symbol navigation the rest of the app calls.
+//
+// Searching needs the symbol table, the demangled-name index, the section list
+// and the string corpus; routing a result to a view needs to know what the views
+// are. Both stay here. The overlay owns the prompt, the scope selector and the
+// result list.
+
 import (
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
+	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
+	"github.com/rabarbra/exex/internal/ui/scope"
+	"github.com/rabarbra/exex/internal/ui/views/strs"
 )
-
-// gotoKind tags a palette result so it can be coloured and routed to the right
-// view on Enter.
-type gotoKind uint8
-
-const (
-	gkAddr gotoKind = iota
-	gkSymbol
-	gkSection
-	gkString
-	gkLib
-)
-
-func (k gotoKind) tag() string {
-	switch k {
-	case gkSymbol:
-		return "sym"
-	case gkSection:
-		return "sec"
-	case gkString:
-		return "str"
-	case gkLib:
-		return "lib"
-	default:
-		return "addr"
-	}
-}
-
-// gotoScope selects what the palette searches.
-type gotoScope uint8
-
-const (
-	gsAll      gotoScope = iota // symbols + sections + a typed address
-	gsSymbols                   // symbols only
-	gsSections                  // section names
-	gsStrings                   // printable strings (its own scope — the corpus is large)
-	gsLibs                      // linked libraries
-	gsAddr                      // a raw address (virtual, or physical when toggled)
-	gsScopeCount
-)
-
-func (s gotoScope) String() string {
-	switch s {
-	case gsSymbols:
-		return "symbols"
-	case gsSections:
-		return "sections"
-	case gsStrings:
-		return "strings"
-	case gsLibs:
-		return "libraries"
-	case gsAddr:
-		return "address"
-	default:
-		return "all"
-	}
-}
-
-// gotoTarget is one selectable palette entry, tagged by kind for colour + routing.
-type gotoTarget struct {
-	kind    gotoKind
-	label   string
-	addr    uint64
-	off     uint64 // file offset (sections / strings with no virtual address)
-	sym     binfile.Symbol
-	hasAddr bool
-}
-
-func (t gotoTarget) isSym() bool { return t.kind == gkSymbol }
 
 // gotoMaxResults bounds how many matches we keep (the list scrolls; the visible
 // window is sized to the terminal height in renderGotoModal).
 const gotoMaxResults = 500
 
-// recomputeGoto rebuilds the palette's result list from the current input and
-// scope. Each scope searches its corpus; "all" spans symbols + sections and
-// offers a parseable address. Strings/libraries are their own scopes (the string
-// corpus is large enough that scanning it on every keystroke must be opt-in).
-func (m *Model) recomputeGoto() {
-	m.gotoResults = m.gotoResults[:0]
-	m.gotoSel = 0
-	m.gotoTop = 0
-	val := strings.TrimSpace(m.gotoInput.Value())
+// Search builds the palette's result list. Each scope searches its corpus; "all"
+// spans symbols + sections and offers a parseable address. Strings/libraries are
+// their own scopes (the string corpus is large enough that scanning it on every
+// keystroke must be opt-in). It satisfies palette.Host.
+func (m *Model) Search(val string, sc scope.Scope, phys bool) []palettemodal.Target {
 	if val == "" {
-		return
+		return nil
 	}
 	needle := strings.ToLower(val)
-	sc := m.gotoScope
+	var out []palettemodal.Target
 
-	if sc == gsAll || sc == gsAddr {
-		m.appendAddrTarget(val)
+	if sc == scope.All || sc == scope.Addr {
+		out = m.appendAddrTarget(out, val, phys)
 	}
-	if sc == gsAll || sc == gsSymbols {
-		m.appendSymbolMatches(needle)
+	if sc == scope.All || sc == scope.Symbols {
+		out = m.appendSymbolMatches(out, needle)
 	}
-	if sc == gsAll || sc == gsSections {
-		m.appendSectionMatches(needle)
+	if sc == scope.All || sc == scope.Sections {
+		out = m.appendSectionMatches(out, needle)
 	}
-	if sc == gsStrings {
-		m.appendStringMatches(needle)
+	if sc == scope.Strings {
+		out = m.appendStringMatches(out, needle)
 	}
-	if sc == gsLibs {
-		m.appendLibMatches(needle)
+	if sc == scope.Libs {
+		out = m.appendLibMatches(out, needle)
 	}
+	return out
 }
+
+// HasPhysAddrs satisfies palette.Host.
+func (m *Model) HasPhysAddrs() bool { return m.file.HasPhysAddrs() }
 
 // appendAddrTarget offers a parseable address, resolving a physical address to
 // its virtual one when physical mode is on.
-func (m *Model) appendAddrTarget(val string) {
+func (m *Model) appendAddrTarget(out []palettemodal.Target, val string, phys bool) []palettemodal.Target {
 	a, err := parseAddr(val)
 	if err != nil {
-		return
+		return out
 	}
 	label := "address  0x" + strconv.FormatUint(a, 16)
-	if m.gotoAddrPhys {
+	if phys {
 		v, ok := m.file.PhysToVirtual(a)
 		if !ok {
-			return // physical address not in any section's load range
+			return out // physical address not in any section's load range
 		}
 		label = fmt.Sprintf("physical 0x%x → virtual 0x%x", a, v)
 		a = v
 	}
-	m.gotoResults = append(m.gotoResults, gotoTarget{kind: gkAddr, label: label, addr: a, hasAddr: true})
+	return append(out, palettemodal.Target{Kind: palettemodal.KindAddr, Label: label, Addr: a, HasAddr: true})
 }
 
 // appendSymbolMatches ranks symbols (raw + demangled name) exact → prefix →
 // substring and appends bounded buckets. The palette never shows more than
 // gotoMaxResults entries, so keep at most that many per rank instead of
 // collecting/sorting every match on large symbol tables for every keystroke.
-func (m *Model) appendSymbolMatches(needle string) {
-	remain := gotoMaxResults - len(m.gotoResults)
+func (m *Model) appendSymbolMatches(out []palettemodal.Target, needle string) []palettemodal.Target {
+	remain := gotoMaxResults - len(out)
 	if remain <= 0 {
-		return
+		return out
 	}
 	lowerName, lowerDem := m.file.LowerNames()
-	var exact, prefix, substr []gotoTarget
-	add := func(dst *[]gotoTarget, t gotoTarget) {
+	var exact, prefix, substr []palettemodal.Target
+	add := func(dst *[]palettemodal.Target, t palettemodal.Target) {
 		if len(*dst) < remain {
 			*dst = append(*dst, t)
 		}
@@ -157,7 +100,7 @@ func (m *Model) appendSymbolMatches(needle string) {
 		if !strings.Contains(name, needle) && (dem == "" || !strings.Contains(dem, needle)) {
 			continue
 		}
-		t := gotoTarget{kind: gkSymbol, label: s.Display(), addr: s.Addr, sym: s, hasAddr: true}
+		t := palettemodal.Target{Kind: palettemodal.KindSymbol, Label: s.Display(), Addr: s.Addr, Sym: s, HasAddr: true}
 		switch {
 		case name == needle || dem == needle:
 			add(&exact, t)
@@ -171,113 +114,105 @@ func (m *Model) appendSymbolMatches(needle string) {
 		}
 	}
 flush:
-	for _, bucket := range [][]gotoTarget{exact, prefix, substr} {
+	for _, bucket := range [][]palettemodal.Target{exact, prefix, substr} {
 		for _, t := range bucket {
-			if len(m.gotoResults) >= gotoMaxResults {
-				return
+			if len(out) >= gotoMaxResults {
+				return out
 			}
-			m.gotoResults = append(m.gotoResults, t)
+			out = append(out, t)
 		}
 	}
+	return out
 }
 
 // appendSectionMatches matches section names.
-func (m *Model) appendSectionMatches(needle string) {
+func (m *Model) appendSectionMatches(out []palettemodal.Target, needle string) []palettemodal.Target {
 	for i := range m.file.Sections {
 		s := m.file.Sections[i]
-		if s.Size == 0 || !containsFold(s.Name, needle) {
+		if s.Size == 0 || !layout.ContainsFold(s.Name, needle) {
 			continue
 		}
-		m.gotoResults = append(m.gotoResults, gotoTarget{
-			kind: gkSection, label: s.Name, addr: s.Addr, off: s.Offset, hasAddr: s.Addr != 0,
+		out = append(out, palettemodal.Target{
+			Kind: palettemodal.KindSection, Label: s.Name, Addr: s.Addr, Off: s.Offset, HasAddr: s.Addr != 0,
 		})
-		if len(m.gotoResults) >= gotoMaxResults {
-			return
+		if len(out) >= gotoMaxResults {
+			return out
 		}
 	}
+	return out
 }
 
 // appendStringMatches matches printable strings (zero-copy over the file image).
-func (m *Model) appendStringMatches(needle string) {
+func (m *Model) appendStringMatches(out []palettemodal.Target, needle string) []palettemodal.Target {
 	for _, e := range m.file.Strings() {
-		if !containsFoldBytes(m.file.StringBytes(e), needle) {
+		if !layout.ContainsFoldBytes(m.file.StringBytes(e), needle) {
 			continue
 		}
-		m.gotoResults = append(m.gotoResults, gotoTarget{
-			kind: gkString, label: sanitizeString(m.file.StringText(e)), addr: e.Addr, off: e.Offset, hasAddr: e.HasAddr,
+		out = append(out, palettemodal.Target{
+			Kind: palettemodal.KindString, Label: strs.Sanitize(m.file.StringText(e)), Addr: e.Addr, Off: e.Offset, HasAddr: e.HasAddr,
 		})
-		if len(m.gotoResults) >= gotoMaxResults {
-			return
+		if len(out) >= gotoMaxResults {
+			return out
 		}
 	}
+	return out
 }
 
 // appendLibMatches matches linked-library names.
-func (m *Model) appendLibMatches(needle string) {
+func (m *Model) appendLibMatches(out []palettemodal.Target, needle string) []palettemodal.Target {
 	if m.file.Info == nil {
-		return
+		return out
 	}
 	for _, lib := range m.file.Info.DynamicLibs {
-		if containsFold(lib, needle) {
-			m.gotoResults = append(m.gotoResults, gotoTarget{kind: gkLib, label: lib})
+		if layout.ContainsFold(lib, needle) {
+			out = append(out, palettemodal.Target{Kind: palettemodal.KindLib, Label: lib})
 		}
-		if len(m.gotoResults) >= gotoMaxResults {
-			return
+		if len(out) >= gotoMaxResults {
+			return out
 		}
 	}
+	return out
 }
 
-// activateGoto acts on the highlighted result, routing it to the natural view for
-// its kind; with no results it falls back to a bare address parse.
-func (m *Model) activateGoto() {
-	if m.gotoSel < 0 || m.gotoSel >= len(m.gotoResults) {
-		if a, err := parseAddr(strings.TrimSpace(m.gotoInput.Value())); err == nil {
+// Activate acts on the highlighted result, routing it to the natural view for its
+// kind; with no results it falls back to a bare address parse. It satisfies
+// palette.Host.
+func (m *Model) Activate(t palettemodal.Target, hasSel bool, typed string) {
+	if !hasSel {
+		if a, err := parseAddr(typed); err == nil {
 			m.gotoAddr(a)
 		} else {
 			m.setStatus("nothing to go to", true)
 		}
 		return
 	}
-	t := m.gotoResults[m.gotoSel]
 	// In the Sources view, an address/symbol target navigates by source line.
-	if m.mode == modeSources && (t.kind == gkAddr || t.kind == gkSymbol) {
-		m.openSourceForAddr(t.addr)
+	if m.mode == modeSources && (t.Kind == palettemodal.KindAddr || t.Kind == palettemodal.KindSymbol) {
+		m.openSourceForAddr(t.Addr)
 		return
 	}
-	switch t.kind {
-	case gkSymbol:
-		m.openSymbol(t.sym)
-	case gkSection, gkString:
-		if t.hasAddr {
-			m.gotoAddr(t.addr)
+	switch t.Kind {
+	case palettemodal.KindSymbol:
+		m.openSymbol(t.Sym)
+	case palettemodal.KindSection, palettemodal.KindString:
+		if t.HasAddr {
+			m.gotoAddr(t.Addr)
 		} else {
-			m.openRawAt(t.off)
+			m.openRawAt(t.Off)
 		}
-	case gkLib:
-		m.openLibsFiltered(t.label)
+	case palettemodal.KindLib:
+		m.openLibsFiltered(t.Label)
 	default:
-		m.gotoAddr(t.addr)
+		m.gotoAddr(t.Addr)
 	}
 }
 
 // openLibsFiltered shows the Libraries view filtered to lib (where the user can
 // open it as primary).
 func (m *Model) openLibsFiltered(lib string) {
-	m.libsFilter.SetValue(lib)
+	m.libs.Filter.SetValue(lib)
 	m.setMode(modeLibs)
 	m.setStatus("library: "+lib+"  (press o to open it)", false)
-}
-
-// gotoSelectionAddr returns the address of the highlighted result, falling back
-// to a bare address typed into the prompt.
-func (m *Model) gotoSelectionAddr() (uint64, bool) {
-	if m.gotoSel >= 0 && m.gotoSel < len(m.gotoResults) {
-		return m.gotoResults[m.gotoSel].addr, true
-	}
-	if a, err := parseAddr(strings.TrimSpace(m.gotoInput.Value())); err == nil {
-		return a, true
-	}
-	return 0, false
 }
 
 // openSourceForAddr opens the Sources view at the source location that addr
@@ -288,20 +223,8 @@ func (m *Model) openSourceForAddr(addr uint64) {
 		m.setStatus(fmt.Sprintf("no source mapping for 0x%x", addr), true)
 		return
 	}
-	m.ensureSources()
-	m.openSourceFile(file, line)
-}
-
-// closeGoto dismisses the goto modal and resets its transient state.
-func (m *Model) closeGoto() {
-	m.gotoActive = false
-	m.gotoInput.Blur()
-	m.gotoInput.SetValue("")
-	m.gotoResults = m.gotoResults[:0]
-	m.gotoSel = 0
-	m.gotoTop = 0
-	m.gotoScope = gsAll
-	m.gotoAddrPhys = false
+	m.sources.Ensure(m.viewContext())
+	m.openSourceFileInDisasm(file, line)
 }
 
 // gotoTargetString navigates to a startup goto argument: an explicit address
@@ -380,13 +303,13 @@ func (m *Model) resolveSymbolGoto(s string) (best binfile.Symbol, count int, exa
 
 // openSymbolsFiltered shows the Symbols view with q applied as the live filter.
 func (m *Model) openSymbolsFiltered(q string) {
-	m.symbolsFilter.SetValue(q)
-	m.recomputeSymbols()
-	m.symbolsCur = 0
-	m.symbolsTop = 0
+	m.symbols.Filter.SetValue(q)
+	m.symbols.Recompute(m.viewContext())
+	m.symbols.Cur = 0
+	m.symbols.Top = 0
 	m.viewportDetached = false
 	m.setMode(modeSymbols)
-	m.setStatus(fmt.Sprintf("%d symbols match %q", len(m.symbolsFiltered), q), false)
+	m.setStatus(fmt.Sprintf("%d symbols match %q", len(m.symbols.Filtered), q), false)
 }
 
 // gotoAddr jumps to a virtual address: disasm if it lands in executable code,

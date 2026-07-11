@@ -10,72 +10,37 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	searchutil "github.com/rabarbra/exex/internal/bytesearch"
+	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
 )
 
-type searchMode = searchutil.Mode
+// openSearch opens the in-view search prompt.
+func (m *Model) openSearch() { m.search.Open() }
 
-const (
-	searchModeAuto = searchutil.ModeAuto
-	searchModeText = searchutil.ModeText
-	searchModeHex  = searchutil.ModeHex
-)
+// SearchCaseChanged drops the disasm search cache, whose hits were computed
+// under the previous case setting. It satisfies search.Host.
+func (m *Model) SearchCaseChanged() { m.searchResults.Reset("") }
 
-func searchModeName(mode searchMode) string {
-	return mode.String()
-}
+// SearchHint describes what the active view searches. It satisfies search.Host.
+func (m *Model) SearchHint() string { return m.current().searchHint() }
 
-func (m *Model) cycleSearchMode() {
-	m.searchMode = searchutil.NextMode(m.searchMode)
-}
-
-// searchSwitch is one clickable toggle in the search popup: a dim name and the
-// current value rendered as a pill ("name ⟦value⟧").
-type searchSwitch struct {
-	name   string
-	value  string
-	toggle func()
-}
-
-// label is the plain "name ⟦value⟧" text; its width drives both the render and
-// the mouse hit-test so they can't drift.
-func (s searchSwitch) label() string { return s.name + " ⟦" + s.value + "⟧" }
-
-// searchSwitchSep separates the switch segments; searchSwitchLine is the 0-based
-// content row the switch strip occupies inside the modal (header, hint, blank,
-// input, blank, switches).
-const (
-	searchSwitchSep  = "   "
-	searchSwitchLine = 5
-)
-
-// searchSwitches returns the mode / direction / origin toggles. The render and
-// the mouse hit-test both build from this, so they can't drift.
-func (m *Model) searchSwitches() []searchSwitch {
-	dir := "→ forward"
-	if !m.searchForward {
-		dir = "← backward"
-	}
-	origin := "cursor"
-	if !m.searchFromCursor {
-		if m.searchForward {
-			origin = "start"
-		} else {
-			origin = "end"
+// SubmitSearch runs the typed query in the active view, re-pinning the byte views
+// when the search moved the cursor. It satisfies search.Host.
+func (m *Model) SubmitSearch(query string, o searchmodal.Options) tea.Cmd {
+	before := m.activeCursorState()
+	m.searchQuery = query
+	inclusive := o.FromCursor
+	cmd := m.runSearchWithOrigin(o.Forward, inclusive, o.FromCursor)
+	if before != m.activeCursorState() {
+		m.viewportDetached = false
+		switch m.mode {
+		case modeHex:
+			m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Hex)
+		case modeRaw:
+			m.byteViews.PinCurrentSectionStart(m.viewContextPtr(), hexraw.Raw)
 		}
 	}
-	return []searchSwitch{
-		{"mode", searchModeName(m.searchMode), m.cycleSearchMode},
-		{"dir", dir, func() { m.searchForward = !m.searchForward }},
-		{"origin", origin, func() { m.searchFromCursor = !m.searchFromCursor }},
-	}
-}
-
-// openSearch opens the search prompt. Repeat search still uses searchQuery via
-// n/N, but each new prompt starts empty so stale input is not accidentally reused.
-func (m *Model) openSearch() {
-	m.searchActive = true
-	m.searchInput.SetValue("")
-	m.searchInput.Focus()
+	return cmd
 }
 
 // runSearch finds the next/previous match for the current query in the active
@@ -85,36 +50,16 @@ func (m *Model) runSearch(forward, inclusive bool) tea.Cmd {
 	return m.runSearchWithOrigin(forward, inclusive, true)
 }
 
-func (m *Model) runSearchFromPrompt() tea.Cmd {
-	inclusive := true
-	if !m.searchFromCursor {
-		inclusive = false
-	}
-	return m.runSearchWithOrigin(m.searchForward, inclusive, m.searchFromCursor)
-}
-
 func (m *Model) runSearchWithOrigin(forward, inclusive bool, fromCursor bool) tea.Cmd {
 	if m.searchQuery == "" {
 		m.setStatus("no search query", true)
 		return nil
 	}
-	switch m.mode {
-	case modeDisasm:
-		return m.runDisasmSearch(forward, inclusive, fromCursor)
-	case modeHex:
-		m.runHexSearch(forward, inclusive, fromCursor)
-	case modeRaw:
-		m.runRawSearch(forward, inclusive, fromCursor)
-	case modeSources:
-		m.runSourcesSearch(forward, inclusive)
-	default:
-		m.setStatus("search isn't available in this view", true)
-	}
-	return nil
+	return m.current().runSearch(forward, inclusive, fromCursor)
 }
 
 func (m *Model) runDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
-	if m.sourceFirst && m.srcFile != "" {
+	if m.dasm.SourceFirst && m.dasm.SrcFile != "" {
 		m.searchInSourceFile(forward, inclusive)
 		return nil
 	}
@@ -122,29 +67,37 @@ func (m *Model) runDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 }
 
 func (m *Model) runHexSearch(forward, inclusive, fromCursor bool) {
-	m.ensureHex()
-	start := m.hexCur
+	ctx := m.viewContext()
+	data, cur, ok := m.byteViews.Data(&ctx, hexraw.Hex)
+	if !ok {
+		return
+	}
+	start := cur
 	if !fromCursor {
 		if forward {
 			start = -1
 		} else {
-			start = m.hexImg.Len() - 1
+			start = data.Len() - 1
 		}
 	}
-	m.hexCur = m.searchBytesAt(m.hexImg, start, forward, inclusive)
+	m.byteViews.SetCursor(hexraw.Hex, m.searchBytesAt(data, start, forward, inclusive))
 }
 
 func (m *Model) runRawSearch(forward, inclusive, fromCursor bool) {
-	m.ensureRaw()
-	start := m.rawCur
+	ctx := m.viewContext()
+	data, cur, ok := m.byteViews.Data(&ctx, hexraw.Raw)
+	if !ok {
+		return
+	}
+	start := cur
 	if !fromCursor {
 		if forward {
 			start = -1
 		} else {
-			start = len(m.rawData) - 1
+			start = data.Len() - 1
 		}
 	}
-	m.rawCur = m.searchBytesAt(rawBytes(m.rawData), start, forward, inclusive)
+	m.byteViews.SetCursor(hexraw.Raw, m.searchBytesAt(data, start, forward, inclusive))
 }
 
 func (m *Model) runSourcesSearch(forward, inclusive bool) {
@@ -171,11 +124,14 @@ func (m *Model) stopDisasmSearch() {
 }
 
 func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool) int {
-	pat := searchutil.ParsePattern(m.searchQuery, m.searchMode)
+	pat := searchutil.ParsePattern(m.searchQuery, m.search.Mode())
 	if len(pat) == 0 {
 		m.setStatus("empty search pattern", true)
 		return cur
 	}
+	// Case-insensitive only for text patterns (folding a hex byte pattern would
+	// wrongly match unrelated letter values).
+	fold := !m.search.CaseSensitive() && searchutil.IsTextPattern(m.searchQuery, m.search.Mode())
 	start := cur
 	if !inclusive {
 		if forward {
@@ -184,7 +140,7 @@ func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool)
 			start--
 		}
 	}
-	if i := findBytesSrc(data, pat, start, forward); i >= 0 {
+	if i := findBytesSrc(data, pat, start, forward, fold); i >= 0 {
 		m.setStatus(fmt.Sprintf("match at offset +0x%x", i), false)
 		return i
 	}
@@ -198,7 +154,7 @@ func (m *Model) searchBytesAt(data byteSource, cur int, forward, inclusive bool)
 // same speed as a flat []byte and never allocates. Matches are within a region
 // (sections) — the meaningful scope; a pattern straddling a section boundary in
 // the flattened image is not matched.
-func findBytesSrc(data byteSource, pat []byte, start int, forward bool) int {
+func findBytesSrc(data byteSource, pat []byte, start int, forward, fold bool) int {
 	n := data.Len()
 	if len(pat) == 0 || len(pat) > n {
 		return -1
@@ -214,7 +170,7 @@ func findBytesSrc(data byteSource, pat []byte, start int, forward bool) int {
 			}
 			from := max(start-r.Off, 0)
 			if from <= len(r.B)-len(pat) {
-				if j := searchutil.FindBytes(r.B, pat, from, true); j >= 0 {
+				if j := searchutil.FindBytesFold(r.B, pat, from, true, fold); j >= 0 {
 					return r.Off + j
 				}
 			}
@@ -231,7 +187,7 @@ func findBytesSrc(data byteSource, pat []byte, start int, forward bool) int {
 		}
 		hi := min(start-r.Off, len(r.B)-len(pat)) // greatest local start to consider
 		if hi >= 0 {
-			if j := searchutil.FindBytes(r.B, pat, hi, false); j >= 0 {
+			if j := searchutil.FindBytesFold(r.B, pat, hi, false, fold); j >= 0 {
 				return r.Off + j
 			}
 		}

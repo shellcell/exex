@@ -471,19 +471,20 @@ Extract all the pathes from strings
 
 0x000106b6 should match with $0x106b6
 
-## 33. dyld shared cache resolution
+## 33. dyld shared cache resolution  ✅ (done)
 
 On macOS the system libraries (libsystem_kernel, libc++, the frameworks, the
 Swift runtime, …) are not standalone files — they live in the dyld shared cache
 (`/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/`, split into a main
 cache plus `.1/.2/…` sub-caches). Today that means:
 
-- **Syscalls (#30):** `-o syscalls-full` can't scan the libraries that actually
-  contain the `svc` instructions (the app's own code makes no direct syscalls),
-  so macOS apps report nothing. The unresolved libraries are currently collapsed
-  into a single "in the dyld shared cache — can't be scanned" note.
-- **Libs (#29):** cache-resident libraries are tagged `·cache` and can't be
-  opened.
+- ✅ **Syscalls (#30):** `-o syscalls-full` now extracts the cache-resident
+  system libraries and follows the `LC_REEXPORT_DYLIB` chain
+  (app → libSystem.B → libsystem_kernel), giving macOS binaries a real syscall
+  surface (~460 distinct syscalls for a typical binary).
+- ✅ **Libs (#29):** a `·cache` library opens as primary — extracted from the
+  shared cache with a compact per-image __LINKEDIT (all symbols, ~hundreds of
+  KB), fully browsable (sections/symbols/disasm).
 
 Add a reader for the dyld shared cache format — parse its header, mappings (each
 maps an address range to a file offset across the cache + sub-caches), and image
@@ -491,9 +492,11 @@ list (address → install path) — so a cache-resident dylib can be extracted (
 split segments stitched back via the mappings into a scannable Mach-O image).
 Then:
 
-- resolve cache-resident lib paths for `syscalls-full` and scan their `svc`
-  sites (giving macOS a real syscall surface);
-- let the Libs view open a `·cache` library as primary (its symbols/disasm).
+Both delivered: `internal/dyldcache` (reader + `ExtractImage` un-sharer),
+wired into `libopen.go` (open as primary) and `dump/syscalls.go` (transitive
+cache-resident scan). Not attempted: reconstructing chained fixups for a cache
+dylib (its relocs stay empty — the cache pre-applies them; see item #38 for the
+on-disk Mach-O fixups decoder).
 
 ## 34. CPU-feature detection  ✅ (done)
 
@@ -540,3 +543,218 @@ Reduce duplication and the cache-invalidation bug surface in `internal/ui`:
 - **UX consistency pass**: a uniform address vocabulary (`synthetic` / `load`
   (LMA) / physical) across disasm/hex/sections/Info, and group the `?` help by
   the same role order as the footer hints.
+
+## 38. Mach-O dynamic fixups decoder (relocs)  ✅ (done)
+
+The Relocations view was empty for essentially every real macOS binary: a linked
+Mach-O carries its relocations not as the per-section relocs `debug/macho` parses
+(those exist only in object files) but as dyld metadata, in one of two shapes —
+`LC_DYLD_INFO(_ONLY)` compact bind/rebase opcode streams (the classic format, and
+what the Go linker still emits) or `LC_DYLD_CHAINED_FIXUPS` in-place pointer
+chains (the modern system-toolchain format, e.g. `/bin/ls`).
+
+`internal/binfile/macho_fixups.go` decodes both into the neutral `Reloc` model:
+binds become named entries resolved to their imported symbol + library (the
+useful part — the image's import table), rebases record the slid pointer slots;
+arm64e authenticated pointers surface as `AUTH_BIND` / `AUTH_REBASE`. Wired into
+the lazy `relocBuild` hook so it costs nothing until the relocs view/`-o relocs`
+is opened, and `machoHasRelocs` reports true off a cheap load-command scan.
+Validated byte-for-byte against the system `dyld_info` (exact bind/rebase counts
+and addresses for `/bin/ls` chained and a Go binary's DYLD_INFO). Note: dylibs
+un-shared from the dyld cache still show empty relocs — the cache already applied
+the fixups and un-sharing drops the (now meaningless) fixup commands.
+
+Follow-ups landed with it: reloc bind targets are now demangled (Itanium/Rust
+in-process, in both the TUI and `-o relocs`), and the relocs view gained the
+shared row-navigation surface — `d`/`h`/`m` jump to the patched address in
+disasm/hex/raw, `e` toggles argument abbreviation, double-click follows to hex,
+and the text filter matches the demangled spelling.
+
+## 39. Performance / footprint review  (plan)
+
+A whole-binary pass on size, startup, CPU and RAM — recording where things stand
+and where the real (vs imagined) headroom is, so future work targets measured
+costs, not guesses. Baseline (arm64, Go 1.26, this tree):
+
+- **Binary size** — 15.2 MB dev build; **11.5 MB stripped** (`-s -w`, the default
+  release) ; **9.9 MB lite** (drops Chroma). Composition: runtime ~4 MB, reflection
+  type metadata ~3.7 MB, `golang.org/x/arch` disassembler 1.25 MB, Chroma +
+  regexp2 ~0.8 MB (already `lite`-gated), `uax29` 0.32 MB (terminal width, via
+  `x/ansi`/`go-runewidth` — unavoidable), `yaml.v3` 0.32 MB (config), exex ~1 MB.
+- **Startup** — ~1 ms warm (`ui.New` 455 KB alloc); parse (cold open) ~7 ms.
+- **RAM** — retained-after-load heap **2.9 MB** (excellent); peak-heap-in-use
+  ~138 MB and peak RSS ~204 MB, but that is the perfreport *render/decode
+  benchmark* churning, not steady state.
+
+So the headline levers (strip, Chroma-gating) are **already done**. Genuine,
+ranked opportunities remaining:
+
+1. **Render/decode allocation churn** — ✅ *investigated + first win landed.*
+   Profiling (memprofile of the disasm render bench) showed the render path is
+   already well-cached (asm-text cache, height cache, `viewCache`): the big
+   allocations — `decodeAcross` (~840 MB) and DWARF `loadLines` (~176 MB) — are
+   **one-time setup** the profile captures alongside the render, GC-reclaimed, not
+   steady-state churn (retained heap stays 2.9 MB). The one demonstrable waste:
+   `disasmInstVisualHeight` rendered the *full styled row* (`disasmInstRows`) just
+   to count its lines, on every height cache-miss (first paint, every resize/wrap
+   toggle, over the whole instruction list). Added `disasmInstRowCount` — the same
+   row-splitting decisions with none of the string building — pinned to the real
+   renderer by `TestDisasmInstRowCountMatches`. Measured: the height pass over 1024
+   instructions dropped **5.53 ms → 0.30 ms, 1.42 MB → 45 KB, 23.9k → 2.8k allocs**
+   (~18×), and the warm disasm frame fell ~380 KB → ~339 KB. The remaining 138 MB
+   perfreport peak is the one-time `disasm-all` full-image decode (~162 MB) — the
+   disassembler stringifying every instruction once — which is inherent to that
+   view and not reduced here.
+2. **Per-host-arch disasm build** — `x/arch` (1.25 MB) links every arch; an
+   opt-in single-arch tag (host only) would shave ~0.5–0.8 MB for distro builds.
+   Marginal, and complicates the matrix — low priority.
+3. **`yaml.v3` → a smaller config decoder** (~0.3 MB). Config is user-facing, so
+   low ROI and some churn risk; only if a hand-rolled reader is otherwise wanted.
+4. **Reflection type metadata (~3.7 MB)** is the largest reducible block but the
+   hardest — it tracks the reflect/encoding usage across deps; not worth chasing
+   without a specific offender identified by `-gcflags=-m`/deadcode analysis.
+
+Not a concern (measured, left alone): startup time, retained heap, `uax29`.
+
+## 40. Cross-view "open caret in…" modal  ✅ (done)
+
+The per-view `d`/`h`/`m` jumps (go to the caret address in disasm/hex/raw) only
+covered three destinations and had to be memorised. **Space** (or `>`) now opens a
+single discoverable menu from any address-bearing view (disasm, hex, raw,
+symbols, sections, strings, relocs): it takes the address under the cursor and
+lists every *other* view as a destination. A header shows what the address *is* —
+its covering symbol (demangled, with offset) and section, and, when the
+pointer-sized word there is itself a mapped address (a GOT slot, a vtable entry),
+where it points (`→ 0x… _malloc`). Each row previews its landing — the covering
+function (Disasm), section + address (Hex), file offset (Raw), the symbol
+(Symbols), the section (Sections), the quoted text of a string at that address
+(Strings), or the relocation type + bound symbol (Relocs). Rows carry the target
+view's number key as a badge, usable as a shortcut (press `5` → Hex); disabled
+rows (e.g. Disasm on a data address, no string here) are dimmed with the reason.
+Enter/click/digit navigates; the selection skips unreachable rows. The caret
+carries a virtual address *and/or* a file offset, so an offset-only position (a
+string in an unmapped section, a raw byte in a file header) still opens in Raw —
+and in Strings, matched by offset — while the address-keyed targets dim with "no
+virtual address"; the address views light up whenever the offset resolves to one.
+The **Info** view has no cursor, so the modal opens on the binary's natural start:
+its entry point, else the lowest mapped address. **Libs** and **Sources** are
+deliberately excluded — their rows are a library/source path, not an address, and
+each already has its full targeted-jump surface on Enter (imported symbols /
+source pane) and `o` (open as primary). Shell-side (`internal/ui/jumpto.go`),
+reusing the existing jump actions plus small
+`CaretAddr`/`SelectByAddr`/`SelectByOffset`/`StringAt`/`StringAtOffset` accessors
+on each view; the `d`/`h`/`m` shortcuts stay as fast paths.
+
+## 41. `f` global value search + modal polish  ✅ (done)
+
+Three distinct navigations, now clearly separated: **goto (`g`)** is a *directory*
+(jump to a named symbol/section/string/lib or a typed address); **open-in
+(space)** takes the caret's *position* to another view; **`f`** searches the
+binary's *content* for the *value* under the caret. goto can't do the third — it
+only indexes named entities — so `f` has its own results engine.
+
+`f` opens a seed picker of the searchable things at the caret — the covering
+**Symbol**, a **String**, the containing **Section**, the **Address**, and the
+**Pointer** the bytes hold (read by address, or straight from the raw bytes at a
+file offset, so a Raw caret over an unmapped header still works), plus the
+**Library**/**Path** in the Libs/Sources views. Choosing one runs a **global
+value search** across four sources, each a concurrent command (`tea.Batch`) whose
+hits **stream** into one list as it finishes: **disasm** operand references
+(reusing the parallel xref scanner — the slow one), **data** words holding the
+address (pointer-width byte scan), **strings** containing the text, and **relocs**
+targeting it. Matching is by *value*, not text, so the `0x` prefix is irrelevant;
+disasm covers compact/RIP-relative x86 refs via the disassembler's resolution,
+the data scan finds pointer-width absolute pointers. Results are tagged with the
+view they belong to and **filterable by view** (a facet bar with per-source
+counts, `⇥`/`⇧⇥` to cycle), with a `/` text filter and Enter-to-jump; a facet
+still scanning shows "searching…", not "no occurrences". `c` in the picker copies
+the seed's value. (`internal/ui/findsearch.go` + `findto.go`.)
+
+Modal polish landed across goto, the find results, and the syscalls modal: all
+three now reserve a **fixed body height** (responsive to terminal resize, but no
+vertical bounce as results stream in or the filter narrows), gained a **title↔tabs
+gap** and consistent indentation, and **centre their empty/searching message**
+horizontally and vertically. Goto results show a **view badge**; the syscalls
+modal cycles scope on **`⇥`** (not just `t`). The find modal shows a live
+**"● searching N sources"** indicator while the concurrent scans complete.
+
+Follow-ups: **`l`** opens a **free-text global search** — type a symbol, string,
+or hex/decimal address and it runs the same content scan (a hex literal or a
+resolved symbol name searches disasm/data/relocs; any text searches strings), so
+you can search for something not under the caret. And an **address search now
+surfaces the string that lives *at* the target address** (tagged "at target"), so
+searching an address tells you what it is when it's a string. In the **Hex/Raw**
+views the Pointer seed reads the **pointer-word-aligned** value the follow-pointer
+action would use, so `f` mid-pointer matches `Enter`.
+
+The **`l`** free-text query splits cleanly: a `0x…` literal is an **address**
+search (operand refs / pointer words / reloc targets / the string at it); anything
+else is a **literal text/byte** search — instruction text (`disasm`), string
+content (`strings`), and the raw file bytes (`data` = hex/raw) — no symbol
+resolution, since an address is only ever a `0x…` value.
+
+**Perf/allocation review** (no perfreport regression: parse 6.8 ms / 9.2 MB,
+disasm render ~331 KB, retained heap 2.92 MB, peak 138 MB — all stable). The
+whole-image scan shared by xref / find / syscalls decoded every instruction into a
+multi-hundred-MB slice just to filter it; a streamed decode (`DecodeRangeFunc`,
+callback per instruction, no slice) cut the xref/find scan's allocation from
+**457 MB → 134 MB (3.4×)** with identical results (guarded by
+`TestDecodeRangeFuncMatchesSlice`). Per-instruction matching is allocation-free
+(`ContainsFold` folds against a pre-lowercased needle); the data/strings/relocs
+sources are near-zero alloc (the byte scan is 81 KB / 22 allocs). The residual
+~134 MB / 8.9 M allocs is x/arch formatting each instruction's text — inherent to
+decoding, and only reducible by structural operand matching (a disasm-package
+change, left as a future item). The syscall direct scan still materialises its
+slice (it needs a look-back window for number recovery); streaming it via a ring
+buffer is a follow-up.
+
+**Case sensitivity + search-modal unification.** Text matching is now
+**case-insensitive by default** with a per-search toggle. The `l` free-text search
+toggles case with `^i` in its prompt; the in-view `/` search (disasm / hex / raw)
+gained a **case** switch (click or `^i`) alongside mode/dir/origin. Caret-seeded
+`f` searches stay **case-sensitive** — a seed is an exact value from the binary.
+The byte/hex search folds ASCII case only for *text* patterns (a hex byte pattern
+never folds); `bytesearch.FindBytesFold` + `IsTextPattern` back this. The in-view
+search prompt was restyled to match the goto/find modals (title, gap, indented
+input, switch strip, hint). Verified the change is behaviour-preserving: a
+ground-truth scan of the Chrome Framework's x86_64 slice finds exactly the 3
+`0xbadbeef` instructions the default (case-insensitive) disasm search returns (the
+arm64 slice has none — it builds the constant via `mov`/`movk`).
+
+## 42. Structured section decoder  (idea)
+
+exex has the two ends of the spectrum — the **Hex** view (raw bytes) and the
+**interpreted** views (Symbols, Relocs, Libs) — plus the **⇧H header modal**,
+which already decodes the ELF header and Mach-O `mach_header` + load commands
+field-by-field. The gap in the middle is showing *how* a table is encoded: a
+**structured record view** that overlays a fixed-layout section with typed field
+annotations (offset, raw bytes, decoded value) per record.
+
+**Symtab is the flagship example.** The Symbols view shows the *result*; a
+structured view would show each `Elf64_Sym` / Mach-O `nlist_64` / COFF record:
+`st_name` (string-table offset → resolved string), `st_info` (bind+type nibbles),
+`st_other`, `st_shndx`, `st_value`, `st_size` — with the raw bytes each occupies.
+It bridges Hex ↔ Symbols and teaches the on-disk format, which is squarely exex's
+niche as a format explorer.
+
+**Scope: the well-defined fixed-record tables, not a generic "decode any
+section" engine** (open-ended, and mostly redundant with the interpreted views).
+Strong candidates, roughly in value order — tables exex does *not* yet decode
+structurally:
+- ELF **`.dynamic`** (`Elf_Dyn` tag/value pairs: NEEDED, RPATH, FLAGS, …) — genuinely
+  useful and currently unshown anywhere.
+- ELF **`.note.*`** (`.note.gnu.build-id`, `.note.ABI-tag`, package metadata).
+- ELF symbol **versioning** (`.gnu.version` / `.gnu.version_r` / `.gnu.version_d`).
+- **symtab / nlist** records as an encoding view (complements the Symbols view).
+- ELF program headers as records (the header modal covers the ELF header, not the
+  per-segment `Phdr` table).
+
+Lower priority (already interpreted elsewhere): relocation sections (Relocs view),
+Mach-O load commands (header modal), PE import/export directories (Libs/Symbols).
+
+**Shape.** Either a Hex-view overlay mode (annotate the selected section's bytes
+with field names/values, navigate record→record) or a dedicated table view driven
+by a small per-section-type record-layout registry in `binfile`. Start with
+`.dynamic` (highest signal, least redundant) + the symtab encoding view; extend to
+notes/version as the registry grows. Medium effort; the decoders are small and
+self-contained, mirroring `rawheader.go`.

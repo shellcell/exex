@@ -84,6 +84,42 @@ func TestMinimalHighlightFollowsThemePalette(t *testing.T) {
 	}
 }
 
+func TestMinimalHighlightOperatorsAndPreproc(t *testing.T) {
+	src := []string{
+		"#include <stdio.h>",
+		"  # define N 3",
+		"a += b == c;",
+	}
+	out := minimalHighlight("x.c", src, "")
+	for i, line := range src {
+		if plain := ansi.Strip(out[i]); plain != line {
+			t.Fatalf("line %d plain text = %q, want %q", i, plain, line)
+		}
+	}
+	// The directive token (leading whitespace excluded) is preproc-styled.
+	if !strings.Contains(out[0], mhPreproc.Render("#include")) {
+		t.Errorf("#include not preproc-styled: %q", out[0])
+	}
+	if !strings.Contains(out[1], mhPreproc.Render("# define")) {
+		t.Errorf("spaced directive not preproc-styled: %q", out[1])
+	}
+	// A run of operator bytes shares the operator colour ("+=", "==").
+	if !strings.Contains(out[2], mhOperator.Render("+=")) {
+		t.Errorf("operator run += not styled: %q", out[2])
+	}
+	if !strings.Contains(out[2], mhOperator.Render("==")) {
+		t.Errorf("operator run == not styled: %q", out[2])
+	}
+}
+
+// A '#' mid-line in a hash-comment language must stay a comment, not a directive.
+func TestMinimalHashLanguageNotTreatedAsPreproc(t *testing.T) {
+	out := minimalHighlight("x.py", []string{"#!/usr/bin/env python"}, "")[0]
+	if !strings.Contains(out, mhComment.Render("#!/usr/bin/env python")) {
+		t.Errorf("python shebang not treated as comment: %q", out)
+	}
+}
+
 func TestMinimalPlainTextUsesThemeForeground(t *testing.T) {
 	got := minimalHighlight("plain.txt", []string{"plain + text"}, "solarized-light")[0]
 	want := lipgloss.NewStyle().Foreground(lipgloss.Color("#586e75")).Render("plain")

@@ -29,12 +29,8 @@ func benchView(b *testing.B, md mode) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 48})
 	mm := m.(*Model)
 	mm.switchMode(md)
-	for mm.disasmDecoding {
-		addr := mm.disasmPendingAddr
-		win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-		m, _ = mm.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
-		mm = m.(*Model)
-	}
+	m = settleDisasmDecode(m)
+	mm = m.(*Model)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -43,7 +39,12 @@ func benchView(b *testing.B, md mode) {
 	}
 }
 
-func BenchmarkViewDisasm(b *testing.B)  { benchView(b, modeDisasm) }
-func BenchmarkViewHex(b *testing.B)     { benchView(b, modeHex) }
-func BenchmarkViewSymbols(b *testing.B) { benchView(b, modeSymbols) }
-func BenchmarkViewRelocs(b *testing.B)  { benchView(b, modeRelocs) }
+func BenchmarkViewDisasm(b *testing.B)   { benchView(b, modeDisasm) }
+func BenchmarkViewHex(b *testing.B)      { benchView(b, modeHex) }
+func BenchmarkViewSymbols(b *testing.B)  { benchView(b, modeSymbols) }
+func BenchmarkViewRelocs(b *testing.B)   { benchView(b, modeRelocs) }
+func BenchmarkViewRaw(b *testing.B)      { benchView(b, modeRaw) }
+func BenchmarkViewStrings(b *testing.B)  { benchView(b, modeStrings) }
+func BenchmarkViewSections(b *testing.B) { benchView(b, modeSections) }
+func BenchmarkViewLibs(b *testing.B)     { benchView(b, modeLibs) }
+func BenchmarkViewInfo(b *testing.B)     { benchView(b, modeInfo) }

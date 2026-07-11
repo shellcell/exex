@@ -11,20 +11,20 @@ import (
 // the last frame), and the accumulated moves are applied together on the tick.
 func TestKeyCoalescing(t *testing.T) {
 	m := &Model{
-		theme:        DefaultTheme(),
-		file:         &binfile.File{},
-		mode:         modeStrings,
-		layoutState:  layoutState{width: 80, height: 24},
-		stringsState: stringsState{stringsList: make([]binfile.StringEntry, 5000)},
+		theme:       DefaultTheme(),
+		file:        &binfile.File{},
+		mode:        modeStrings,
+		layoutState: layoutState{width: 80, height: 24},
 	}
-	m.stringsFilter = newPromptInput("", "/ ")
-	m.recomputeStrings()
+	m.strs.List = make([]binfile.StringEntry, 5000)
+	m.strs.Filter = newPromptInput("", "/ ")
+	m.strs.Recompute(m.viewContext())
 
 	m.enqueueNavKey("down")
 	if !m.keyTicking {
 		t.Fatal("first nav key should start the coalescing tick")
 	}
-	first := m.stringsCur
+	first := m.strs.Cur
 	if first == 0 {
 		t.Fatal("first press should move the cursor immediately")
 	}
@@ -36,15 +36,15 @@ func TestKeyCoalescing(t *testing.T) {
 			t.Fatal("a coalesced repeat must leave the frame clean so View() is skipped")
 		}
 	}
-	if m.stringsCur != first {
-		t.Fatalf("repeats moved the cursor mid-flood (%d → %d); they should only accumulate", first, m.stringsCur)
+	if m.strs.Cur != first {
+		t.Fatalf("repeats moved the cursor mid-flood (%d → %d); they should only accumulate", first, m.strs.Cur)
 	}
 	if m.pendingKeyN == 0 {
 		t.Fatal("repeats should have accumulated a pending count")
 	}
 
 	m.handleKeyTick()
-	if m.stringsCur == first {
+	if m.strs.Cur == first {
 		t.Fatal("tick should apply the accumulated moves")
 	}
 	if m.pendingKeyN != 0 {

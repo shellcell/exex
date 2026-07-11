@@ -15,17 +15,17 @@ func (m *Model) Init() tea.Cmd {
 	// immediately; names switch from raw to demangled when it completes. Skipped
 	// when the user disabled demangling (the pass allocates 1+ GB on large C++/
 	// Swift binaries) — toggling it on later computes lazily.
-	if len(m.file.Symbols) > 0 && !m.cfg.Behavior.NoDemangle {
+	if len(m.file.Symbols) > 0 && len(m.demangledNames) == 0 && !m.cfg.Behavior.NoDemangle {
 		cmds = append(cmds, m.demangleCmd())
 	}
 	// If the configured default view is Disasm, switchMode already flagged a
 	// decode; kick it off here (New can't return a Cmd).
-	if m.disasmDecoding && !m.disasmBuilt && m.dis != nil {
-		cmds = append(cmds, m.decodeDisasmCmd(m.disasmPendingAddr))
+	if m.dasm.Decoding && !m.dasm.Built && m.dis != nil {
+		cmds = append(cmds, m.decodeDisasmCmd(m.dasm.PendingAddr))
 	}
 	// Pre-warm the initial disasm window right after the first frame. This keeps
 	// startup responsive while making the view ready for the common next action.
-	cmds = append(cmds, func() tea.Msg { return prewarmMsg{} })
+	cmds = append(cmds, m.backgroundCmd(func() tea.Msg { return prewarmMsg{} }))
 	return tea.Batch(cmds...)
 }
 
@@ -39,9 +39,9 @@ type prewarmMsg struct{}
 // remains on-demand because it is large and only source-aware views need it.
 func (m *Model) handlePrewarm() (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.dis != nil && !m.disasmBuilt && !m.disasmDecoding {
-		m.disasmDecoding = true
-		m.disasmPendingAddr = m.disasmInitAddr
+	if m.dis != nil && !m.dasm.Built && !m.dasm.Decoding {
+		m.dasm.Decoding = true
+		m.dasm.PendingAddr = m.disasmInitAddr
 		cmds = append(cmds, m.decodeDisasmCmd(m.disasmInitAddr))
 	}
 	return m, tea.Batch(cmds...)
@@ -53,6 +53,9 @@ func (m *Model) setStatus(s string, isError bool) {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if done, ok := msg.(backgroundDoneMsg); ok {
+		return m.handleBackgroundDone(done)
+	}
 	// Assume each message changes the screen; the rare no-op paths (coalesced
 	// wheel events) clear this so View() can reuse the previous frame.
 	m.viewDirty = true
@@ -94,6 +97,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syscallFullDoneMsg:
 		return m.handleSyscallFullDone(msg)
 
+	case findPartialMsg:
+		return m.handleFindPartial(msg)
+
 	case disasmPrefetchMsg:
 		return m, nil
 
@@ -126,37 +132,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) forwardToFocusedInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch {
-	case m.gotoActive:
-		before := m.gotoInput.Value()
-		m.gotoInput, cmd = m.gotoInput.Update(msg)
-		if m.gotoInput.Value() != before {
-			m.recomputeGoto()
+	case m.palette.Active():
+		cmd = m.palette.HandleInput(m, msg)
+	case m.search.Active():
+		cmd = m.search.HandleInput(msg)
+	case m.symbols.Filter.Focused():
+		before := m.symbols.Filter.Value()
+		m.symbols.Filter, cmd = m.symbols.Filter.Update(msg)
+		if m.symbols.Filter.Value() != before {
+			m.symbols.Recompute(m.viewContext())
 		}
-	case m.searchActive:
-		m.searchInput, cmd = m.searchInput.Update(msg)
-	case m.symbolsFilter.Focused():
-		before := m.symbolsFilter.Value()
-		m.symbolsFilter, cmd = m.symbolsFilter.Update(msg)
-		if m.symbolsFilter.Value() != before {
-			m.recomputeSymbols()
+	case m.sections.Filter.Focused():
+		before := m.sections.Filter.Value()
+		m.sections.Filter, cmd = m.sections.Filter.Update(msg)
+		if m.sections.Filter.Value() != before {
+			m.sections.Recompute()
 		}
-	case m.sectionsFilter.Focused():
-		before := m.sectionsFilter.Value()
-		m.sectionsFilter, cmd = m.sectionsFilter.Update(msg)
-		if m.sectionsFilter.Value() != before {
-			m.recomputeSections()
+	case m.strs.Filter.Focused():
+		before := m.strs.Filter.Value()
+		m.strs.Filter, cmd = m.strs.Filter.Update(msg)
+		if m.strs.Filter.Value() != before {
+			m.strs.Recompute(m.viewContext())
 		}
-	case m.stringsFilter.Focused():
-		before := m.stringsFilter.Value()
-		m.stringsFilter, cmd = m.stringsFilter.Update(msg)
-		if m.stringsFilter.Value() != before {
-			m.recomputeStrings()
-		}
-	case m.sourcesFilter.Focused():
-		before := m.sourcesFilter.Value()
-		m.sourcesFilter, cmd = m.sourcesFilter.Update(msg)
-		if m.sourcesFilter.Value() != before {
-			m.recomputeSourceFiles()
+	case m.sources.Filter.Focused():
+		before := m.sources.Filter.Value()
+		m.sources.Filter, cmd = m.sources.Filter.Update(msg)
+		if m.sources.Filter.Value() != before {
+			m.sources.Recompute(m.viewContext())
 		}
 	}
 	return m, cmd
@@ -167,37 +169,31 @@ func (m *Model) resize(width, height int) {
 		m.clearAllViewCaches()
 	}
 	m.width, m.height = width, height
-	bodyH := m.bodyHeight()
-	m.headerVP.SetWidth(m.width)
-	m.headerVP.SetHeight(bodyH)
-	m.srcVP.SetWidth(m.width / 2)
-	m.srcVP.SetHeight(bodyH)
 }
 
 func (m *Model) handleDisasmReady(msg disasmReadyMsg) (tea.Model, tea.Cmd) {
 	// Ignore late delivery if a synchronous jump already loaded a newer span.
-	if (msg.file != nil && msg.file != m.file) || !m.disasmDecoding || msg.addr != m.disasmPendingAddr {
+	if (msg.file != nil && msg.file != m.file) || !m.dasm.Decoding || msg.addr != m.dasm.PendingAddr {
 		return m, nil
 	}
-	m.disasmInst = msg.insts
-	m.disasmPosLo = m.posLoFor(msg.posLo, msg.insts)
-	m.disasmPosHi = msg.posHi
-	m.sourceAsmRowCache = nil
-	m.disasmHeightCache = nil
-	m.disasmBuilt = true
-	m.disasmDecoding = false
-	m.disasmPendingAddr = 0
+	m.dasm.Inst = msg.span.Insts
+	m.dasm.PosLo, m.dasm.PosHi = msg.span.PosLo, msg.span.PosHi
+	m.dasm.SourceAsmRowCache = nil
+	m.dasm.HeightCache = nil
+	m.dasm.Built = true
+	m.dasm.Decoding = false
+	m.dasm.PendingAddr = 0
 	// A prewarm decode (the user isn't in the disasm view yet) only stores the
 	// window — it must not switch the view or post a status. Positioning happens
 	// when the user actually opens disasm (switchMode sees disasmBuilt).
 	if m.mode != modeDisasm {
 		return m, nil
 	}
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		m.setStatus("no executable code to disassemble", true)
 		return m, nil
 	}
-	if !m.disasmPositioned && m.disasmInitAddr != 0 {
+	if !m.dasm.Positioned && m.disasmInitAddr != 0 {
 		m.loadDisasmAt(m.disasmInitAddr)
 	}
 	return m, nil
@@ -214,21 +210,24 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		m.searchCancelable = false
 		m.searchCancel = nil
 		if msg.hit != nil {
-			m.setDisasmWindow(msg.hit.win, msg.hit.insts)
-			m.disasmCur = msg.hit.idx
-			m.disasmTop = msg.hit.idx
-			m.disasmPositioned = true
+			if len(msg.hit.insts) > 0 {
+				m.dasm.SetSpan(m.disasmService().SpanFor(msg.hit.win, msg.hit.insts))
+				m.dasm.Cur = msg.hit.idx
+				m.dasm.Top = msg.hit.idx
+			} else {
+				m.loadDisasmAt(msg.hit.addr)
+			}
+			m.dasm.Positioned = true
 			m.setMode(modeDisasm)
 			m.searchCursorMode = searchCursorAtMatch
 			m.searchCursorAddr = msg.hit.addr
 			m.setStatus("match: "+strings.TrimSpace(msg.hit.text), false)
 			return m, m.prefetchDisasmAroundCmd(msg.hit.addr)
 		}
+		m.searchResults.SetExhausted(msg.next.forward)
 		if msg.next.forward {
-			m.searchResults.forwardExhausted = true
 			m.searchCursorMode = searchCursorAfterEnd
 		} else {
-			m.searchResults.backwardExhausted = true
 			m.searchCursorMode = searchCursorBeforeStart
 		}
 		m.searchCursorAddr = 0
@@ -236,7 +235,7 @@ func (m *Model) handleDisasmSearchProgress(msg disasmSearchProgressMsg) (tea.Mod
 		return m, nil
 	}
 	m.setStatus(msg.status, false)
-	return m, m.searchDisasmStepCmd(msg.next)
+	return m, m.backgroundCmd(m.searchDisasmStepCmd(msg.next))
 }
 
 // demangleDoneMsg carries the result of the background symbol demangle.
@@ -258,31 +257,21 @@ func (m *Model) applyDemangledNames(names []string) {
 // stale; they also appear in the disasm "<name>:" labels and disasm/hex
 // annotations, whose cached row heights wrap by name length.
 func (m *Model) invalidateSymbolNameState() {
-	m.symbolsByDisplay = nil
-	m.symbolsTreeInit = false
-	m.symbolsCollapsed = nil
-	if m.symbolsReady {
-		m.recomputeSymbols()
-	}
+	m.symbols.OnNamesChanged(m.viewContext())
 	m.clearSymbolNameCaches()
 	m.refreshModalSymbolNames()
 }
 
 func (m *Model) refreshModalSymbolNames() {
 	m.xrefCache = nil
-	if m.xrefActive {
+	if m.xref.Active() {
 		m.xrefLabel = m.xrefLabelForTarget(m.xrefTarget)
-		for i := range m.xrefResults {
-			m.xrefResults[i].sym = m.symbolDisplayAt(m.xrefResults[i].addr)
-		}
-		m.rebuildXrefRows()
+		m.xref.SetLabel(m.xrefLabel)
+		m.xref.RelabelSymbols(m.symbolDisplayAt)
 	}
 	m.syscallCached = nil
-	if m.syscallActive {
-		for i := range m.syscallResults {
-			m.syscallResults[i].Sym = m.symbolDisplayAt(m.syscallResults[i].Addr)
-		}
-		m.rebuildSyscallRows()
+	if m.syscalls.Active() {
+		m.syscalls.RelabelSymbols(m.symbolDisplayAt)
 	}
 }
 
@@ -315,7 +304,7 @@ func (m *Model) toggleDemangle() {
 // shows up immediately (with raw names) instead of blocking on startup.
 func (m *Model) demangleCmd() tea.Cmd {
 	f := m.file
-	return func() tea.Msg { return demangleDoneMsg{file: f, names: f.ComputeDemangled()} }
+	return m.backgroundCmd(func() tea.Msg { return demangleDoneMsg{file: f, names: f.ComputeDemangled()} })
 }
 
 // copyToClipboard puts text on the system clipboard and reports success or

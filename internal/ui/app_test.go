@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // TestRenderAllViews drives the model through every view (and some navigation)
@@ -40,11 +41,7 @@ func TestRenderAllViews(t *testing.T) {
 	pump := func(msg tea.Msg) {
 		t.Helper()
 		model, _ = model.Update(msg)
-		if mm, ok := model.(*Model); ok && mm.disasmDecoding {
-			addr := mm.disasmPendingAddr
-			win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-			model, _ = model.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
-		}
+		model = settleDisasmDecode(model)
 	}
 
 	pump(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -59,10 +56,10 @@ func TestRenderAllViews(t *testing.T) {
 	assertDisasmBudget := func() {
 		t.Helper()
 		mm, ok := model.(*Model)
-		if !ok || len(mm.disasmInst) == 0 {
+		if !ok || len(mm.dasm.Inst) == 0 {
 			return
 		}
-		if got := mm.disasmPosHi - mm.disasmPosLo; got > mm.disasmMaxBytes {
+		if got := mm.dasm.PosHi - mm.dasm.PosLo; got > mm.disasmMaxBytes {
 			t.Fatalf("disasm window = %d bytes, budget = %d", got, mm.disasmMaxBytes)
 		}
 	}
@@ -210,39 +207,39 @@ func TestCtrlENavigatesDisasmToEnd(t *testing.T) {
 	m.width, m.height = 120, 40
 	m.disasmMaxBytes = 16 << 10
 	m.jumpDisasmBoundary(false)
-	if len(m.disasmInst) < 2 {
+	if len(m.dasm.Inst) < 2 {
 		t.Skip("not enough disassembly to test end navigation")
 	}
-	m.disasmCur = 0
+	m.dasm.Cur = 0
 
 	model, _ := m.handleKey(keyPress("ctrl+e"))
 	m = model.(*Model)
-	if got, want := m.disasmCur, len(m.disasmInst)-1; got != want {
+	if got, want := m.dasm.Cur, len(m.dasm.Inst)-1; got != want {
 		t.Fatalf("ctrl+e disasm cursor = %d, want %d", got, want)
 	}
 	_ = m.View()
-	rowHeight := func(i int) int { return m.disasmInstVisualHeight(i, m.disasmRenderWidth()) }
-	if got, want := m.disasmTop, maxViewportTop(len(m.disasmInst), m.disasmViewportHeight(), rowHeight); got != want {
+	rowHeight := m.disasmRowHeight(m.disasmRenderWidth())
+	if got, want := m.dasm.Top, layout.MaxViewportTop(len(m.dasm.Inst), m.disasmViewportHeight(), rowHeight); got != want {
 		t.Fatalf("ctrl+e disasm top = %d, want bottom-aligned %d", got, want)
 	}
 
-	endCur := m.disasmCur
-	endTop := m.disasmTop
+	endCur := m.dasm.Cur
+	endTop := m.dasm.Top
 	model, _ = m.handleKey(keyPress("up"))
 	m = model.(*Model)
-	if got, want := m.disasmCur, endCur-1; got != want {
+	if got, want := m.dasm.Cur, endCur-1; got != want {
 		t.Fatalf("up after ctrl+e cursor = %d, want %d", got, want)
 	}
-	if got := m.disasmTop; got != endTop {
+	if got := m.dasm.Top; got != endTop {
 		t.Fatalf("up after ctrl+e top = %d, want unchanged %d", got, endTop)
 	}
 
 	model, _ = m.handleKey(keyPress("ctrl+e"))
 	m = model.(*Model)
 	_ = m.View()
-	endTop = m.disasmTop
-	endLo := m.disasmPosLo
-	endAddr := m.disasmInst[m.disasmCur].Addr
+	endTop = m.dasm.Top
+	endLo := m.dasm.PosLo
+	endAddr := m.dasm.Inst[m.dasm.Cur].Addr
 	m.wheelSuppressUntil = time.Time{}
 	model, _ = m.handleMouse(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 2, Y: 5}))
 	m = model.(*Model)
@@ -250,13 +247,13 @@ func TestCtrlENavigatesDisasmToEnd(t *testing.T) {
 		t.Fatal("wheel up after ctrl+e did not detach viewport")
 	}
 	if endTop == 0 && endLo > 0 {
-		if got := m.disasmPosLo; got >= endLo {
+		if got := m.dasm.PosLo; got >= endLo {
 			t.Fatalf("wheel up after ctrl+e posLo = %d, want before %d", got, endLo)
 		}
-		if got := m.disasmInst[m.disasmCur].Addr; got > endAddr {
+		if got := m.dasm.Inst[m.dasm.Cur].Addr; got > endAddr {
 			t.Fatalf("wheel up after ctrl+e cursor addr = 0x%x, want at or before 0x%x", got, endAddr)
 		}
-	} else if got := m.disasmTop; got >= endTop {
+	} else if got := m.dasm.Top; got >= endTop {
 		t.Fatalf("wheel up after ctrl+e top = %d, want less than %d", got, endTop)
 	}
 }
@@ -281,11 +278,11 @@ func TestMouseWheelOverRightDisasmPaneScrollsRightPane(t *testing.T) {
 	if !m.rightPaneActive() {
 		t.Skip("right pane is not active")
 	}
-	m.rightScroll = 9
+	m.dasm.RightScroll = 9
 
 	model, _ := m.handleMouse(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: m.width - 2, Y: 10}))
 	m = model.(*Model)
-	if got := m.rightScroll; got != 6 {
+	if got := m.dasm.RightScroll; got != 6 {
 		t.Fatalf("rightScroll after wheel up = %d, want 6", got)
 	}
 }
@@ -309,19 +306,18 @@ func TestGotoChromeMainOnChromiumBinary(t *testing.T) {
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	mm := model.(*Model)
 
-	mm.gotoInput.SetValue("ChromeMain")
-	mm.recomputeGoto()
-	if len(mm.gotoResults) == 0 {
+	mm.palette.SetQuery(mm, "ChromeMain")
+	if len(mm.palette.Results()) == 0 {
 		t.Fatal("expected goto results for ChromeMain")
 	}
-	mm.activateGoto()
+	mm.palette.Activate(mm)
 	if mm.mode != modeDisasm {
 		t.Fatalf("mode = %v, want disasm", mm.mode)
 	}
-	if len(mm.disasmInst) == 0 {
+	if len(mm.dasm.Inst) == 0 {
 		t.Fatal("expected disasm window after goto")
 	}
-	addr := mm.disasmInst[mm.disasmCur].Addr
+	addr := mm.dasm.Inst[mm.dasm.Cur].Addr
 	sym, ok := mm.file.SymbolAt(addr)
 	if !ok {
 		t.Fatalf("no symbol at current disasm address 0x%x", addr)
@@ -329,17 +325,17 @@ func TestGotoChromeMainOnChromiumBinary(t *testing.T) {
 	if sym.Display() != "ChromeMain" {
 		t.Fatalf("landed on %q at 0x%x, want ChromeMain", sym.Display(), addr)
 	}
-	if got := mm.disasmPosHi - mm.disasmPosLo; got > mm.disasmMaxBytes {
+	if got := mm.dasm.PosHi - mm.dasm.PosLo; got > mm.disasmMaxBytes {
 		t.Fatalf("disasm window = %d bytes, budget = %d", got, mm.disasmMaxBytes)
 	}
 
 	mm.jumpDisasmBoundary(false)
 	mm.searchQuery = "ChromeMain"
 	runModelCmd(t, mm, mm.runSearch(true, true))
-	if len(mm.disasmInst) == 0 {
+	if len(mm.dasm.Inst) == 0 {
 		t.Fatal("expected disasm window after search")
 	}
-	addr = mm.disasmInst[mm.disasmCur].Addr
+	addr = mm.dasm.Inst[mm.dasm.Cur].Addr
 	sym, ok = mm.file.SymbolAt(addr)
 	if !ok || sym.Display() != "ChromeMain" {
 		t.Fatalf("search landed on %q at 0x%x, want ChromeMain", sym.Display(), addr)
@@ -365,34 +361,34 @@ func TestSearchMovsblOnChromiumBinary(t *testing.T) {
 	m.jumpDisasmBoundary(false)
 	m.searchQuery = "movsbl"
 	runModelCmd(t, m, m.runSearch(true, true))
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		t.Fatal("expected disasm window after search")
 	}
-	got := strings.ToLower(m.disasmInst[m.disasmCur].Text)
+	got := strings.ToLower(m.dasm.Inst[m.dasm.Cur].Text)
 	if !strings.Contains(got, "movsbl") {
 		t.Fatalf("search landed on %q, want movsbl", got)
 	}
-	if got := m.disasmPosHi - m.disasmPosLo; got > m.disasmMaxBytes {
+	if got := m.dasm.PosHi - m.dasm.PosLo; got > m.disasmMaxBytes {
 		t.Fatalf("disasm window = %d bytes, budget = %d", got, m.disasmMaxBytes)
 	}
-	first := m.disasmInst[m.disasmCur].Addr
-	if len(m.searchResults.hits) < 2 {
-		t.Fatalf("expected cached movsbl hits, got %d", len(m.searchResults.hits))
+	first := m.dasm.Inst[m.dasm.Cur].Addr
+	if len(m.searchResults.Hits()) < 2 {
+		t.Fatalf("expected cached movsbl hits, got %d", len(m.searchResults.Hits()))
 	}
 	cmd := m.runSearch(true, false)
 	if m.searchRunning {
 		t.Fatal("expected cached movsbl hit not to start background search")
 	}
 	runModelCmd(t, m, cmd)
-	second := m.disasmInst[m.disasmCur].Addr
+	second := m.dasm.Inst[m.dasm.Cur].Addr
 	if second <= first {
 		t.Fatalf("expected later cached movsbl hit, got 0x%x after 0x%x", second, first)
 	}
 	for i := 0; i < 6; i++ {
 		runModelCmd(t, m, m.runSearch(true, false))
 	}
-	if len(m.searchResults.hits) < 6 {
-		t.Fatalf("expected several cached movsbl hits, got %d", len(m.searchResults.hits))
+	if len(m.searchResults.Hits()) < 6 {
+		t.Fatalf("expected several cached movsbl hits, got %d", len(m.searchResults.Hits()))
 	}
 	for i := 0; i < 4; i++ {
 		cmd = m.runSearch(false, false)
@@ -422,17 +418,17 @@ func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
 	m.jumpDisasmBoundary(false)
 	m.searchQuery = "badbeef"
 	runModelCmd(t, m, m.runSearch(true, true))
-	first := m.disasmInst[m.disasmCur].Addr
-	if !strings.Contains(strings.ToLower(m.disasmInst[m.disasmCur].Text), "badbeef") {
-		t.Fatalf("first hit = %q, want badbeef", m.disasmInst[m.disasmCur].Text)
+	first := m.dasm.Inst[m.dasm.Cur].Addr
+	if !strings.Contains(strings.ToLower(m.dasm.Inst[m.dasm.Cur].Text), "badbeef") {
+		t.Fatalf("first hit = %q, want badbeef", m.dasm.Inst[m.dasm.Cur].Text)
 	}
 	runModelCmd(t, m, m.runSearch(true, false))
-	second := m.disasmInst[m.disasmCur].Addr
+	second := m.dasm.Inst[m.dasm.Cur].Addr
 	if second <= first {
 		t.Fatalf("second hit 0x%x should be after first 0x%x", second, first)
 	}
 	runModelCmd(t, m, m.runSearch(true, false))
-	if !m.searchResults.forwardExhausted {
+	if !m.searchResults.Exhausted(true) {
 		t.Fatal("expected forward search to be exhausted after second badbeef hit")
 	}
 	cmd := m.runSearch(false, false)
@@ -440,7 +436,7 @@ func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
 		t.Fatal("expected backward repeat after end to use cache")
 	}
 	runModelCmd(t, m, cmd)
-	if got := m.disasmInst[m.disasmCur].Addr; got != second {
+	if got := m.dasm.Inst[m.dasm.Cur].Addr; got != second {
 		t.Fatalf("first backward cached hit = 0x%x, want last hit 0x%x", got, second)
 	}
 	cmd = m.runSearch(false, false)
@@ -448,7 +444,7 @@ func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
 		t.Fatal("expected second backward repeat after end to use cache")
 	}
 	runModelCmd(t, m, cmd)
-	if got := m.disasmInst[m.disasmCur].Addr; got != first {
+	if got := m.dasm.Inst[m.dasm.Cur].Addr; got != first {
 		t.Fatalf("second backward cached hit = 0x%x, want first hit 0x%x", got, first)
 	}
 	cmd = m.runSearch(false, false)
@@ -458,7 +454,7 @@ func TestSearchBadbeefBacktracksFromEndUsingCache(t *testing.T) {
 	if cmd != nil {
 		runModelCmd(t, m, cmd)
 	}
-	if got := m.disasmInst[m.disasmCur].Addr; got != first {
+	if got := m.dasm.Inst[m.dasm.Cur].Addr; got != first {
 		t.Fatalf("backward repeat before first hit moved to 0x%x, want to stay at first hit 0x%x", got, first)
 	}
 }
@@ -480,18 +476,18 @@ func TestDisasmNavigationAutoLoadsVisibleScreenOnChromiumBinary(t *testing.T) {
 	m.width, m.height = 120, 20
 
 	m.jumpDisasmBoundary(false)
-	m.disasmCur = len(m.disasmInst) - 1
-	_, oldHi := m.disasmPosLo, m.disasmPosHi
+	m.dasm.Cur = len(m.dasm.Inst) - 1
+	_, oldHi := m.dasm.PosLo, m.dasm.PosHi
 	m.updateDisasm("down")
-	if m.disasmPosHi <= oldHi {
+	if m.dasm.PosHi <= oldHi {
 		t.Fatal("expected navigation to load more code below")
 	}
 
 	m.jumpDisasmBoundary(true)
-	m.disasmCur = 0
-	oldLo, _ := m.disasmPosLo, m.disasmPosHi
+	m.dasm.Cur = 0
+	oldLo, _ := m.dasm.PosLo, m.dasm.PosHi
 	m.updateDisasm("up")
-	if m.disasmPosLo >= oldLo {
+	if m.dasm.PosLo >= oldLo {
 		t.Fatal("expected navigation to load more code above")
 	}
 }

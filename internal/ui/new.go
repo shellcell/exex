@@ -5,13 +5,21 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/disasm"
 	"github.com/rabarbra/exex/internal/explorer"
 	"github.com/rabarbra/exex/internal/syntax"
+	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
+	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	infoview "github.com/rabarbra/exex/internal/ui/views/info"
+	"github.com/rabarbra/exex/internal/ui/views/libs"
+	"github.com/rabarbra/exex/internal/ui/views/relocs"
+	"github.com/rabarbra/exex/internal/ui/views/sections"
+	"github.com/rabarbra/exex/internal/ui/views/sources"
+	"github.com/rabarbra/exex/internal/ui/views/strs"
+	"github.com/rabarbra/exex/internal/ui/views/symbols"
 )
 
 // New constructs a Bubble Tea model for a loaded binary.
@@ -33,71 +41,60 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	strFilter := newPromptInput("type to filter…", "/ ")
 	libFilter := newPromptInput("type to filter…", "/ ")
 	relocFilter := newPromptInput("symbol · type · section", "/ ")
-	gotoInput := newPromptInput("0x401000 or symbol name", "→ ")
 	searchInput := newPromptInput("hex bytes (de ad be ef) or text", "/ ")
 	sysFilter := newPromptInput("name · #num · symbol", "/ ")
 
 	m := &Model{
-		file:  f,
-		dis:   d,
-		cfg:   cfg,
-		theme: NewTheme(cfg),
-		mode:  modeInfo,
-		layoutState: layoutState{
-			headerVP: viewport.New(),
+		file:        f,
+		dis:         d,
+		cfg:         cfg,
+		theme:       NewTheme(cfg),
+		mode:        modeInfo,
+		layoutState: layoutState{},
+		info:        infoview.NewState(),
+		byteViews:   hexraw.NewState(),
+		sections: sections.State{
+			Sections: f.Sections,
+			Segments: f.Segments,
+			Filter:   secFilter,
 		},
-		sectionsState: sectionsState{
-			sections:       f.Sections,
-			segments:       f.Segments,
-			sectionsFilter: secFilter,
-		},
-		symbolsState: symbolsState{
-			symbolsFilter: filter,
-			symbolsTree:   cfg.Behavior.TreeSymbols,
-			symbolsAbbrev: cfg.Behavior.AbbrevArgs,
+		symbols: symbols.State{
+			Filter: filter,
+			Tree:   cfg.Behavior.TreeSymbols,
+			Abbrev: cfg.Behavior.AbbrevArgs,
 		},
 		disasmState: disasmState{
+			dasm: disasmview.State{
+				SourceState: disasmview.SourceState{ShowSource: true},
+			},
 			disasmMaxBytes:      defaultDisasmMaxBytes,
 			disasmSearchWorkers: 0,
-			showSource:          true,
-			srcVP:               viewport.New(),
 			srcHighlighter:      syntax.NewHighlighter(sourceSyntaxTheme(cfg)),
 		},
-		stringsState: stringsState{
-			stringsFilter: strFilter,
+		strs: strs.State{
+			Filter: strFilter,
 		},
-		sourcesState: sourcesState{
-			sourcesFilter: srcFilter,
-			sourcesTree:   cfg.Behavior.TreeSources,
+		sources: sources.State{
+			Filter: srcFilter,
+			Tree:   cfg.Behavior.TreeSources,
 		},
-		libsState: libsState{
-			libsTree:   cfg.Behavior.TreeLibs,
-			libsFilter: libFilter,
+		libs: libs.State{
+			Tree:   cfg.Behavior.TreeLibs,
+			Filter: libFilter,
 		},
-		relocsState: relocsState{
-			relocFilter: relocFilter,
+		relocs: relocs.State{
+			Filter: relocFilter,
 		},
-		gotoState: gotoState{
-			gotoInput: gotoInput,
-		},
-		searchState: searchState{
-			searchInput:      searchInput,
-			searchForward:    true,
-			searchFromCursor: true,
-		},
-		syscallState: syscallState{
-			syscallFilter: sysFilter,
-		},
+		gotoState: gotoState{},
 		interactionState: interactionState{
 			wrap:                cfg.Behavior.DefaultWrap,
 			treeCollapseDefault: cfg.Behavior.TreeCollapsed,
-			hexInterp:           -1, // resolved to the pointer-width hex on first use
 		},
 		keyState: newKeyState(cfg.Keys),
 	}
 	m.keyLog = os.Getenv("EXEX_KEYLOG") == "1"
-	m.buildSectionFacets()
-	m.recomputeSections()
+	m.sections.BuildFacets()
+	m.sections.Recompute()
 
 	// The disassembly is decoded lazily on first open (it can be large); record
 	// where the cursor should land — a guaranteed-executable address chosen by
@@ -121,6 +118,14 @@ func New(f *binfile.File, opts ...Options) (*Model, error) {
 	}
 	m.disasmSvc = explorer.NewDisasmService(f, d, m.disasmMaxBytes, m.disasmSearchWorkers)
 	m.disasmInitAddr = explorer.DefaultExecAddr(f, m.disasmTarget)
+	// The palette overlay owns its prompt but not its styling, so the shell builds
+	// the widget and hands it over.
+	m.palette.SetInput(newPromptInput("0x401000 or symbol name", "→ "))
+	m.xref.SetInput(newPromptInput("location · text · 0xaddr", "/ "))
+	m.findQueryModal.SetInput(newPromptInput("symbol · string · 0xaddr", "search "))
+	m.findResults.SetInput(newPromptInput("filter results", "/ "))
+	m.search.Init(searchInput)
+	m.syscalls.SetInput(sysFilter)
 
 	// Open the configured default view (info when unset).
 	m.switchMode(parseDefaultView(cfg.Behavior.DefaultView))

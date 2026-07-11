@@ -87,6 +87,25 @@ type Inst struct {
 	Class InstClass
 }
 
+// Mnemonic returns the instruction's first whitespace-delimited token, lowered.
+func Mnemonic(text string) string {
+	text = strings.TrimSpace(text)
+	if i := strings.IndexAny(text, " \t"); i >= 0 {
+		text = text[:i]
+	}
+	return strings.ToLower(text)
+}
+
+// IsAddrLoad reports whether op materialises an address (so its operand is worth
+// annotating with the symbol/section it points at).
+func IsAddrLoad(op string) bool {
+	switch op {
+	case "lea", "leaq", "leal", "leaw", "adr", "adrp":
+		return true
+	}
+	return false
+}
+
 // Classify maps a rendered instruction's mnemonic to an InstClass. Exported so
 // callers that already hold an Inst.Text (e.g. after Range) can re-classify.
 func Classify(text string) InstClass {

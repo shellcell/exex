@@ -76,12 +76,11 @@ func (m *Model) renderDisasm() string {
 // disasm view (the view still gives the jump targets priority).
 func (m *Model) renderDisasmScroll(w, h int) string {
 	ctx := m.viewContextPtr()
-	var addrMap func(addr uint64) *lipgloss.Style
+	var addrMap func(addr uint64) (lipgloss.Style, bool)
 	if m.rightPaneActive() && !m.dasm.SourceFirst && len(m.dasm.Inst) > 0 {
 		curFile, curLine, _ := m.file.LookupAddrCol(m.dasm.Inst[m.dasm.Cur].Addr)
-		addrMap = func(addr uint64) *lipgloss.Style {
-			st := m.dasm.AddrMapStyle(ctx, addr, curFile, curLine)
-			return &st
+		addrMap = func(addr uint64) (lipgloss.Style, bool) {
+			return m.dasm.AddrMapStyle(ctx, addr, curFile, curLine), true
 		}
 	}
 	return m.dasm.RenderScroll(ctx, w, h, addrMap)

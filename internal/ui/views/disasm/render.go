@@ -200,7 +200,12 @@ func (st *State) RowHeight(ctx *view.Context, w int) func(int) int {
 // so the cursor is visible. addrMap, when non-nil, colours each row's address
 // by its source mapping (the source-pane-open policy); the intra-function
 // jump-target highlight takes priority over it.
-func (st *State) RenderScroll(ctx *view.Context, w, h int, addrMap func(addr uint64) *lipgloss.Style) string {
+//
+// addrMap returns the style by value: handing back a *lipgloss.Style would
+// force one heap allocation per rendered row, since a pointer returned across
+// the call cannot be proven non-escaping. Taken by address here, it stays on
+// the stack.
+func (st *State) RenderScroll(ctx *view.Context, w, h int, addrMap func(addr uint64) (lipgloss.Style, bool)) string {
 	if h < 1 {
 		h = 1
 	}
@@ -239,7 +244,9 @@ func (st *State) RenderScroll(ctx *view.Context, w, h int, addrMap func(addr uin
 		if jt, ok := jumpTargets[inst.Addr]; ok {
 			targetStyle = &jt
 		} else if addrMap != nil {
-			targetStyle = addrMap(inst.Addr)
+			if ms, ok := addrMap(inst.Addr); ok {
+				targetStyle = &ms
+			}
 		}
 		for _, row := range st.InstRows(ctx, inst, w, i == st.Cur, targetStyle) {
 			if len(rows) >= h {

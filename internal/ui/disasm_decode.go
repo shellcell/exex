@@ -116,10 +116,6 @@ func (m *Model) loadDisasmWindow(addr uint64, before int) bool {
 	return m.dasm.LoadWindow(m.dasmEnv(), addr, before)
 }
 
-func (m *Model) loadDisasmWindowEnding(end int) bool {
-	return m.dasm.LoadWindowEnding(m.dasmEnv(), end)
-}
-
 // dasmEnv bundles what the disasm view's navigation needs from the shell.
 func (m *Model) dasmEnv() disasmview.Env {
 	return disasmview.Env{File: m.file, Svc: m.disasmService(), Host: m}

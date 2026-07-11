@@ -213,9 +213,6 @@ func (s *State) Rows() []Row { return s.shown }
 // Filtering reports whether the filter box has the keyboard.
 func (s *State) Filtering() bool { return s.filtering }
 
-// FullRunning reports whether the library scan is in flight.
-func (s *State) FullRunning() bool { return s.fullRunning }
-
 // FullDone reports whether it has completed.
 func (s *State) FullDone() bool { return s.fullDone }
 

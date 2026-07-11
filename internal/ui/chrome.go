@@ -55,17 +55,6 @@ func (t Theme) modalTitle(s string) string { return t.titleStyle.Render(" " + s 
 func (t Theme) modalHint(s string) string  { return t.footerStyle.Padding(0).Render(s) }
 func modalListWidth(termW int) int         { return layout.Clamp(termW-8, 40, 120) }
 
-// centeredModalLine horizontally centres a (possibly styled) line within width w,
-// padding both sides — for a modal's empty/status message.
-func centeredModalLine(s string, w int) string {
-	sw := lipgloss.Width(s)
-	if sw >= w {
-		return layout.FitANSIWidth(s, w)
-	}
-	left := (w - sw) / 2
-	return strings.Repeat(" ", left) + s + strings.Repeat(" ", w-sw-left)
-}
-
 // overlayCenter draws a pre-rendered modal centred over bg.
 func (m *Model) overlayCenter(bg, modal string) string {
 	mw := lipgloss.Width(modal)

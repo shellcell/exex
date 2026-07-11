@@ -116,14 +116,8 @@ const (
 	searchCursorBeforeStart = explorer.CursorBeforeStart
 )
 
-// resetDisasmSearchCache / ensureDisasmSearchCache keep the cache aligned with
-// the live query; the cache itself lives in internal/explorer.
-func (m *Model) resetDisasmSearchCache(query string) {
-	m.searchResults.Reset(query)
-	m.searchCursorMode = searchCursorAtMatch
-	m.searchCursorAddr = 0
-}
-
+// ensureDisasmSearchCache keeps the cache aligned with the live query; the
+// cache itself lives in internal/explorer.
 func (m *Model) ensureDisasmSearchCache() {
 	if m.searchResults.EnsureQuery(m.searchQuery) {
 		m.searchCursorMode = searchCursorAtMatch

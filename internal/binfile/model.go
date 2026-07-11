@@ -509,19 +509,6 @@ func (f *File) ensureDWARF() {
 	})
 }
 
-// WarmDebugInfo eagerly performs the normally-lazy DWARF *parse* (dwarf.Data) so
-// the source pane / Sources view start from a warm decode. It deliberately does
-// NOT build the address→line table and lookup maps: those are large (hundreds of
-// MB and millions of entries on a rich debug binary) and would be wasted heap if
-// the user never opens source — they stay lazy until first source access. Safe
-// from a background goroutine (Once-guarded); a no-op without debug info.
-func (f *File) WarmDebugInfo() {
-	if !f.HasDWARF() {
-		return
-	}
-	f.ensureDWARF()
-}
-
 // ensureLineIndexes builds source-line lookup maps from the lazy DWARF line table.
 func (f *File) ensureLineIndexes() {
 	f.indexOnce.Do(func() {
@@ -1096,10 +1083,6 @@ func (f *File) Raw() []byte { return f.raw }
 
 // DebugPath returns the explicit external debug-symbols path (--debug), or "".
 func (f *File) DebugPath() string { return f.debugPath }
-
-// RequestedArch returns the fat-Mach-O slice requested via --arch, or "" when
-// none was given (the host/first slice was auto-selected).
-func (f *File) RequestedArch() string { return f.reqArch }
 
 // AddrHexWidth is the number of hex digits an address should be printed with.
 // With the compact-addresses preference set, a 64-bit binary whose addresses all

@@ -90,10 +90,6 @@ func (m *Model) jumpDisasmBoundary(forward bool) {
 	}
 }
 
-func (m *Model) scrollDisasmToBottom() {
-	m.dasm.ScrollToBottom(m.disasmViewportHeight(), m.disasmRowHeight(m.disasmRenderWidth()))
-}
-
 func (m *Model) goBack() {
 	if m.dasm.HistoryPos <= 0 {
 		m.setStatus("at start of history", false)

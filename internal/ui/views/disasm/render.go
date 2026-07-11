@@ -48,31 +48,6 @@ func (st *State) RenderInstText(ctx *view.Context, text string, class dis.InstCl
 	})
 }
 
-// appendAddr writes "0x" + addr, zero-padded to digits hex chars, into dst —
-// what fmt.Sprintf("0x%0*x", digits, addr) produces, without fmt's boxing and
-// intermediate string. Called for every visible row, on every frame.
-func appendAddr(dst []byte, addr uint64, digits int) []byte {
-	const hexDigits = "0123456789abcdef"
-	var tmp [16]byte // a uint64 is at most 16 hex digits
-	n := 0
-	for {
-		tmp[n] = hexDigits[addr&0xf]
-		n++
-		addr >>= 4
-		if addr == 0 {
-			break
-		}
-	}
-	dst = append(dst, '0', 'x')
-	for i := n; i < digits; i++ {
-		dst = append(dst, '0')
-	}
-	for i := n - 1; i >= 0; i-- {
-		dst = append(dst, tmp[i])
-	}
-	return dst
-}
-
 // asmHighlighter returns the assembly highlighter for the current theme and
 // architecture, building it on first use. Which implementation that is depends
 // on the build tag, and this package deliberately doesn't know: see
@@ -413,7 +388,7 @@ func annotationContinuationRowCount(ctx *view.Context, note string, annCol, w in
 // (optionally selection-highlighted) plus any annotation continuation rows.
 func (st *State) InstRows(ctx *view.Context, inst dis.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {
 	var addrBuf [18]byte // "0x" + 16 hex digits
-	addrText := string(appendAddr(addrBuf[:0], inst.Addr, ctx.File.AddrHexWidth()))
+	addrText := string(layout.AppendAddr(addrBuf[:0], inst.Addr, ctx.File.AddrHexWidth()))
 	addrCol := ctx.AddrStyle.Render(addrText)
 	if targetStyle != nil {
 		addrCol = targetStyle.Render(addrText)

@@ -67,7 +67,32 @@ type State struct {
 	Numeric bool // trailing column: numeric interpretation instead of ASCII
 	Interp  int  // index into hexInterps; -1 means pointer-width hex
 	Inspect bool // show the data inspector banner
+
+	// rowCache memoizes rendered rows (see rowKey). A row is a fair amount of
+	// work — the address, the cursor cell, the pointer/symbol annotations — and
+	// Bubble Tea redraws every row on every message, though moving the caret
+	// changes only the two rows it left and entered. Colour-bearing: dropped by
+	// DropCaches on a theme change.
+	rowCache layout.RowMemo[rowKey, string]
 }
+
+// rowKey identifies a rendered row: its position, plus every input that changes
+// how it draws. cursor is the caret's offset within the row, or -1 when the
+// caret is elsewhere — so moving the caret invalidates only the rows it touches,
+// not the screen.
+type rowKey struct {
+	pos     int
+	mode    Mode
+	addrW   int
+	bpr     int
+	cursor  int
+	interp  int
+	numeric bool
+	ann     bool
+}
+
+// DropCaches discards the memoised rows (a theme change restyles them all).
+func (st *State) DropCaches() { st.rowCache = nil }
 
 // NewState returns a State with the numeric interpretation lazily resolved to
 // the binary pointer width on first use.
@@ -1204,7 +1229,23 @@ func (st *State) pointerWordStart(ctx *view.Context, addr uint64, pos int) int {
 	return pos - off
 }
 
+// renderRow returns the rendered row, from the memo when this exact row was
+// drawn last frame — which, on a scroll or a caret move, is nearly all of them.
 func (st *State) renderRow(ctx *view.Context, md Mode, data ByteSource, cur int, span rowSpan, addrW int, addrAt func(pos int) uint64) string {
+	cursor := -1
+	if cur >= span.start && cur < span.end {
+		cursor = cur - span.start
+	}
+	key := rowKey{
+		pos: span.start, mode: md, addrW: addrW, bpr: BytesPerRow(ctx),
+		cursor: cursor, interp: st.Interp, numeric: st.Numeric, ann: ctx.HideAnnotations,
+	}
+	return st.rowCache.Get(key, func() string {
+		return st.buildRow(ctx, md, data, cur, span, addrW, addrAt)
+	})
+}
+
+func (st *State) buildRow(ctx *view.Context, md Mode, data ByteSource, cur int, span rowSpan, addrW int, addrAt func(pos int) uint64) string {
 	row := data.Bytes(span.start, span.end)
 	var hexCol, asciiCol strings.Builder
 	bpr := BytesPerRow(ctx)
@@ -1239,7 +1280,8 @@ func (st *State) renderRow(ctx *view.Context, md Mode, data ByteSource, cur int,
 	var line strings.Builder
 	line.Grow(hexCol.Len() + asciiCol.Len() + 48)
 	line.WriteByte(' ')
-	line.WriteString(ctx.AddrStyle.Render(fmt.Sprintf("0x%0*x", addrW, span.lineAddr)))
+	var addrBuf [18]byte // "0x" + 16 hex digits
+	line.WriteString(ctx.AddrStyle.Render(string(layout.AppendAddr(addrBuf[:0], span.lineAddr, addrW))))
 	line.WriteString("  ")
 	line.WriteString(hexCol.String())
 	line.WriteString("  ")

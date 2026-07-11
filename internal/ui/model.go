@@ -92,8 +92,9 @@ type layoutState struct {
 // colour cache is keyed by raw instruction text, which carries no symbol name.)
 func (m *Model) clearSymbolNameCaches() {
 	m.dasm.HeightCache = nil
-	m.dasm.AnnCache = nil // annotations name their target symbol
-	m.relocs.DropCaches() // reloc bind targets render demangled/abbreviated names
+	m.dasm.AnnCache = nil    // annotations name their target symbol
+	m.byteViews.DropCaches() // hex rows trail the symbol covering the row
+	m.relocs.DropCaches()    // reloc bind targets render demangled/abbreviated names
 }
 
 // clearAllViewCaches drops all row caches affected by global layout toggles.
@@ -117,6 +118,7 @@ func (m *Model) clearColorCaches() {
 	m.dasm.AsmCache = nil
 	m.dasm.AsmHL = nil
 	m.dasm.SourceAsmRowCache = nil
+	m.byteViews.DropCaches() // hex/raw rows bake in the byte palette
 	m.relocs.DropCaches()
 	m.info.DropCaches() // restyle the Info page on the next render
 }

@@ -7,7 +7,7 @@ package ui
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +16,8 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 type disasmSearchHit struct {
@@ -27,17 +29,18 @@ type disasmSearchHit struct {
 }
 
 type disasmSearchStep struct {
-	file      *binfile.File
-	seq       int
-	label     string
-	query     string
-	forward   bool
-	inclusive bool
-	logical   int
-	total     int
-	chunk     int
-	base      int
-	cancel    <-chan struct{}
+	file          *binfile.File
+	seq           int
+	label         string
+	query         string
+	caseSensitive bool
+	forward       bool
+	inclusive     bool
+	logical       int
+	total         int
+	chunk         int
+	base          int
+	cancel        <-chan struct{}
 }
 
 type disasmSearchProgressMsg struct {
@@ -53,149 +56,132 @@ type disasmSearchProgressMsg struct {
 	status    string
 }
 
-type disasmSearchCache struct {
-	query             string
-	hits              []disasmSearchHit
-	forwardExhausted  bool
-	backwardExhausted bool
-	scannedLo         int
-	scannedHi         int
-	overflow          bool
+const disasmSearchLead = 1 << 10
+
+// directionalHitBuffer keeps only the nearest hits in the direction being
+// searched. Backward decoding still arrives in ascending address order, so it
+// uses a ring to retain the latest addresses without shifting on every match.
+type directionalHitBuffer struct {
+	hits     []disasmSearchHit
+	limit    int
+	forward  bool
+	next     int
+	overflow bool
 }
 
-const disasmSearchCacheCap = 100
+func (b *directionalHitBuffer) add(hit disasmSearchHit) {
+	if len(b.hits) < b.limit {
+		b.hits = append(b.hits, hit)
+		return
+	}
+	b.overflow = true
+	if b.forward {
+		return
+	}
+	b.hits[b.next] = hit
+	b.next = (b.next + 1) % b.limit
+}
 
+func (b *directionalHitBuffer) ordered() []disasmSearchHit {
+	if b.forward {
+		return b.hits
+	}
+	out := make([]disasmSearchHit, len(b.hits))
+	if !b.overflow {
+		for i := range b.hits {
+			out[i] = b.hits[len(b.hits)-1-i]
+		}
+		return out
+	}
+	for i := range b.hits {
+		j := (b.next - 1 - i + len(b.hits)) % len(b.hits)
+		out[i] = b.hits[j]
+	}
+	return out
+}
+
+func appendDirectionalHits(dst, src []disasmSearchHit, limit int) []disasmSearchHit {
+	if len(dst) >= limit {
+		return dst
+	}
+	return append(dst, src[:min(len(src), limit-len(dst))]...)
+}
+
+// searchCursorMode values mirror explorer.CursorMode; the shell tracks where the
+// search cursor sits so the cache can answer "the next hit" after running off an
+// end.
 const (
-	searchCursorAtMatch = iota
-	searchCursorAfterEnd
-	searchCursorBeforeStart
+	searchCursorAtMatch     = explorer.CursorAtMatch
+	searchCursorAfterEnd    = explorer.CursorAfterEnd
+	searchCursorBeforeStart = explorer.CursorBeforeStart
 )
 
-func (m *Model) resetDisasmSearchCache(query string) {
-	m.searchResults = disasmSearchCache{query: query, scannedLo: -1}
-	m.searchCursorMode = searchCursorAtMatch
-	m.searchCursorAddr = 0
-}
-
+// ensureDisasmSearchCache keeps the cache aligned with the live query; the
+// cache itself lives in internal/explorer.
 func (m *Model) ensureDisasmSearchCache() {
-	if m.searchResults.query != m.searchQuery {
-		m.resetDisasmSearchCache(m.searchQuery)
+	if m.searchResults.EnsureQuery(m.searchQuery) {
+		m.searchCursorMode = searchCursorAtMatch
+		m.searchCursorAddr = 0
 	}
 }
 
+// cacheDisasmSearchHits stores the addresses and text of fresh hits. The decoded
+// windows that found them are deliberately dropped (see explorer.SearchHit).
 func (m *Model) cacheDisasmSearchHits(hits []disasmSearchHit, forward bool) {
 	if len(hits) == 0 {
 		return
 	}
 	m.ensureDisasmSearchCache()
-	sort.Slice(hits, func(i, j int) bool { return hits[i].addr < hits[j].addr })
-	for _, hit := range hits {
-		i := sort.Search(len(m.searchResults.hits), func(i int) bool { return m.searchResults.hits[i].addr >= hit.addr })
-		if i < len(m.searchResults.hits) && m.searchResults.hits[i].addr == hit.addr {
-			continue
-		}
-		if len(m.searchResults.hits) >= disasmSearchCacheCap {
-			m.searchResults.overflow = true
-		}
-		m.searchResults.hits = append(m.searchResults.hits, disasmSearchHit{})
-		copy(m.searchResults.hits[i+1:], m.searchResults.hits[i:])
-		m.searchResults.hits[i] = disasmSearchHit{addr: hit.addr, text: hit.text}
+	cached := make([]explorer.SearchHit, len(hits))
+	for i, h := range hits {
+		cached[i] = explorer.SearchHit{Addr: h.addr, Text: h.text}
 	}
-	if len(m.searchResults.hits) > disasmSearchCacheCap {
-		if forward {
-			m.searchResults.hits = m.searchResults.hits[len(m.searchResults.hits)-disasmSearchCacheCap:]
-		} else {
-			m.searchResults.hits = m.searchResults.hits[:disasmSearchCacheCap]
-		}
-	}
+	m.searchResults.Add(cached, forward)
 }
 
 func (m *Model) noteDisasmSearchCoverage(lo, hi int) {
 	m.ensureDisasmSearchCache()
-	if lo < 0 {
-		lo = 0
-	}
-	if hi < lo {
-		hi = lo
-	}
-	if m.searchResults.scannedLo < 0 || lo < m.searchResults.scannedLo {
-		m.searchResults.scannedLo = lo
-	}
-	if hi > m.searchResults.scannedHi {
-		m.searchResults.scannedHi = hi
-	}
+	m.searchResults.NoteCoverage(lo, hi)
 }
 
 func (m *Model) disasmSearchCacheComplete() bool {
-	img := m.file.ExecImage()
-	return !m.searchResults.overflow && m.searchResults.scannedLo == 0 && m.searchResults.scannedHi >= img.Len()
+	return m.searchResults.Complete(m.file.ExecImage().Len())
 }
 
-func (m *Model) cachedDisasmSearchHit(forward, inclusive bool) (disasmSearchHit, bool) {
+// cachedDisasmSearchHit answers a repeat search from the cache when it can.
+func (m *Model) cachedDisasmSearchHit(forward, inclusive bool) (explorer.SearchHit, bool) {
 	m.ensureDisasmSearchCache()
-	if len(m.searchResults.hits) == 0 || len(m.disasmInst) == 0 {
-		return disasmSearchHit{}, false
+	if len(m.dasm.Inst) == 0 {
+		return explorer.SearchHit{}, false
 	}
-	if !forward && m.searchCursorMode == searchCursorAfterEnd {
-		return m.searchResults.hits[len(m.searchResults.hits)-1], true
-	}
-	if forward && m.searchCursorMode == searchCursorBeforeStart {
-		return m.searchResults.hits[0], true
-	}
-	cur := m.disasmInst[m.disasmCur].Addr
+	cur := m.dasm.Inst[m.dasm.Cur].Addr
 	if m.searchCursorAddr != 0 {
 		cur = m.searchCursorAddr
 	}
-	if forward {
-		for _, hit := range m.searchResults.hits {
-			if (!inclusive && hit.addr <= cur) || (inclusive && hit.addr < cur) {
-				continue
-			}
-			return hit, true
-		}
-		return disasmSearchHit{}, false
-	}
-	for i := len(m.searchResults.hits) - 1; i >= 0; i-- {
-		hit := m.searchResults.hits[i]
-		if (!inclusive && hit.addr >= cur) || (inclusive && hit.addr > cur) {
-			continue
-		}
-		return hit, true
-	}
-	return disasmSearchHit{}, false
+	return m.searchResults.Next(cur, m.searchCursorMode, forward, inclusive)
 }
 
 func (m *Model) cachedDisasmSearchBoundary(forward bool) (uint64, bool) {
 	m.ensureDisasmSearchCache()
-	if len(m.searchResults.hits) == 0 {
-		return 0, false
-	}
-	if forward {
-		return m.searchResults.hits[len(m.searchResults.hits)-1].addr, true
-	}
-	return m.searchResults.hits[0].addr, true
+	return m.searchResults.Boundary(forward)
 }
 
 func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
-	if len(m.disasmInst) == 0 {
+	if len(m.dasm.Inst) == 0 {
 		m.setStatus("no disassembly loaded", true)
 		return nil
 	}
 	m.ensureDisasmSearchCache()
 	if fromCursor {
 		if hit, ok := m.cachedDisasmSearchHit(forward, inclusive); ok {
-			m.loadDisasmAt(hit.addr)
+			m.loadDisasmAt(hit.Addr)
 			m.searchCursorMode = searchCursorAtMatch
-			m.searchCursorAddr = hit.addr
-			m.setStatus("match: "+strings.TrimSpace(hit.text), false)
-			return m.prefetchDisasmAroundCmd(hit.addr)
+			m.searchCursorAddr = hit.Addr
+			m.setStatus("match: "+strings.TrimSpace(hit.Text), false)
+			return m.prefetchDisasmAroundCmd(hit.Addr)
 		}
 	}
-	if fromCursor && forward && m.searchResults.forwardExhausted {
-		m.setStatus("not found: "+m.searchQuery, true)
-		return nil
-	}
-	if fromCursor && !forward && m.searchResults.backwardExhausted {
+	if fromCursor && m.searchResults.Exhausted(forward) {
 		m.setStatus("not found: "+m.searchQuery, true)
 		return nil
 	}
@@ -212,7 +198,7 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		return m.prefetchDisasmAroundCmd(hit.addr)
 	}
 	img := m.file.ExecImage()
-	cur := m.disasmInst[m.disasmCur]
+	cur := m.dasm.Inst[m.dasm.Cur]
 	pos, ok := img.PosForAddr(cur.Addr)
 	if !ok {
 		m.setStatus("current disasm address is not in executable image", true)
@@ -225,16 +211,17 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 	done := make(chan struct{})
 	m.searchCancel = done
 	step := disasmSearchStep{
-		file:      m.file,
-		seq:       m.searchSeq,
-		label:     m.searchQuery,
-		query:     canonicalSearchQuery(m.searchQuery),
-		forward:   forward,
-		inclusive: inclusive,
-		total:     img.Len(),
-		chunk:     m.disasmSearchChunkBytes(),
-		base:      pos,
-		cancel:    done,
+		file:          m.file,
+		seq:           m.searchSeq,
+		label:         m.searchQuery,
+		query:         canonicalSearchQuery(m.searchQuery),
+		caseSensitive: m.search.CaseSensitive(),
+		forward:       forward,
+		inclusive:     inclusive,
+		total:         img.Len(),
+		chunk:         m.disasmSearchChunkBytes(),
+		base:          pos,
+		cancel:        done,
 	}
 	if !fromCursor {
 		if forward {
@@ -265,15 +252,24 @@ func (m *Model) startDisasmSearch(forward, inclusive, fromCursor bool) tea.Cmd {
 		}
 	}
 	m.setStatus(m.disasmSearchStatus(step), false)
-	return m.searchDisasmStepCmd(step)
+	return m.backgroundCmd(m.searchDisasmStepCmd(step))
+}
+
+// nameMatches compares a search query to a symbol name, honouring case
+// sensitivity (the fast path is an exact-name match).
+func nameMatches(q, name string, caseSensitive bool) bool {
+	if caseSensitive {
+		return q == name
+	}
+	return strings.EqualFold(q, name)
 }
 
 func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) (disasmSearchHit, bool) {
 	q := strings.TrimSpace(m.searchQuery)
-	if q == "" || len(m.disasmInst) == 0 {
+	if q == "" || len(m.dasm.Inst) == 0 {
 		return disasmSearchHit{}, false
 	}
-	cur := m.disasmInst[m.disasmCur].Addr
+	cur := m.dasm.Inst[m.dasm.Cur].Addr
 	if !fromCursor {
 		if forward {
 			cur = 0
@@ -290,7 +286,10 @@ func (m *Model) searchDisasmSymbolFastPath(forward, inclusive, fromCursor bool) 
 		}
 		// Cheap, allocation-free name match first (Display is Demangled-or-Name,
 		// so checking both covers it); only then the binary-search membership test.
-		if !strings.EqualFold(q, sym.Name) && !(sym.Demangled != "" && strings.EqualFold(q, sym.Demangled)) {
+		// Honour case sensitivity so a sensitive search doesn't fast-path to a
+		// wrong-case symbol.
+		if !nameMatches(q, sym.Name, m.search.CaseSensitive()) &&
+			!(sym.Demangled != "" && nameMatches(q, sym.Demangled, m.search.CaseSensitive())) {
 			continue
 		}
 		if _, ok := img.PosForAddr(sym.Addr); !ok {
@@ -372,25 +371,43 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 		}
 	}
 	matchText := func(s string) bool {
+		if step.caseSensitive {
+			return strings.Contains(s, step.label) // exact, case-sensitive
+		}
 		if queryASCII {
-			return containsFold(s, query)
+			return layout.ContainsFold(s, query)
 		}
 		return strings.Contains(strings.ToLower(s), query)
 	}
+	var symbolStarts []uint64
+	for _, sym := range file.Symbols {
+		if sym.Addr != 0 && matchText(sym.Display()) {
+			symbolStarts = append(symbolStarts, sym.Addr)
+		}
+	}
+	slices.Sort(symbolStarts)
+	symbolStarts = slices.Compact(symbolStarts)
 	match := func(instText string, addr uint64) bool {
 		if matchText(instText) {
 			return true
 		}
-		if sym, ok := file.SymbolAt(addr); ok && sym.Addr == addr && matchText(sym.Display()) {
-			return true
-		}
-		return false
+		_, ok := slices.BinarySearch(symbolStarts, addr)
+		return ok
 	}
 	type chunkResult struct {
-		order int
-		win   binfile.Window
-		insts []disasm.Inst
-		hits  []disasmSearchHit
+		hits []disasmSearchHit
+	}
+	const hitLimit = explorer.CacheCap + 1 // one extra makes SearchCache record overflow
+	hydrate := func(hit disasmSearchHit) disasmSearchHit {
+		win, ok := img.WindowContaining(hit.addr, step.chunk, step.chunk/4)
+		if !ok {
+			return hit
+		}
+		insts := svc.DecodeWindow(win)
+		if idx, ok := disasm.IndexForAddr(insts, hit.addr); ok {
+			hit.win, hit.insts, hit.idx = win, insts, idx
+		}
+		return hit
 	}
 	return func() tea.Msg {
 		if scanCancelled(step.cancel) {
@@ -427,35 +444,27 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 					if scanCancelled(step.cancel) {
 						return
 					}
-					insts := svc.DecodeWindow(win)
-					results[i] = chunkResult{order: i, win: win, insts: insts}
-					startPos := step.logical
-					if i > 0 {
-						startPos = win.Start
-					}
-					for j, inst := range insts {
+					buf := directionalHitBuffer{forward: true, limit: hitLimit}
+					svc.DecodeRangeFunc(win.Start, win.End-win.Start, disasmSearchLead, func(inst disasm.Inst) bool {
 						if scanCancelled(step.cancel) {
-							return
-						}
-						instPos, ok := img.PosForAddr(inst.Addr)
-						if !ok || instPos < startPos {
-							continue
+							return false
 						}
 						if match(inst.Text, inst.Addr) {
-							results[i].hits = append(results[i].hits, disasmSearchHit{win: win, insts: insts, idx: j, addr: inst.Addr, text: inst.Text})
+							buf.add(disasmSearchHit{addr: inst.Addr, text: inst.Text})
 						}
-					}
+						return true
+					})
+					results[i].hits = buf.ordered()
 				}(i, win)
 			}
 			wg.Wait()
-			var found []disasmSearchHit
+			found := make([]disasmSearchHit, 0, hitLimit)
 			for _, res := range results {
-				if len(res.hits) > 0 {
-					found = append(found, res.hits...)
-				}
+				found = appendDirectionalHits(found, res.hits, hitLimit)
 			}
 			if len(found) > 0 {
-				return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: step.logical, scannedHi: logical, done: true}
+				hit := hydrate(found[0])
+				return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &hit, found: found, scannedLo: step.logical, scannedHi: logical, done: true}
 			}
 			next := step
 			next.logical = logical
@@ -488,36 +497,27 @@ func (m *Model) searchDisasmStepCmd(step disasmSearchStep) tea.Cmd {
 				if scanCancelled(step.cancel) {
 					return
 				}
-				insts := svc.DecodeWindow(win)
-				results[i] = chunkResult{order: i, win: win, insts: insts}
-				endPos := step.logical
-				if i > 0 {
-					endPos = win.End
-				}
-				for j := len(insts) - 1; j >= 0; j-- {
+				buf := directionalHitBuffer{forward: false, limit: hitLimit}
+				svc.DecodeRangeFunc(win.Start, win.End-win.Start, disasmSearchLead, func(inst disasm.Inst) bool {
 					if scanCancelled(step.cancel) {
-						return
-					}
-					inst := insts[j]
-					instPos, ok := img.PosForAddr(inst.Addr)
-					if !ok || instPos >= endPos {
-						continue
+						return false
 					}
 					if match(inst.Text, inst.Addr) {
-						results[i].hits = append(results[i].hits, disasmSearchHit{win: win, insts: insts, idx: j, addr: inst.Addr, text: inst.Text})
+						buf.add(disasmSearchHit{addr: inst.Addr, text: inst.Text})
 					}
-				}
+					return true
+				})
+				results[i].hits = buf.ordered()
 			}(i, win)
 		}
 		wg.Wait()
-		var found []disasmSearchHit
+		found := make([]disasmSearchHit, 0, hitLimit)
 		for _, res := range results {
-			if len(res.hits) > 0 {
-				found = append(found, res.hits...)
-			}
+			found = appendDirectionalHits(found, res.hits, hitLimit)
 		}
 		if len(found) > 0 {
-			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &found[0], found: found, scannedLo: logical, scannedHi: step.logical, done: true}
+			hit := hydrate(found[0])
+			return disasmSearchProgressMsg{file: step.file, seq: step.seq, forward: step.forward, hit: &hit, found: found, scannedLo: logical, scannedHi: step.logical, done: true}
 		}
 		next := step
 		next.logical = logical

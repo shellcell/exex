@@ -17,6 +17,10 @@ import (
 
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
+	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/rabarbra/exex/internal/ui/views/sources"
+	"github.com/rabarbra/exex/internal/ui/views/strs"
+	"github.com/rabarbra/exex/internal/ui/views/symbols"
 )
 
 // kp converts a chord description to the KeyPressMsg a terminal would send.
@@ -106,11 +110,7 @@ func newKeyHarness(t *testing.T, path string) *keyHarness {
 func (h *keyHarness) pump(msg tea.Msg) {
 	h.t.Helper()
 	h.model, _ = h.model.Update(msg)
-	if mm, ok := h.model.(*Model); ok && mm.disasmDecoding {
-		addr := mm.disasmPendingAddr
-		win, insts := mm.decodeDisasmAt(addr, mm.disasmLeadBytes())
-		h.model, _ = h.model.Update(disasmReadyMsg{addr: addr, posLo: win.Start, posHi: win.End, insts: insts})
-	}
+	h.model = settleDisasmDecode(h.model)
 	// Render every frame, exactly as the program loop does, so list/tree rows are
 	// always rebuilt before the next key (and any render panic is caught here).
 	if strings.TrimSpace(h.model.View().Content) == "" {
@@ -153,28 +153,28 @@ func TestKeysGlobal(t *testing.T) {
 
 	// g opens goto; esc closes.
 	h.press("g")
-	if !h.m().gotoActive {
+	if !h.m().palette.Active() {
 		t.Fatal("g did not open goto modal")
 	}
 	h.press("esc")
-	if h.m().gotoActive {
+	if h.m().palette.Active() {
 		t.Fatal("esc did not close goto modal")
 	}
 
 	// , opens settings; esc closes.
 	h.press(",")
-	if !h.m().settingsActive {
+	if !h.m().settings.Active() {
 		t.Fatal(", did not open settings")
 	}
 	h.press("esc")
 
 	// ? opens help; the next key dismisses it.
 	h.press("?")
-	if !h.m().helpActive {
+	if !h.m().help.Active() {
 		t.Fatal("? did not open help")
 	}
 	h.press("x")
-	if h.m().helpActive {
+	if h.m().help.Active() {
 		t.Fatal("help overlay did not dismiss on next key")
 	}
 
@@ -194,37 +194,37 @@ func TestKeysSections(t *testing.T) {
 	h.goView(modeSections, "2")
 
 	// s cycles the sort field; r reverses.
-	s0 := h.m().sectionsSort
+	s0 := h.m().sections.Sort
 	h.press("s")
-	if h.m().sectionsSort == s0 {
+	if h.m().sections.Sort == s0 {
 		t.Fatal("s did not change the sort field")
 	}
-	d0 := h.m().sectionsSortDesc
+	d0 := h.m().sections.SortDesc
 	h.press("r")
-	if h.m().sectionsSortDesc == d0 {
+	if h.m().sections.SortDesc == d0 {
 		t.Fatal("r did not reverse the sort")
 	}
 
 	// t cycles sections -> segments -> header -> sections (when the binary has
 	// segments). Cycle all the way back to sections for the jump tests below.
-	if len(h.m().segments) > 0 {
-		seg0 := h.m().showSegments
+	if len(h.m().sections.Segments) > 0 {
+		seg0 := h.m().sections.ShowSegments
 		h.press("t")
-		if h.m().showSegments == seg0 {
+		if h.m().sections.ShowSegments == seg0 {
 			t.Fatal("t did not toggle sections/segments")
 		}
 		h.press("t") // -> back to sections (2-state cycle now)
-		if h.m().showSegments {
+		if h.m().sections.ShowSegments {
 			t.Fatal("second t did not return to the section table")
 		}
 	}
 	// The raw header moved from a Sections sub-mode to the ⇧H overlay.
 	h.press("H")
-	if !h.m().headerActive {
+	if !h.m().header.Active() {
 		t.Fatal("H did not open the raw-header overlay")
 	}
 	h.press("esc") // close it so the rest of the section-key checks run on the table
-	if h.m().headerActive {
+	if h.m().header.Active() {
 		t.Fatal("esc did not close the raw-header overlay")
 	}
 
@@ -255,10 +255,10 @@ func TestKeysSections(t *testing.T) {
 func selectExecSection(t *testing.T, h *keyHarness) {
 	t.Helper()
 	m := h.m()
-	for i, idx := range m.sectionsFiltered {
-		s := m.sections[idx]
+	for i, idx := range m.sections.Filtered {
+		s := m.sections.Sections[idx]
 		if binfile.IsExecSection(&s) && s.Addr != 0 {
-			m.sectionsCur = i
+			m.sections.Cur = i
 			return
 		}
 	}
@@ -275,41 +275,41 @@ func TestKeysSymbols(t *testing.T) {
 	}
 
 	// s cycles sort, r reverses.
-	s0 := h.m().symbolsSort
+	s0 := h.m().symbols.Sort
 	h.press("s")
-	if h.m().symbolsSort == s0 {
+	if h.m().symbols.Sort == s0 {
 		t.Fatal("s did not change symbol sort")
 	}
-	d0 := h.m().symbolsSortDesc
+	d0 := h.m().symbols.SortDesc
 	h.press("r")
-	if h.m().symbolsSortDesc == d0 {
+	if h.m().symbols.SortDesc == d0 {
 		t.Fatal("r did not reverse symbol sort")
 	}
 
 	// ctrl+t / ctrl+s / ctrl+b drive the column filters.
 	h.press("ctrl+t")
-	if !h.m().symbolsKindOn {
+	if !h.m().symbols.KindOn {
 		t.Fatal("ctrl+t did not enable the type filter")
 	}
-	sc0 := h.m().symbolsScope
+	sc0 := h.m().symbols.Scope
 	h.press("ctrl+s")
-	if h.m().symbolsScope == sc0 {
+	if h.m().symbols.Scope == sc0 {
 		t.Fatal("ctrl+s did not advance the scope filter")
 	}
 	h.press("ctrl+b")
-	if !h.m().symbolsBindOn {
+	if !h.m().symbols.BindOn {
 		t.Fatal("ctrl+b did not enable the bind filter")
 	}
 	// esc clears every filter.
 	h.press("esc")
-	if h.m().symbolsKindOn || h.m().symbolsBindOn || h.m().symbolsScope != scopeAll {
+	if h.m().symbols.KindOn || h.m().symbols.BindOn || h.m().symbols.Scope != symbols.ScopeAll {
 		t.Fatal("esc did not clear symbol filters")
 	}
 
 	// t toggles tree/flat.
-	tr0 := h.m().symbolsTree
+	tr0 := h.m().symbols.Tree
 	h.press("t")
-	if h.m().symbolsTree == tr0 {
+	if h.m().symbols.Tree == tr0 {
 		t.Fatal("t did not toggle the symbol tree")
 	}
 	h.press("t") // back to flat
@@ -341,13 +341,13 @@ func TestKeysSymbols(t *testing.T) {
 func selectFuncSymbol(t *testing.T, h *keyHarness) {
 	t.Helper()
 	m := h.m()
-	for i, r := range m.symbolsRows {
-		if r.node.leaf < 0 {
+	for i, r := range m.symbols.Rows {
+		if r.Node.Leaf < 0 {
 			continue
 		}
-		s := m.file.Symbols[r.node.leaf]
+		s := m.file.Symbols[r.Node.Leaf]
 		if s.Kind == binfile.SymFunc && m.canDisasmAt(s.Addr) {
-			m.symbolsCur = i
+			m.symbols.Cur = i
 			return
 		}
 	}
@@ -359,24 +359,24 @@ func selectFuncSymbol(t *testing.T, h *keyHarness) {
 func TestKeysStrings(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeStrings, "7")
-	if len(h.m().stringsList) == 0 {
+	if len(h.m().strs.List) == 0 {
 		t.Skip("binary has no printable strings")
 	}
 
 	// ctrl+s cycles the section filter (when section info is present).
-	if len(h.m().stringsSections) > 0 {
+	if len(h.m().strs.Sections) > 0 {
 		h.press("ctrl+s")
-		if !h.m().stringsSecOn {
+		if !h.m().strs.SecOn {
 			t.Fatal("ctrl+s did not enable the section filter")
 		}
 		h.press("esc")
-		if h.m().stringsSecOn {
+		if h.m().strs.SecOn {
 			t.Fatal("esc did not clear the strings section filter")
 		}
 	}
 
 	// Copy address/offset and the string text.
-	h.m().stringsCur = 0
+	h.m().strs.Cur = 0
 	h.m().lastCopy = ""
 	h.press("A")
 	if !strings.HasPrefix(h.m().lastCopy, "0x") {
@@ -390,10 +390,10 @@ func TestKeysStrings(t *testing.T) {
 
 	// d/h/m jump to a mapped string when one exists; m always reaches raw.
 	if i, ok := mappedStringRow(h.m()); ok {
-		h.m().stringsCur = i
+		h.m().strs.Cur = i
 		h.goView(modeHex, "h")
 		h.goView(modeStrings, "7")
-		h.m().stringsCur = i
+		h.m().strs.Cur = i
 		// A mapped string usually lives in .rodata, not code; "d" only reaches the
 		// disasm view when the string sits in an executable section (rare, and
 		// platform-dependent for the system binary used here). Tolerate a refused
@@ -404,13 +404,13 @@ func TestKeysStrings(t *testing.T) {
 		}
 	}
 	h.goView(modeStrings, "7")
-	h.m().stringsCur = 0
+	h.m().strs.Cur = 0
 	h.goView(modeRaw, "m")
 }
 
 func mappedStringRow(m *Model) (int, bool) {
-	for i, fi := range m.stringsFiltered {
-		if m.stringsList[fi].HasAddr {
+	for i, fi := range m.strs.Filtered {
+		if m.strs.List[fi].HasAddr {
 			return i, true
 		}
 	}
@@ -427,16 +427,16 @@ func TestKeysLibs(t *testing.T) {
 	}
 
 	// t toggles tree/flat.
-	tr0 := h.m().libsTree
+	tr0 := h.m().libs.Tree
 	h.press("t")
-	if h.m().libsTree == tr0 {
+	if h.m().libs.Tree == tr0 {
 		t.Fatal("t did not toggle the libs tree")
 	}
 
 	// ctrl+p cycles the availability filter.
-	av0 := h.m().libsAvail
+	av0 := h.m().libs.Avail
 	h.press("ctrl+p")
-	if h.m().libsAvail == av0 {
+	if h.m().libs.Avail == av0 {
 		t.Fatal("ctrl+p did not change the availability filter")
 	}
 	h.press("ctrl+p")
@@ -454,10 +454,10 @@ func TestKeysLibs(t *testing.T) {
 func selectLibLeaf(t *testing.T, h *keyHarness) {
 	t.Helper()
 	m := h.m()
-	m.buildLibRows()
-	for i, r := range m.libsRows {
-		if r.node.leaf >= 0 {
-			m.libsCur = i
+	m.libs.BuildRows(m.viewContext())
+	for i, r := range m.libs.Rows {
+		if r.Node.Leaf >= 0 {
+			m.libs.Cur = i
 			return
 		}
 	}
@@ -469,16 +469,16 @@ func selectLibLeaf(t *testing.T, h *keyHarness) {
 func TestKeysDisasm(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeDisasm, "4")
-	if h.m().dis == nil || len(h.m().disasmInst) == 0 {
+	if h.m().dis == nil || len(h.m().dasm.Inst) == 0 {
 		t.Skip("no disassembly for this architecture/binary")
 	}
 
 	// ] / [ jump to the next / previous symbol (cursor moves).
-	c0 := h.m().disasmCur
+	c0 := h.m().dasm.Cur
 	h.press("]")
-	moved := h.m().disasmCur != c0
+	moved := h.m().dasm.Cur != c0
 	h.press("[")
-	if !moved && h.m().disasmCur == c0 {
+	if !moved && h.m().dasm.Cur == c0 {
 		t.Log("symbol jump did not move (few symbols) — tolerated")
 	}
 
@@ -491,9 +491,9 @@ func TestKeysDisasm(t *testing.T) {
 	// x kicks off an xref scan (sets xrefRunning or opens the modal via its cmd).
 	h.press("x")
 	// e toggles argument abbreviation globally.
-	ab0 := h.m().symbolsAbbrev
+	ab0 := h.m().symbols.Abbrev
 	h.press("e")
-	if h.m().symbolsAbbrev == ab0 {
+	if h.m().symbols.Abbrev == ab0 {
 		t.Fatal("e did not toggle argument abbreviation")
 	}
 
@@ -512,7 +512,7 @@ func TestKeysDisasm(t *testing.T) {
 
 	// / opens the search modal.
 	h.press("/")
-	if !h.m().searchActive {
+	if !h.m().search.Active() {
 		t.Fatal("/ did not open the disasm search modal")
 	}
 	h.press("esc")
@@ -530,26 +530,26 @@ func TestKeysHexRaw(t *testing.T) {
 	h.goView(modeHex, "5")
 
 	// t toggles the pointer/ascii column; i toggles the inspector.
-	pw0 := h.m().hexNumeric
+	pw0 := h.m().byteViews.Numeric
 	h.press("t")
-	if h.m().hexNumeric == pw0 {
+	if h.m().byteViews.Numeric == pw0 {
 		t.Fatal("t did not toggle the hex pointer column")
 	}
-	in0 := h.m().hexInspect
+	in0 := h.m().byteViews.Inspect
 	h.press("i")
-	if h.m().hexInspect == in0 {
+	if h.m().byteViews.Inspect == in0 {
 		t.Fatal("i did not toggle the data inspector")
 	}
 
 	// Arrow keys (and j/k by row) move the byte cursor; h/l are reserved for
 	// view-jumps per the doc, not horizontal movement.
-	cur0 := h.m().hexCur
+	cur0 := h.m().byteViews.HexCur
 	h.press("right")
-	if h.m().hexCur == cur0 {
+	if h.m().byteViews.HexCur == cur0 {
 		t.Fatal("right did not move the byte cursor")
 	}
 	h.press("left")
-	if h.m().hexCur != cur0 {
+	if h.m().byteViews.HexCur != cur0 {
 		t.Fatal("left did not move the byte cursor back")
 	}
 
@@ -574,9 +574,9 @@ func TestKeysHexRaw(t *testing.T) {
 
 	// Raw view: d jumps back to disasm for an allocated offset; t/i/copy work.
 	h.goView(modeRaw, "6")
-	pw0 = h.m().hexNumeric
+	pw0 = h.m().byteViews.Numeric
 	h.press("t")
-	if h.m().hexNumeric == pw0 {
+	if h.m().byteViews.Numeric == pw0 {
 		t.Fatal("raw: t did not toggle the pointer column")
 	}
 	h.m().lastCopy = ""
@@ -587,7 +587,7 @@ func TestKeysHexRaw(t *testing.T) {
 
 	// Raw: h jumps to hex for an allocated offset.
 	if off, ok := allocatedRawOffset(h.m()); ok {
-		h.m().rawCur = off
+		h.m().byteViews.RawCur = off
 		h.goView(modeHex, "h")
 		h.goView(modeRaw, "6")
 	}
@@ -595,7 +595,7 @@ func TestKeysHexRaw(t *testing.T) {
 	// / opens the byte search modal.
 	h.goView(modeHex, "5")
 	h.press("/")
-	if !h.m().searchActive {
+	if !h.m().search.Active() {
 		t.Fatal("/ did not open the hex search modal")
 	}
 	h.press("esc")
@@ -613,12 +613,12 @@ func allocatedRawOffset(m *Model) (int, bool) {
 
 func selectExecHexByte(h *keyHarness) bool {
 	m := h.m()
-	m.ensureHex()
-	for _, r := range m.hexImg.Regions {
+	m.byteViews.EnsureHex(m.viewContextPtr())
+	for _, r := range m.byteViews.HexImg.Regions {
 		addr := r.Addr
 		if _, ok := m.file.ExecImage().PosForAddr(addr); ok {
-			if pos, ok := m.hexImg.PosForAddr(addr); ok {
-				m.hexCur = pos
+			if pos, ok := m.byteViews.HexImg.PosForAddr(addr); ok {
+				m.byteViews.HexCur = pos
 				return true
 			}
 		}
@@ -642,40 +642,40 @@ func TestKeysTreeNav(t *testing.T) {
 	h.pump(tea.WindowSizeMsg{Width: 120, Height: 30})
 	h.goView(modeSymbols, "3")
 	h.press("t") // switch to the namespace tree (builds the tree rows)
-	if !h.m().symbolsTree {
+	if !h.m().symbols.Tree {
 		t.Fatal("t did not enable the symbol tree")
 	}
 
 	// + expands every group → the fully-expanded row count.
 	h.press("+")
-	expanded := len(h.m().symbolsRows)
+	expanded := len(h.m().symbols.Rows)
 	if expanded == 0 {
 		t.Fatal("no tree rows after expand-all")
 	}
 	// - collapses every group → fewer rows.
 	h.press("-")
-	if len(h.m().symbolsRows) >= expanded {
-		t.Fatalf("- did not collapse (%d >= %d)", len(h.m().symbolsRows), expanded)
+	if len(h.m().symbols.Rows) >= expanded {
+		t.Fatalf("- did not collapse (%d >= %d)", len(h.m().symbols.Rows), expanded)
 	}
 	// + expands back to the full set.
 	h.press("+")
-	if len(h.m().symbolsRows) != expanded {
-		t.Fatalf("+ did not expand all (%d != %d)", len(h.m().symbolsRows), expanded)
+	if len(h.m().symbols.Rows) != expanded {
+		t.Fatalf("+ did not expand all (%d != %d)", len(h.m().symbols.Rows), expanded)
 	}
 	// Enter on the root recursively collapses the subtree below it.
-	h.m().symbolsCur = 0
+	h.m().symbols.Cur = 0
 	h.press("enter")
-	if len(h.m().symbolsRows) >= expanded {
+	if len(h.m().symbols.Rows) >= expanded {
 		t.Fatal("enter did not collapse the subtree below the root")
 	}
 	// right expands the current group one level.
 	h.press("right")
-	if h.m().isSymbolCollapsed(h.m().symbolsRows[0].node.path) {
+	if h.m().symbols.IsCollapsed(h.m().symbols.Rows[0].Node.Path) {
 		t.Fatal("right did not expand the group under the cursor")
 	}
 	// left collapses it again.
 	h.press("left")
-	if !h.m().isSymbolCollapsed(h.m().symbolsRows[0].node.path) {
+	if !h.m().symbols.IsCollapsed(h.m().symbols.Rows[0].Node.Path) {
 		t.Fatal("left did not collapse the group under the cursor")
 	}
 }
@@ -686,22 +686,22 @@ func TestKeysSources(t *testing.T) {
 	bin := buildDebugSample(t) // skips when no C compiler
 	h := newKeyHarness(t, bin)
 	h.goView(modeSources, "9")
-	if !h.m().file.HasDWARF() || len(h.m().sourcesFiles) == 0 {
+	if !h.m().file.HasDWARF() || len(h.m().sources.Files) == 0 {
 		t.Skip("sample has no usable DWARF source list")
 	}
 
 	// t toggles tree/flat.
-	tr0 := h.m().sourcesTree
+	tr0 := h.m().sources.Tree
 	h.press("t")
-	if h.m().sourcesTree == tr0 {
+	if h.m().sources.Tree == tr0 {
 		t.Fatal("t did not toggle the sources tree")
 	}
 	h.press("t")
 
 	// ctrl+p cycles the availability filter.
-	av0 := h.m().sourcesAvail
+	av0 := h.m().sources.Avail
 	h.press("ctrl+p")
-	if h.m().sourcesAvail == av0 {
+	if h.m().sources.Avail == av0 {
 		t.Fatal("ctrl+p did not change the sources availability filter")
 	}
 	h.press("ctrl+p")
@@ -718,17 +718,17 @@ func TestKeysSources(t *testing.T) {
 	// Enter opens the file in the disasm source-first view.
 	selectSourceLeaf(t, h)
 	h.press("enter")
-	if h.m().mode != modeDisasm || !h.m().sourceFirst {
-		t.Fatalf("enter did not open source-first disasm (mode=%v sourceFirst=%v)", h.m().mode, h.m().sourceFirst)
+	if h.m().mode != modeDisasm || !h.m().dasm.SourceFirst {
+		t.Fatalf("enter did not open source-first disasm (mode=%v sourceFirst=%v)", h.m().mode, h.m().dasm.SourceFirst)
 	}
 }
 
 func selectSourceLeaf(t *testing.T, h *keyHarness) {
 	t.Helper()
 	m := h.m()
-	for i, r := range m.sourcesRows {
-		if r.node.leaf >= 0 {
-			m.sourcesCur = i
+	for i, r := range m.sources.Rows {
+		if r.Node.Leaf >= 0 {
+			m.sources.Cur = i
 			return
 		}
 	}
@@ -756,7 +756,7 @@ func TestKeysCopyLine(t *testing.T) {
 	check("disasm", "4", modeDisasm)
 	check("hex", "5", modeHex)
 	check("raw", "6", modeRaw)
-	if h.goView(modeStrings, "7"); len(h.m().stringsList) > 0 {
+	if h.goView(modeStrings, "7"); len(h.m().strs.List) > 0 {
 		h.m().lastCopy = ""
 		h.press("L")
 		if h.m().lastCopy == "" {
@@ -764,7 +764,7 @@ func TestKeysCopyLine(t *testing.T) {
 		}
 	}
 	if h.goView(modeLibs, "8"); h.m().file.Info != nil && len(h.m().file.Info.DynamicLibs) > 0 {
-		h.m().buildLibRows()
+		h.m().libs.BuildRows(h.m().viewContext())
 		h.m().lastCopy = ""
 		h.press("L")
 		if h.m().lastCopy == "" {
@@ -780,18 +780,18 @@ func TestStringsSortKeys(t *testing.T) {
 	m := newTestModel(t, f)
 	// Offset-ascending input (as the extractor produces), with addresses in a
 	// different order so the address sort is observably distinct.
-	m.stringsList = []binfile.StringEntry{
+	m.strs.List = []binfile.StringEntry{
 		{Offset: 0x10, Addr: 0x3000, HasAddr: true, Len: 1, Section: ".rodata"},
 		{Offset: 0x20, Addr: 0x1000, HasAddr: true, Len: 1, Section: ".rodata"},
 		{Offset: 0x30, Addr: 0x2000, HasAddr: true, Len: 1, Section: ".rodata"},
 	}
 	m.setMode(modeStrings)
-	m.recomputeStrings()
+	m.strs.Recompute(m.viewContext())
 
 	offsets := func() []uint64 {
 		var out []uint64
-		for _, i := range m.stringsFiltered {
-			out = append(out, m.stringsList[i].Offset)
+		for _, i := range m.strs.Filtered {
+			out = append(out, m.strs.List[i].Offset)
 		}
 		return out
 	}
@@ -800,15 +800,15 @@ func TestStringsSortKeys(t *testing.T) {
 		t.Fatalf("default (offset) order = %x", got)
 	}
 	// s → address: order becomes addr 0x1000,0x2000,0x3000 = offsets 0x20,0x30,0x10.
-	m.updateStrings("s")
-	if m.stringsSort != strSortAddr {
-		t.Fatalf("s did not advance sort, got %v", m.stringsSort)
+	m.strs.Update(m.viewContext(), m, "s")
+	if m.strs.Sort != strs.SortAddr {
+		t.Fatalf("s did not advance sort, got %v", m.strs.Sort)
 	}
 	if got := offsets(); got[0] != 0x20 || got[1] != 0x30 || got[2] != 0x10 {
 		t.Fatalf("address-sorted order = %x", got)
 	}
 	// r reverses the address sort.
-	m.updateStrings("r")
+	m.strs.Update(m.viewContext(), m, "r")
 	if got := offsets(); got[0] != 0x10 || got[2] != 0x20 {
 		t.Fatalf("reversed address order = %x", got)
 	}
@@ -821,20 +821,20 @@ func TestLibsSortReverse(t *testing.T) {
 		t.Skip("need >= 2 libraries")
 	}
 	first := func() string {
-		for _, r := range h.m().libsRows {
-			if r.node.leaf >= 0 {
-				return h.m().file.Info.DynamicLibs[r.node.leaf]
+		for _, r := range h.m().libs.Rows {
+			if r.Node.Leaf >= 0 {
+				return h.m().file.Info.DynamicLibs[r.Node.Leaf]
 			}
 		}
 		return ""
 	}
 	// Flat list so the leaf order reflects the sort directly.
-	if h.m().libsTree {
+	if h.m().libs.Tree {
 		h.press("t")
 	}
 	asc := first()
 	h.press("r")
-	if !h.m().libsSortDesc {
+	if !h.m().libs.SortDesc {
 		t.Fatal("r did not set descending")
 	}
 	if first() == asc {
@@ -846,20 +846,20 @@ func TestSourcesSortKeys(t *testing.T) {
 	bin := buildDebugSample(t)
 	h := newKeyHarness(t, bin)
 	h.goView(modeSources, "9")
-	if !h.m().file.HasDWARF() || len(h.m().sourcesFiles) == 0 {
+	if !h.m().file.HasDWARF() || len(h.m().sources.Files) == 0 {
 		t.Skip("no DWARF sources")
 	}
-	if h.m().sourcesTree {
+	if h.m().sources.Tree {
 		h.press("t")
 	}
-	s0 := h.m().sourcesSort
+	s0 := h.m().sources.Sort
 	h.press("s")
-	if h.m().sourcesSort == s0 {
+	if h.m().sources.Sort == s0 || h.m().sources.Sort != sources.SortName {
 		t.Fatal("s did not change the sources sort field")
 	}
-	d0 := h.m().sourcesSortDesc
+	d0 := h.m().sources.SortDesc
 	h.press("r")
-	if h.m().sourcesSortDesc == d0 {
+	if h.m().sources.SortDesc == d0 {
 		t.Fatal("r did not reverse the sources sort")
 	}
 }
@@ -877,17 +877,17 @@ func TestKeysFacetChords(t *testing.T) {
 	h.goView(modeSymbols, "3")
 
 	// 1) Ctrl+t toggles the type facet filter.
-	h.m().symbolsKindOn = false
+	h.m().symbols.KindOn = false
 	h.press("ctrl+t")
-	if !h.m().symbolsKindOn {
+	if !h.m().symbols.KindOn {
 		t.Fatal("ctrl+t did not trigger the type filter")
 	}
 
 	// 2) Bare "t" must still toggle the tree, not filter (no regression).
 	h.press("esc")
-	tree0 := h.m().symbolsTree
+	tree0 := h.m().symbols.Tree
 	h.press("t")
-	if h.m().symbolsTree == tree0 {
+	if h.m().symbols.Tree == tree0 {
 		t.Fatal("plain t no longer toggles the tree")
 	}
 	h.press("t")
@@ -920,22 +920,22 @@ func TestKeysConfigurable(t *testing.T) {
 	// Symbols: the configured sort key cycles the sort; the default "s" still works
 	// too (aliases are additive), but the custom key must take effect.
 	h.goView(modeSymbols, "3")
-	s0 := h.m().symbolsSort
+	s0 := h.m().symbols.Sort
 	h.press("z")
-	if h.m().symbolsSort == s0 {
+	if h.m().symbols.Sort == s0 {
 		t.Fatal("configured sort key 'z' did not change the sort")
 	}
-	sc0 := h.m().symbolsScope
+	sc0 := h.m().symbols.Scope
 	h.press("Q")
-	if h.m().symbolsScope == sc0 {
+	if h.m().symbols.Scope == sc0 {
 		t.Fatal("configured scope-filter key 'Q' had no effect")
 	}
 
 	// Sections: the configured reverse key flips the order.
 	h.goView(modeSections, "2")
-	d0 := h.m().sectionsSortDesc
+	d0 := h.m().sections.SortDesc
 	h.press("x")
-	if h.m().sectionsSortDesc == d0 {
+	if h.m().sections.SortDesc == d0 {
 		t.Fatal("configured reverse key 'x' did not reverse the sort")
 	}
 
@@ -972,8 +972,8 @@ func TestKeysActivate(t *testing.T) {
 
 	// Strings: Enter opens the selected string (Hex if mapped, else Raw).
 	h.goView(modeStrings, "7")
-	if len(h.m().stringsList) > 0 {
-		h.m().stringsCur = 0
+	if len(h.m().strs.List) > 0 {
+		h.m().strs.Cur = 0
 		h.press("enter")
 		if h.m().mode != modeHex && h.m().mode != modeRaw {
 			t.Fatalf("strings Enter left mode = %v", h.m().mode)
@@ -983,7 +983,7 @@ func TestKeysActivate(t *testing.T) {
 	// Disasm: ←/→ walk history, Enter follows an operand address (tolerant: an
 	// instruction may have no in-file target).
 	h.goView(modeDisasm, "4")
-	if len(h.m().disasmInst) > 0 {
+	if len(h.m().dasm.Inst) > 0 {
 		h.press("enter") // follow (or status "no address")
 		h.press("left")  // history back
 		h.press("right") // history forward
@@ -1011,11 +1011,11 @@ func TestKeysTabTogglesMode(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 
 	// Sections: tab toggles sections <-> segments, same as t.
-	if len(h.m().segments) > 0 {
+	if len(h.m().sections.Segments) > 0 {
 		h.goView(modeSections, "2")
-		seg0 := h.m().showSegments
+		seg0 := h.m().sections.ShowSegments
 		h.press("tab")
-		if h.m().showSegments == seg0 {
+		if h.m().sections.ShowSegments == seg0 {
 			t.Fatal("tab did not toggle sections/segments")
 		}
 	}
@@ -1023,18 +1023,18 @@ func TestKeysTabTogglesMode(t *testing.T) {
 	// Symbols: tab toggles the tree.
 	if len(h.m().file.Symbols) > 0 {
 		h.goView(modeSymbols, "3")
-		tr0 := h.m().symbolsTree
+		tr0 := h.m().symbols.Tree
 		h.press("tab")
-		if h.m().symbolsTree == tr0 {
+		if h.m().symbols.Tree == tr0 {
 			t.Fatal("tab did not toggle the symbol tree")
 		}
 	}
 
 	// Hex: tab toggles the ascii/pointer column.
 	h.goView(modeHex, "5")
-	pw0 := h.m().hexNumeric
+	pw0 := h.m().byteViews.Numeric
 	h.press("tab")
-	if h.m().hexNumeric == pw0 {
+	if h.m().byteViews.Numeric == pw0 {
 		t.Fatal("tab did not toggle the hex pointer column")
 	}
 
@@ -1042,12 +1042,12 @@ func TestKeysTabTogglesMode(t *testing.T) {
 	// it reports unavailable; with DWARF it toggles showSource. Either way the
 	// view stays disasm and nothing panics.
 	h.goView(modeDisasm, "4")
-	show0 := h.m().showSource
+	show0 := h.m().dasm.ShowSource
 	h.press("tab")
 	if h.m().mode != modeDisasm {
 		t.Fatal("tab in disasm changed the view")
 	}
-	if h.m().file.HasDWARF() && h.m().showSource == show0 {
+	if h.m().file.HasDWARF() && h.m().dasm.ShowSource == show0 {
 		t.Fatal("tab in disasm did not toggle the source pane")
 	}
 }
@@ -1063,13 +1063,13 @@ func TestKeysEscClears(t *testing.T) {
 		h.press("/")
 		h.press("a")
 		h.press("ctrl+t")
-		if h.m().symbolsFilter.Value() == "" && !h.m().symbolsKindOn {
+		if h.m().symbols.Filter.Value() == "" && !h.m().symbols.KindOn {
 			t.Skip("could not set symbol filters")
 		}
 		h.press("esc")
-		if h.m().symbolsFilter.Value() != "" || h.m().symbolsKindOn || h.m().symbolsFilter.Focused() {
+		if h.m().symbols.Filter.Value() != "" || h.m().symbols.KindOn || h.m().symbols.Filter.Focused() {
 			t.Fatalf("symbols esc did not clear everything (text=%q kind=%v focused=%v)",
-				h.m().symbolsFilter.Value(), h.m().symbolsKindOn, h.m().symbolsFilter.Focused())
+				h.m().symbols.Filter.Value(), h.m().symbols.KindOn, h.m().symbols.Filter.Focused())
 		}
 	}
 
@@ -1079,19 +1079,19 @@ func TestKeysEscClears(t *testing.T) {
 	h.press("/")
 	h.press("t")
 	h.press("esc")
-	if h.m().sectionsTypeOn || h.m().sectionsFilter.Value() != "" || h.m().sectionsFilter.Focused() {
+	if h.m().sections.TypeOn || h.m().sections.Filter.Value() != "" || h.m().sections.Filter.Focused() {
 		t.Fatal("sections esc did not clear filters")
 	}
 
 	// Strings: section filter + text, esc clears.
 	h.goView(modeStrings, "7")
-	if len(h.m().stringsSections) > 0 {
+	if len(h.m().strs.Sections) > 0 {
 		h.press("ctrl+s")
 	}
 	h.press("/")
 	h.press("a")
 	h.press("esc")
-	if h.m().stringsSecOn || h.m().stringsFilter.Value() != "" {
+	if h.m().strs.SecOn || h.m().strs.Filter.Value() != "" {
 		t.Fatal("strings esc did not clear filters")
 	}
 
@@ -1102,7 +1102,7 @@ func TestKeysEscClears(t *testing.T) {
 		h.press("/")
 		h.press("a")
 		h.press("esc")
-		if h.m().libsAvail != availAll || h.m().libsFilter.Value() != "" {
+		if h.m().libs.Avail != view.AvailAll || h.m().libs.Filter.Value() != "" {
 			t.Fatal("libs esc did not clear filters")
 		}
 	}
@@ -1113,31 +1113,31 @@ func TestKeysEscClears(t *testing.T) {
 func TestKeysSectionFilters(t *testing.T) {
 	h := newKeyHarness(t, systemBinary(t))
 	h.goView(modeSections, "2")
-	if len(h.m().sectionsTypes) == 0 {
+	if len(h.m().sections.Types) == 0 {
 		t.Skip("no section type names")
 	}
-	all := len(h.m().sectionsFiltered)
+	all := len(h.m().sections.Filtered)
 	h.press("ctrl+t")
-	if !h.m().sectionsTypeOn {
+	if !h.m().sections.TypeOn {
 		t.Fatal("ctrl+t did not enable the section type filter")
 	}
-	if len(h.m().sectionsFiltered) > all {
+	if len(h.m().sections.Filtered) > all {
 		t.Fatal("type filter did not narrow the list")
 	}
 	// Every visible row matches the selected type.
-	for _, idx := range h.m().sectionsFiltered {
-		if h.m().sections[idx].TypeName != h.m().sectionsType {
-			t.Fatalf("row type %q != filter %q", h.m().sections[idx].TypeName, h.m().sectionsType)
+	for _, idx := range h.m().sections.Filtered {
+		if h.m().sections.Sections[idx].TypeName != h.m().sections.TypeSel {
+			t.Fatalf("row type %q != filter %q", h.m().sections.Sections[idx].TypeName, h.m().sections.TypeSel)
 		}
 	}
 	h.press("esc")
-	if h.m().sectionsTypeOn {
+	if h.m().sections.TypeOn {
 		t.Fatal("esc did not clear the type filter")
 	}
 	// Flags filter is wired too.
-	if len(h.m().sectionsFlagsList) > 0 {
+	if len(h.m().sections.FlagsList) > 0 {
 		h.press("ctrl+f")
-		if !h.m().sectionsFlagsOn {
+		if !h.m().sections.FlagsOn {
 			t.Fatal("ctrl+f did not enable the section flags filter")
 		}
 	}
@@ -1151,7 +1151,7 @@ func TestKeysLibsSearch(t *testing.T) {
 	if h.m().file.Info == nil || len(h.m().file.Info.DynamicLibs) < 2 {
 		t.Skip("need at least two dynamic libraries")
 	}
-	all := len(h.m().libsRows)
+	all := len(h.m().libs.Rows)
 	// Filter by a substring of the first library's basename.
 	lib := h.m().file.Info.DynamicLibs[0]
 	needle := lib
@@ -1162,14 +1162,14 @@ func TestKeysLibsSearch(t *testing.T) {
 	for _, r := range needle {
 		h.press(string(r))
 	}
-	if h.m().libsFilter.Value() == "" {
+	if h.m().libs.Filter.Value() == "" {
 		t.Skip("filter input did not accept text")
 	}
-	if len(h.m().libsRows) > all {
+	if len(h.m().libs.Rows) > all {
 		t.Fatal("libs search did not narrow the list")
 	}
 	h.press("esc")
-	if h.m().libsFilter.Value() != "" {
+	if h.m().libs.Filter.Value() != "" {
 		t.Fatal("esc did not clear the libs search")
 	}
 }
@@ -1185,21 +1185,21 @@ func TestKeysNavAliases(t *testing.T) {
 
 	// ctrl+down / alt+down page down; cmd+up returns to the top.
 	h.press("ctrl+down")
-	if h.m().sectionsCur == 0 {
+	if h.m().sections.Cur == 0 {
 		t.Fatal("ctrl+down did not page down")
 	}
 	h.press("cmd+up")
-	if h.m().sectionsCur != 0 {
+	if h.m().sections.Cur != 0 {
 		t.Fatal("cmd+up did not go to the top")
 	}
 	// cmd+down goes to the bottom; ctrl+up pages back up.
 	h.press("cmd+down")
-	bottom := h.m().sectionsCur
-	if bottom != len(h.m().sectionsFiltered)-1 {
-		t.Fatalf("cmd+down landed at %d, want %d", bottom, len(h.m().sectionsFiltered)-1)
+	bottom := h.m().sections.Cur
+	if bottom != len(h.m().sections.Filtered)-1 {
+		t.Fatalf("cmd+down landed at %d, want %d", bottom, len(h.m().sections.Filtered)-1)
 	}
 	h.press("ctrl+up")
-	if h.m().sectionsCur == bottom {
+	if h.m().sections.Cur == bottom {
 		t.Fatal("ctrl+up did not page up")
 	}
 }

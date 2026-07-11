@@ -8,6 +8,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/rabarbra/exex/internal/ui/views/sections"
+	"github.com/rabarbra/exex/internal/ui/views/strs"
+	"github.com/rabarbra/exex/internal/ui/views/symbols"
 )
 
 func wheelDownModel() *Model {
@@ -16,12 +19,10 @@ func wheelDownModel() *Model {
 		file:        &binfile.File{},
 		mode:        modeStrings,
 		layoutState: layoutState{width: 80, height: 24},
-		stringsState: stringsState{
-			stringsList: make([]binfile.StringEntry, 5000),
-		},
 	}
-	m.stringsFilter = newPromptInput("", "/ ")
-	m.recomputeStrings() // empty filter → all rows visible
+	m.strs.List = make([]binfile.StringEntry, 5000)
+	m.strs.Filter = newPromptInput("", "/ ")
+	m.strs.Recompute(m.viewContext()) // empty filter → all rows visible
 	return m
 }
 
@@ -39,7 +40,7 @@ func TestWheelCoalescing(t *testing.T) {
 	if !m.wheelTicking {
 		t.Fatal("first wheel event should start the coalescing tick")
 	}
-	firstTop := m.stringsTop
+	firstTop := m.strs.Top
 	if firstTop == 0 {
 		t.Fatal("first wheel event should have scrolled")
 	}
@@ -51,15 +52,15 @@ func TestWheelCoalescing(t *testing.T) {
 			t.Fatal("a coalesced wheel event must leave the frame clean so View() is skipped")
 		}
 	}
-	if m.stringsTop != firstTop {
-		t.Fatalf("burst scrolled mid-flood (top %d → %d); events should only accumulate", firstTop, m.stringsTop)
+	if m.strs.Top != firstTop {
+		t.Fatalf("burst scrolled mid-flood (top %d → %d); events should only accumulate", firstTop, m.strs.Top)
 	}
 	if m.pendingWheel == 0 {
 		t.Fatal("burst should have accumulated pending wheel delta")
 	}
 
 	m.handleWheelTick() // applies the accumulated delta in one shot
-	if m.stringsTop == firstTop {
+	if m.strs.Top == firstTop {
 		t.Fatal("tick should have applied the accumulated scroll")
 	}
 	if m.pendingWheel != 0 {
@@ -90,24 +91,24 @@ func TestSectionsHeaderClickSorts(t *testing.T) {
 	}}
 	m := newTestModel(t, f)
 	m.setMode(modeSections)
-	m.recomputeSections()
+	m.sections.Recompute()
 
 	clickBodyRow(m, 7, 1) // Name header.
-	if m.sectionsSort != secSortName {
-		t.Fatalf("header click sort = %v, want name", m.sectionsSort)
+	if m.sections.Sort != sections.SortName {
+		t.Fatalf("header click sort = %v, want name", m.sections.Sort)
 	}
-	if got := m.sections[m.sectionsFiltered[0]].Name; got != "alpha" {
+	if got := m.sections.Sections[m.sections.Filtered[0]].Name; got != "alpha" {
 		t.Fatalf("name sort first = %q, want alpha", got)
 	}
 
 	clickBodyRow(m, 7, 1)
-	if !m.sectionsSortDesc {
+	if !m.sections.SortDesc {
 		t.Fatal("second header click did not reverse sections sort")
 	}
-	if got := m.sections[m.sectionsFiltered[0]].Name; got != "zeta" {
+	if got := m.sections.Sections[m.sections.Filtered[0]].Name; got != "zeta" {
 		t.Fatalf("name desc first = %q, want zeta", got)
 	}
-	if header := ansi.Strip(m.renderSections()); !strings.Contains(header, "Name ") || !strings.Contains(header, "▽") || strings.Contains(header, "Name▽") {
+	if header := ansi.Strip(m.sections.Render(m.viewContext(), m)); !strings.Contains(header, "Name ") || !strings.Contains(header, "▽") || strings.Contains(header, "Name▽") {
 		t.Fatalf("section header missing descending marker: %q", header)
 	}
 }
@@ -120,24 +121,24 @@ func TestSymbolsHeaderClickSorts(t *testing.T) {
 	}}
 	m := newTestModel(t, f)
 	m.setMode(modeSymbols)
-	m.recomputeSymbols()
+	m.symbols.Recompute(m.viewContext())
 
 	clickBodyRow(m, 2, 1) // Address header.
-	if m.symbolsSort != sortByAddr {
-		t.Fatalf("header click sort = %v, want address", m.symbolsSort)
+	if m.symbols.Sort != symbols.SortAddr {
+		t.Fatalf("header click sort = %v, want address", m.symbols.Sort)
 	}
-	if got := m.file.Symbols[m.symbolsRows[0].node.leaf].Addr; got != 0x1000 {
+	if got := m.file.Symbols[m.symbols.Rows[0].Node.Leaf].Addr; got != 0x1000 {
 		t.Fatalf("address sort first = %#x, want 0x1000", got)
 	}
 
 	clickBodyRow(m, 2, 1)
-	if !m.symbolsSortDesc {
+	if !m.symbols.SortDesc {
 		t.Fatal("second header click did not reverse symbols sort")
 	}
-	if got := m.file.Symbols[m.symbolsRows[0].node.leaf].Addr; got != 0x3000 {
+	if got := m.file.Symbols[m.symbols.Rows[0].Node.Leaf].Addr; got != 0x3000 {
 		t.Fatalf("address desc first = %#x, want 0x3000", got)
 	}
-	if header := ansi.Strip(m.renderSymbols()); !strings.Contains(header, "Address ") || !strings.Contains(header, "▽") || strings.Contains(header, "Address▽") {
+	if header := ansi.Strip(m.symbols.Render(m.viewContext(), m)); !strings.Contains(header, "Address ") || !strings.Contains(header, "▽") || strings.Contains(header, "Address▽") {
 		t.Fatalf("symbol header missing descending marker: %q", header)
 	}
 }
@@ -148,23 +149,23 @@ func TestStringsHeaderClickSorts(t *testing.T) {
 		file:        binfile.NewRawFile([]byte("abc")),
 		mode:        modeStrings,
 		layoutState: layoutState{width: 120, height: 30},
-		stringsState: stringsState{stringsList: []binfile.StringEntry{
-			{Offset: 0, Addr: 0x3000, HasAddr: true, Len: 1},
-			{Offset: 1, Addr: 0x1000, HasAddr: true, Len: 1},
-			{Offset: 2, Addr: 0x2000, HasAddr: true, Len: 1},
-		}},
 	}
-	m.stringsFilter = newPromptInput("", "/ ")
-	m.recomputeStrings()
+	m.strs.List = []binfile.StringEntry{
+		{Offset: 0, Addr: 0x3000, HasAddr: true, Len: 1},
+		{Offset: 1, Addr: 0x1000, HasAddr: true, Len: 1},
+		{Offset: 2, Addr: 0x2000, HasAddr: true, Len: 1},
+	}
+	m.strs.Filter = newPromptInput("", "/ ")
+	m.strs.Recompute(m.viewContext())
 
 	clickBodyRow(m, 13, 1) // Address header.
-	if m.stringsSort != strSortAddr {
-		t.Fatalf("header click sort = %v, want address", m.stringsSort)
+	if m.strs.Sort != strs.SortAddr {
+		t.Fatalf("header click sort = %v, want address", m.strs.Sort)
 	}
-	if got := m.stringsList[m.stringsFiltered[0]].Offset; got != 1 {
+	if got := m.strs.List[m.strs.Filtered[0]].Offset; got != 1 {
 		t.Fatalf("address sort first offset = %#x, want 1", got)
 	}
-	if header := ansi.Strip(m.renderStrings()); !strings.Contains(header, "Address ") || !strings.Contains(header, "△") || strings.Contains(header, "Address△") {
+	if header := ansi.Strip(m.strs.Render(m.viewContext(), m)); !strings.Contains(header, "Address ") || !strings.Contains(header, "△") || strings.Contains(header, "Address△") {
 		t.Fatalf("strings header missing ascending marker: %q", header)
 	}
 }
@@ -173,13 +174,13 @@ func TestLibsHeaderClickSorts(t *testing.T) {
 	f := &binfile.File{Format: binfile.FormatELF, Info: &binfile.Info{DynamicLibs: []string{"z.so", "a.so"}}}
 	m := newTestModel(t, f)
 	m.setMode(modeLibs)
-	m.libsTree = false
-	m.buildLibRows()
+	m.libs.Tree = false
+	m.libs.BuildRows(m.viewContext())
 
 	first := func() string {
-		for _, row := range m.libsRows {
-			if row.node.leaf >= 0 {
-				return m.file.Info.DynamicLibs[row.node.leaf]
+		for _, row := range m.libs.Rows {
+			if row.Node.Leaf >= 0 {
+				return m.file.Info.DynamicLibs[row.Node.Leaf]
 			}
 		}
 		return ""
@@ -188,19 +189,19 @@ func TestLibsHeaderClickSorts(t *testing.T) {
 		t.Fatalf("initial first lib = %q, want a.so", got)
 	}
 
-	clickBodyRow(m, 2, m.libsTitleRow()+1)
-	if m.libsSortDesc {
+	clickBodyRow(m, 2, m.libs.TitleRow(m.viewContext())+1)
+	if m.libs.SortDesc {
 		t.Fatal("click below libs header sorted instead of selecting a row")
 	}
 
-	clickBodyRow(m, 2, m.libsTitleRow())
-	if !m.libsSortDesc {
+	clickBodyRow(m, 2, m.libs.TitleRow(m.viewContext()))
+	if !m.libs.SortDesc {
 		t.Fatal("libs header click did not reverse sort")
 	}
 	if got := first(); got != "z.so" {
 		t.Fatalf("descending first lib = %q, want z.so", got)
 	}
-	if header := ansi.Strip(m.renderLibsHeader()); !strings.Contains(header, "Needed libraries ") || !strings.Contains(header, "▽") || strings.Contains(header, "Needed libraries▽") {
+	if header := ansi.Strip(m.libs.Render(m.viewContext(), m)); !strings.Contains(header, "Needed libraries ") || !strings.Contains(header, "▽") || strings.Contains(header, "Needed libraries▽") {
 		t.Fatalf("libs header missing descending marker: %q", header)
 	}
 }

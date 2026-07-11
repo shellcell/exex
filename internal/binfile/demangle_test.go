@@ -31,3 +31,20 @@ func TestDemangleName(t *testing.T) {
 		}
 	}
 }
+
+func TestDemangleWorkers(t *testing.T) {
+	for _, tc := range []struct {
+		procs int
+		want  int
+	}{
+		{0, 1},
+		{1, 1},
+		{4, 4},
+		{8, 8},
+		{16, 8},
+	} {
+		if got := demangleWorkers(tc.procs); got != tc.want {
+			t.Errorf("demangleWorkers(%d) = %d, want %d", tc.procs, got, tc.want)
+		}
+	}
+}

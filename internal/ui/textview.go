@@ -13,6 +13,7 @@ package ui
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/syntax"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 // maxTextFileBytes bounds how much of a text file the viewer loads.
@@ -96,7 +98,7 @@ func NewText(path string, cfg config.Config) (tea.Model, error) {
 
 // load reads path and recomputes the highlighted paths.
 func (m *textModel) load(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := readFilePrefix(path, maxTextFileBytes+1)
 	if err != nil {
 		return err
 	}
@@ -201,7 +203,7 @@ func (m *textModel) handleKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m *textModel) scroll(delta int) {
-	m.top = clamp(m.top+delta, 0, m.maxTop())
+	m.top = layout.Clamp(m.top+delta, 0, m.maxTop())
 }
 
 // back returns to the previously-viewed text file, or quits at the root.
@@ -215,7 +217,7 @@ func (m *textModel) back() (tea.Model, tea.Cmd) {
 		m.status = "back: " + err.Error()
 		return m, nil
 	}
-	m.top = clamp(prev.top, 0, m.maxTop())
+	m.top = layout.Clamp(prev.top, 0, m.maxTop())
 	return m, nil
 }
 
@@ -233,7 +235,7 @@ func (m *textModel) open(resolved string) (tea.Model, tea.Cmd) {
 		nm.width, nm.height = m.width, m.height
 		return nm, nm.Init()
 	}
-	data, err := os.ReadFile(resolved)
+	data, err := readFilePrefix(resolved, 8192)
 	if err != nil {
 		m.status = "open: " + err.Error()
 		return m, nil
@@ -249,26 +251,35 @@ func (m *textModel) open(resolved string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func readFilePrefix(path string, limit int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, int64(limit)))
+}
+
 func (m *textModel) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		return tea.NewView("initializing…")
 	}
 	bodyH := m.bodyHeight()
 	suffix := fmt.Sprintf("   (%d lines, %d paths)", len(m.lines), len(m.picks))
-	header := m.theme.viewTitleLine(truncateMiddle(m.path, max(1, m.width-lipgloss.Width(suffix)))+suffix, m.width)
+	header := m.theme.viewTitleLine(layout.TruncateMiddle(m.path, max(1, m.width-lipgloss.Width(suffix)))+suffix, m.width)
 
 	var b strings.Builder
 	for i := m.top; i < len(m.lines) && i < m.top+bodyH; i++ {
 		b.WriteString(m.renderLine(i))
 		b.WriteByte('\n')
 	}
-	body := padBody(b.String(), m.width, bodyH)
+	body := layout.PadBody(b.String(), m.width, bodyH)
 
 	footer := m.theme.footerStyle.Render("↑/↓ scroll · Enter/o open path menu · Esc back · q quit")
 	if m.status != "" {
 		footer = m.theme.infoStyle.Render(m.status)
 	}
-	out := header + "\n" + body + "\n" + padRight(footer, m.width)
+	out := header + "\n" + body + "\n" + layout.PadRight(footer, m.width)
 
 	if m.pickerActive {
 		out = m.overlayCenterText(out, m.renderPicker())
@@ -289,7 +300,7 @@ func (m *textModel) renderLine(i int) string {
 		line = m.hlLines[i]
 	}
 	line = underlineRanges(line, m.spans[i])
-	return padRight(fitANSIWidth(line, m.width), m.width)
+	return layout.PadRight(layout.FitANSIWidth(line, m.width), m.width)
 }
 
 // underlineRanges adds an underline over the given byte ranges of an
@@ -351,7 +362,7 @@ func (m *textModel) renderPicker() string {
 	var sb strings.Builder
 	sb.WriteString(m.theme.modalTitle("Open path"))
 	sb.WriteString("\n\n")
-	top := visualTop(m.pickerSel, m.pickerTop, len(m.picks), visible, func(int) int { return 1 })
+	top := layout.VisualTop(m.pickerSel, m.pickerTop, len(m.picks), visible, func(int) int { return 1 })
 	m.pickerTop = top
 	end := min(top+visible, len(m.picks))
 	for i := top; i < end; i++ {
@@ -359,7 +370,7 @@ func (m *textModel) renderPicker() string {
 		if rel, err := filepath.Rel(m.dir, label); err == nil && !strings.HasPrefix(rel, "..") {
 			label = rel
 		}
-		line := padRight(" "+truncateMiddle(label, rowW-2), rowW)
+		line := layout.PadRight(" "+layout.TruncateMiddle(label, rowW-2), rowW)
 		if i == m.pickerSel {
 			line = m.theme.tableSelStyle.Render(line)
 		}
@@ -377,7 +388,7 @@ func (m *textModel) renderPicker() string {
 func (m *textModel) overlayCenterText(bg, modal string) string {
 	mw := lipgloss.Width(modal)
 	mh := lipgloss.Height(modal)
-	return overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
+	return layout.Overlay(bg, modal, (m.width-mw)/2, (m.height-mh)/2)
 }
 
 // extractPaths finds, per line, the byte spans that are filesystem paths
@@ -386,7 +397,8 @@ func (m *textModel) overlayCenterText(bg, modal string) string {
 func extractPaths(lines []string, dir string) ([][]pathSpan, []string) {
 	spans := make([][]pathSpan, len(lines))
 	seen := map[string]bool{}
-	cmdCache := map[string]string{} // memoised $PATH lookups
+	pathCache := map[string]string{} // memoised filesystem hits and misses
+	cmdCache := map[string]string{}  // memoised $PATH lookups
 	var picks []string
 	for i, line := range lines {
 		var ls []pathSpan
@@ -401,7 +413,11 @@ func extractPaths(lines []string, dir string) ([][]pathSpan, []string) {
 			}
 			tok := line[s:e]
 			// A filesystem path first; otherwise a bare command name on $PATH.
-			resolved := resolveExistingPath(tok, dir)
+			resolved, cached := pathCache[tok]
+			if !cached {
+				resolved = resolveExistingPath(tok, dir)
+				pathCache[tok] = resolved
+			}
 			if resolved == "" {
 				resolved = resolveCommand(tok, cmdCache)
 			}

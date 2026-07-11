@@ -93,3 +93,28 @@ func Grep(files []string, linesFor func(string) []string, query string, limit in
 	}
 	return out
 }
+
+// GrepStream is Grep for a streaming line source. scan calls yield in line
+// order and stops when yield returns false, so callers need not retain every
+// source file merely to search it.
+func GrepStream(files []string, scan func(string, func(string) bool), query string, limit int) []Match {
+	q := strings.ToLower(query)
+	if q == "" || limit <= 0 {
+		return nil
+	}
+	var out []Match
+	for _, file := range files {
+		lineNo := 0
+		scan(file, func(line string) bool {
+			lineNo++
+			if strings.Contains(strings.ToLower(line), q) {
+				out = append(out, Match{File: file, Line: lineNo})
+			}
+			return len(out) < limit
+		})
+		if len(out) >= limit {
+			return out
+		}
+	}
+	return out
+}

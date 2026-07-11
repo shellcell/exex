@@ -37,6 +37,9 @@ const (
 const (
 	lcMain             = 0x80000028
 	lcLoadDylinker     = 0x0e
+	lcLoadWeakDylib    = 0x80000018 // LC_LOAD_WEAK_DYLIB
+	lcReexportDylib    = 0x8000001f // LC_REEXPORT_DYLIB
+	lcLoadUpwardDylib  = 0x80000023 // LC_LOAD_UPWARD_DYLIB
 	lcUUID             = 0x1b
 	lcCodeSignature    = 0x1d
 	lcEncryptionInfo   = 0x21
@@ -260,7 +263,7 @@ func (f *File) loadMachO() error {
 	}
 	f.Symbols = append(f.Symbols, machoImportSymbols(mf, f.raw, base, libs)...)
 
-	f.entry = machoEntry(mf, textSeg, base)
+	f.entry = machoEntry(mf, textSeg)
 	f.loadMachOInfo(mf) // reads mf.Symtab (Stripped), so before it is dropped below
 	f.dwarfAvail = f.machoHasDWARF(mf)
 	f.header = f.machoHeaderInfo(mf)
@@ -275,7 +278,14 @@ func (f *File) loadMachO() error {
 				symNames[i] = mf.Symtab.Syms[i].Name
 			}
 		}
-		f.relocBuild = func() []Reloc { return machoRelocs(mf, base, symNames) }
+		raw := f.raw
+		f.relocBuild = func() []Reloc {
+			out := machoRelocs(mf, base, symNames)
+			// A linked image carries its relocations as dyld bind/rebase or chained
+			// fixups rather than per-section relocs; decode those too so the view is
+			// populated for real executables and dylibs, not just object files.
+			return append(out, machoDynamicFixups(mf, raw, base)...)
+		}
 	}
 
 	// Defer the DWARF decode (abbrev/section parse — a big slice of Open for debug
@@ -611,7 +621,7 @@ func machoHasRelocs(mf *macho.File) bool {
 			return true
 		}
 	}
-	return false
+	return machoHasDynamicFixups(mf)
 }
 
 // machoHasDWARF reports whether DWARF is available without parsing it: an
@@ -953,7 +963,7 @@ func neutralFlags(alloc, write, exec bool) string {
 
 // machoEntry resolves the entry point. LC_MAIN records an offset from the start
 // of __TEXT; we add the segment's virtual base to recover the address.
-func machoEntry(mf *macho.File, textSeg *macho.Segment, base uint64) uint64 {
+func machoEntry(mf *macho.File, textSeg *macho.Segment) uint64 {
 	for _, l := range mf.Loads {
 		lb, ok := l.(macho.LoadBytes)
 		if !ok {
@@ -995,6 +1005,59 @@ func machoEntry(mf *macho.File, textSeg *macho.Segment, base uint64) uint64 {
 	return 0
 }
 
+// machoAllDylibs returns every library the image links against, in load order:
+// regular LC_LOAD_DYLIB (which the stdlib parses into *macho.Dylib) plus the
+// weak, re-export and upward variants (raw load commands the stdlib leaves as
+// LoadBytes). The stdlib's ImportedLibraries() sees only the first kind, so an
+// umbrella like libSystem.B — which pulls in libsystem_kernel via
+// LC_REEXPORT_DYLIB — would otherwise look dependency-less.
+func machoAllDylibs(mf *macho.File) []string {
+	var libs []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			libs = append(libs, name)
+		}
+	}
+	for _, l := range mf.Loads {
+		switch v := l.(type) {
+		case *macho.Dylib:
+			add(v.Name)
+		case macho.LoadBytes:
+			raw := v.Raw()
+			if len(raw) < 16 {
+				continue
+			}
+			switch mf.ByteOrder.Uint32(raw) {
+			case lcLoadWeakDylib, lcReexportDylib, lcLoadUpwardDylib:
+				nameOff := mf.ByteOrder.Uint32(raw[8:])
+				if int(nameOff) < len(raw) {
+					add(cStr(raw[nameOff:]))
+				}
+			}
+		}
+	}
+	return libs
+}
+
+// cStr reads a NUL-terminated string from the head of b.
+func cStr(b []byte) string {
+	if i := indexNUL(b); i >= 0 {
+		return string(b[:i])
+	}
+	return string(b)
+}
+
+func indexNUL(b []byte) int {
+	for i, c := range b {
+		if c == 0 {
+			return i
+		}
+	}
+	return -1
+}
+
 func mfSyms(mf *macho.File) []macho.Symbol {
 	if mf.Symtab == nil {
 		return nil
@@ -1004,9 +1067,7 @@ func mfSyms(mf *macho.File) []macho.Symbol {
 
 func (f *File) loadMachOInfo(mf *macho.File) {
 	in := &Info{}
-	if libs, err := mf.ImportedLibraries(); err == nil {
-		in.DynamicLibs = libs
-	}
+	in.DynamicLibs = machoAllDylibs(mf)
 	in.BuildID = machoUUID(mf)
 	in.Stripped = mf.Symtab == nil || len(mf.Symtab.Syms) == 0
 	in.StaticLinked = len(in.DynamicLibs) == 0

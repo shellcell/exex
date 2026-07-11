@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/rabarbra/exex/internal/binfile"
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/dump"
+	"github.com/rabarbra/exex/internal/dyldcache"
 	"github.com/rabarbra/exex/internal/syscalls"
 	"github.com/rabarbra/exex/internal/ui"
 )
@@ -84,6 +86,12 @@ func main() {
 			} else {
 				runArchiveViewer(path)
 			}
+			return
+		}
+		// A dyld shared cache is not a single object either: it packs the system's
+		// dylibs into one mapped image split across subcache files. List its images.
+		if dyldcache.IsCache(readPrefix(path, 16)) {
+			runDyldCache(path, gotoTarget)
 			return
 		}
 		// Not a recognised binary: if it's a readable text file (a shell/python/…
@@ -255,6 +263,36 @@ func readPrefix(path string, n int) []byte {
 	buf := make([]byte, n)
 	r, _ := io.ReadFull(fp, buf)
 	return buf[:r]
+}
+
+// runDyldCache opens a dyld shared cache and lists its images (install path +
+// header address). With a goto argument it filters to images whose path contains
+// that substring. This is a reader/lister — it does not un-share dylibs.
+func runDyldCache(path, filter string) {
+	c, err := dyldcache.Open(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "exex: %v\n", err)
+		os.Exit(1)
+	}
+	defer c.Close()
+
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+	subs := c.SubCacheNames()
+	fmt.Fprintf(out, "dyld shared cache: %s\n", c.Arch)
+	fmt.Fprintf(out, "  %d images, %d mappings, %d cache files\n\n", len(c.Images), len(c.Mappings), len(subs))
+
+	shown := 0
+	for _, im := range c.Images {
+		if filter != "" && !strings.Contains(im.Path, filter) {
+			continue
+		}
+		fmt.Fprintf(out, "  %#016x  %s\n", im.Address, im.Path)
+		shown++
+	}
+	if filter != "" {
+		fmt.Fprintf(out, "\n%d image(s) matching %q\n", shown, filter)
+	}
 }
 
 // runTextViewer loads path into the text-script viewer and runs it.

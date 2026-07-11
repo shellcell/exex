@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # Reports what makes up the exex binary:
 #   1. build totals (stripped full vs lite) and the Chroma cost as their difference
-#      — Chroma's ~2.4 MB of embedded lexer XML hides under "go:string.*" in the
-#      symbol table, so a build diff is the only honest measure of its full cost;
+#      — embedded lexer/style XML hides under "go:string.*" in the symbol table,
+#      so a build diff is the only honest measure of its full cost;
 #   2. a per-module attribution from the symbol table, for both the full and lite
 #      builds (so you can see what the `lite` tag actually drops).
 #
@@ -62,11 +62,11 @@ echo
 echo "== $bin build totals (stripped, -s -w) =="
 printf "  %-7s %8s MB\n" "full" "$(mb "$bf")"
 printf "  %-7s %8s MB\n" "lite" "$(mb "$bl")"
-printf "  %-7s %8s MB  (full - lite: Chroma + regexp2 + encoding/xml + embedded lexers)\n" "Chroma" "$(mb "$bd")"
+printf "  %-7s %8s MB  (full - lite: Chroma + regexp2 + encoding/xml + curated assets)\n" "Chroma" "$(mb "$bd")"
 
 echo
 echo "== per-module attribution: FULL build (symbol sizes, unstripped) =="
-echo "   note: Chroma's embedded lexer XML is counted under 'Go: strings + embedded data',"
+echo "   note: Chroma's embedded lexer/style XML is counted under 'Go: strings + embedded data',"
 echo "         not 'Chroma' — see the build-diff above for its real cost."
 echo
 breakdown "$fullsym"

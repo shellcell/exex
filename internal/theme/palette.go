@@ -10,7 +10,16 @@ package theme
 
 //go:generate go run gen/main.go
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
+
+// DefaultName is the theme used when none is configured, and the palette every
+// other lookup falls back to. Both the UI (internal/ui) and the source
+// highlighter (internal/syntax) resolve against it, so it lives here rather than
+// as a constant duplicated in each.
+const DefaultName = "nord"
 
 // Palette is the small set of semantic colours we pull from a Chroma style and
 // map onto the UI and the built-in syntax highlighter. Every field is a #RRGGBB
@@ -74,6 +83,19 @@ func PaletteFor(name string) (Palette, bool) {
 		return p.resolved(), true
 	}
 	return Palette{}, false
+}
+
+// ForegroundFor returns the default text colour of a style, falling back to
+// DefaultName's and then to "". Callers use it to colour tokens a style leaves
+// unstyled.
+func ForegroundFor(name string) string {
+	if p, ok := PaletteFor(strings.TrimSpace(name)); ok {
+		return p.Foreground
+	}
+	if p, ok := PaletteFor(DefaultName); ok {
+		return p.Foreground
+	}
+	return ""
 }
 
 // Names returns the sorted list of known palette (Chroma style) names.

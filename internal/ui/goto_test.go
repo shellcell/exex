@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rabarbra/exex/internal/binfile"
+	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
 )
 
 func TestResolveSymbolGoto(t *testing.T) {
@@ -34,14 +35,14 @@ func TestAppendSymbolMatchesRanksBeforeTableOrder(t *testing.T) {
 		{Name: "target_helper", Addr: 0x2000},
 		{Name: "target", Addr: 0x1000},
 	}}}
-	m.appendSymbolMatches("target")
-	if got := len(m.gotoResults); got != 3 {
-		t.Fatalf("matches = %d, want 3", got)
+	got := m.appendSymbolMatches(nil, "target")
+	if len(got) != 3 {
+		t.Fatalf("matches = %d, want 3", len(got))
 	}
 	want := []string{"target", "target_helper", "zzz_target"}
 	for i, w := range want {
-		if got := m.gotoResults[i].label; got != w {
-			t.Fatalf("result[%d] = %q, want %q", i, got, w)
+		if got[i].Label != w {
+			t.Fatalf("result[%d] = %q, want %q", i, got[i].Label, w)
 		}
 	}
 }
@@ -52,36 +53,35 @@ func TestAppendSymbolMatchesFlushesWhenExactBucketFillsCap(t *testing.T) {
 		{Name: "needle", Addr: 0x2000},
 		{Name: "needle", Addr: 0x3000},
 	}}}
-	m.gotoResults = make([]gotoTarget, gotoMaxResults-2)
-	m.appendSymbolMatches("needle")
-	if got := len(m.gotoResults); got != gotoMaxResults {
-		t.Fatalf("matches after bounded append = %d, want %d", got, gotoMaxResults)
+	seeded := make([]palettemodal.Target, gotoMaxResults-2)
+	got := m.appendSymbolMatches(seeded, "needle")
+	if len(got) != gotoMaxResults {
+		t.Fatalf("matches after bounded append = %d, want %d", len(got), gotoMaxResults)
 	}
 	for i := gotoMaxResults - 2; i < gotoMaxResults; i++ {
-		if got := m.gotoResults[i].label; got != "needle" {
-			t.Fatalf("result[%d] = %q, want needle", i, got)
+		if got[i].Label != "needle" {
+			t.Fatalf("result[%d] = %q, want needle", i, got[i].Label)
 		}
 	}
 }
 
 func TestStartupGotoMultipleMatchesOpensSymbols(t *testing.T) {
 	m := &Model{
-		theme:        DefaultTheme(),
-		layoutState:  layoutState{width: 120, height: 30},
-		file:         &binfile.File{Symbols: []binfile.Symbol{{Name: "do_thing", Addr: 0x1000}, {Name: "do_other", Addr: 0x2000}}},
-		symbolsState: symbolsState{},
+		theme:       DefaultTheme(),
+		layoutState: layoutState{width: 120, height: 30},
+		file:        &binfile.File{Symbols: []binfile.Symbol{{Name: "do_thing", Addr: 0x1000}, {Name: "do_other", Addr: 0x2000}}},
 	}
-	m.symbolsFilter = newPromptInput("", "/ ")
-	m.recomputeSymbols()
+	m.symbols.Filter = newPromptInput("", "/ ")
+	m.symbols.Recompute(m.viewContext())
 	m.gotoTargetString("do_") // two substring matches, no exact
 	if m.mode != modeSymbols {
 		t.Fatalf("multiple matches should open Symbols view, got mode %v", m.mode)
 	}
-	if got := m.symbolsFilter.Value(); got != "do_" {
+	if got := m.symbols.Filter.Value(); got != "do_" {
 		t.Fatalf("filter = %q, want do_", got)
 	}
-	if len(m.symbolsFiltered) != 2 {
-		t.Fatalf("filtered count = %d, want 2", len(m.symbolsFiltered))
+	if len(m.symbols.Filtered) != 2 {
+		t.Fatalf("filtered count = %d, want 2", len(m.symbols.Filtered))
 	}
 }
 

@@ -22,6 +22,20 @@ func TestLooksLikeText(t *testing.T) {
 	}
 }
 
+func TestReadFilePrefixStopsAtLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 1024)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readFilePrefix(path, 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 17 {
+		t.Fatalf("read %d bytes, want 17", len(got))
+	}
+}
+
 func TestExtractPathsExistingOnly(t *testing.T) {
 	dir := t.TempDir()
 	// A real relative file the script references, plus a real absolute one.

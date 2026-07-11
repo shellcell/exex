@@ -17,16 +17,15 @@ func TestPasteIntoGotoModal(t *testing.T) {
 		layoutState: layoutState{width: 120, height: 30},
 		file:        &binfile.File{Symbols: []binfile.Symbol{{Name: "main", Addr: 0x1000}}},
 	}
-	m.gotoInput = newPromptInput("", "→ ")
-	m.gotoActive = true
-	m.gotoInput.Focus()
+	m.palette.SetInput(newPromptInput("", "→ "))
+	m.palette.Open(m)
 
 	upd, _ := m.Update(tea.PasteMsg{Content: "main"})
 	got := upd.(*Model)
-	if v := got.gotoInput.Value(); v != "main" {
+	if v := got.palette.Value(); v != "main" {
 		t.Fatalf("goto value after paste = %q, want %q", v, "main")
 	}
-	if len(got.gotoResults) == 0 {
+	if len(got.palette.Results()) == 0 {
 		t.Fatal("paste did not re-run the goto match")
 	}
 }
@@ -37,12 +36,11 @@ func TestPasteIntoSearchModal(t *testing.T) {
 		layoutState: layoutState{width: 120, height: 30},
 		file:        &binfile.File{},
 	}
-	m.searchInput = newPromptInput("", "/ ")
-	m.searchActive = true
-	m.searchInput.Focus()
+	m.search.Init(newPromptInput("", "/ "))
+	m.search.Open()
 
 	upd, _ := m.Update(tea.PasteMsg{Content: "de ad be ef"})
-	if v := upd.(*Model).searchInput.Value(); v != "de ad be ef" {
+	if v := upd.(*Model).search.Value(); v != "de ad be ef" {
 		t.Fatalf("search value after paste = %q, want %q", v, "de ad be ef")
 	}
 }

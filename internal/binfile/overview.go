@@ -3,6 +3,7 @@ package binfile
 import (
 	"debug/buildinfo"
 	"debug/dwarf"
+	"sort"
 	"strings"
 )
 
@@ -144,25 +145,72 @@ func dwarfLanguage(d *dwarf.Data) string {
 	}
 }
 
-// dwarfLangName maps the common DW_LANG_* constants to a readable name.
+// dwarfLangNames maps the DW_LANG_* constants to a readable name. Several codes
+// share a language (C and Fortran each span multiple standard revisions). Keeping
+// this as data (rather than a switch) lets DwarfLanguageNames enumerate the set,
+// which the syntax-coverage test cross-checks against the curated Chroma lexers.
+var dwarfLangNames = map[int64]string{
+	0x0001: "C", 0x0002: "C", 0x000c: "C", 0x001d: "C", 0x002c: "C",
+	0x0004: "C++", 0x0019: "C++", 0x001a: "C++", 0x0021: "C++", 0x002a: "C++", 0x002b: "C++",
+	0x0003: "Ada", 0x000d: "Ada", 0x002e: "Ada", 0x002f: "Ada",
+	0x0005: "COBOL", 0x0006: "COBOL",
+	0x0007: "Fortran", 0x0008: "Fortran", 0x000e: "Fortran", 0x0022: "Fortran", 0x0023: "Fortran", 0x002d: "Fortran",
+	0x0009: "Pascal",
+	0x000a: "Modula-2",
+	0x000b: "Java",
+	0x0010: "Objective-C",
+	0x0011: "Objective-C++",
+	0x0012: "UPC",
+	0x0013: "D",
+	0x0014: "Python",
+	0x0015: "OpenCL",
+	0x0016: "Go",
+	0x0017: "Modula-3",
+	0x0018: "Haskell",
+	0x001b: "OCaml",
+	0x001c: "Rust",
+	0x001e: "Swift",
+	0x001f: "Julia",
+	0x0020: "Dylan",
+	0x0024: "RenderScript",
+	0x0025: "BLISS",
+	0x0026: "Kotlin",
+	0x0027: "Zig",
+	0x0028: "Crystal",
+	0x0030: "HIP",
+	0x0031: "Assembly", 0x8001: "Assembly",
+	0x0032: "C#",
+	0x0033: "Mojo",
+	0x0034: "GLSL",
+	0x0035: "GLSL ES",
+	0x0036: "HLSL",
+	0x0037: "OpenCL C++",
+	0x0038: "C++ for OpenCL",
+	0x0039: "SYCL",
+	0x003d: "Metal",
+	0x0040: "Ruby",
+	0x0041: "Move",
+	0x0042: "Hylo",
+	0xb000: "Delphi",
+}
+
+// dwarfLangName maps a DW_LANG_* constant to a readable name, or "" if unknown.
 func dwarfLangName(v int64) string {
-	switch v {
-	case 0x0001, 0x0002, 0x000c, 0x001d, 0x0024, 0x0027, 0x0029, 0x002b:
-		return "C"
-	case 0x0004, 0x0019, 0x001a, 0x0021, 0x0022, 0x002a:
-		return "C++"
-	case 0x0010:
-		return "Objective-C"
-	case 0x0011:
-		return "Objective-C++"
-	case 0x0016:
-		return "Go"
-	case 0x001c:
-		return "Rust"
-	case 0x001e:
-		return "Swift"
-	case 0x000d:
-		return "Python"
+	return dwarfLangNames[v]
+}
+
+// DwarfLanguageNames returns the distinct, sorted set of source-language names
+// exex can identify from DWARF. Exposed so the syntax package's coverage test can
+// verify each has a curated highlighter (or an explicit minimal-fallback).
+func DwarfLanguageNames() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range dwarfLangNames {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
 	}
-	return ""
+	sort.Strings(out)
+	return out
 }

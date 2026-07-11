@@ -9,6 +9,7 @@ import (
 
 	"github.com/rabarbra/exex/internal/config"
 	"github.com/rabarbra/exex/internal/theme"
+	"github.com/rabarbra/exex/internal/ui/layout"
 )
 
 func TestPresetColorsLookup(t *testing.T) {
@@ -213,7 +214,7 @@ func TestRenderBackgroundReappliesAfterANSIReset(t *testing.T) {
 	if got := ansi.StringWidth(out); got != 4 {
 		t.Fatalf("background row width = %d, want 4", got)
 	}
-	if prefix := stylePrefix(bg); strings.Count(out, prefix) < 2 {
+	if prefix := layout.StylePrefix(bg); strings.Count(out, prefix) < 2 {
 		t.Fatalf("background was not reapplied after inner reset: %q", out)
 	}
 }
@@ -226,13 +227,13 @@ func TestModalOverlayUsesThemedForegroundAndBackground(t *testing.T) {
 			TableRowFG: "#040506",
 		}}),
 	}
-	out := m.overlayCenter(padBody("", m.width, m.height), m.theme.modalStyle.Render("popup text"))
+	out := m.overlayCenter(layout.PadBody("", m.width, m.height), m.theme.modalStyle.Render("popup text"))
 
-	bgPrefix := stylePrefix(lipgloss.NewStyle().Background(lipgloss.Color("#010203")))
+	bgPrefix := layout.StylePrefix(lipgloss.NewStyle().Background(lipgloss.Color("#010203")))
 	if !strings.Contains(out, bgPrefix) {
 		t.Fatalf("modal overlay missing configured background: %q", out)
 	}
-	fgPrefix := stylePrefix(lipgloss.NewStyle().Foreground(lipgloss.Color("#040506")))
+	fgPrefix := layout.StylePrefix(lipgloss.NewStyle().Foreground(lipgloss.Color("#040506")))
 	if !strings.Contains(out, fgPrefix) {
 		t.Fatalf("modal overlay missing themed foreground: %q", out)
 	}

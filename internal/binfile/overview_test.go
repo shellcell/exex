@@ -34,3 +34,25 @@ func TestComputeOverview(t *testing.T) {
 		t.Error("expected Fortify=true from __memcpy_chk")
 	}
 }
+
+func TestDwarfLangName(t *testing.T) {
+	tests := map[int64]string{
+		0x0005: "COBOL",
+		0x000a: "Modula-2",
+		0x0013: "D",
+		0x0018: "Haskell",
+		0x001f: "Julia",
+		0x0022: "Fortran",
+		0x0027: "Zig",
+		0x002c: "C",
+		0x0032: "C#",
+		0x0033: "Mojo",
+		0x003d: "Metal",
+		0xdead: "",
+	}
+	for code, want := range tests {
+		if got := dwarfLangName(code); got != want {
+			t.Fatalf("dwarfLangName(0x%x) = %q, want %q", code, got, want)
+		}
+	}
+}

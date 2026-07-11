@@ -52,9 +52,10 @@ type State struct {
 	Filtered     []int           // indices into the active slice (sections or segments)
 	Cur          int
 	Top          int
-	RenderedTop  int       // Top as of the last render, for mouse hit-testing
-	Sort         SortField // sort field for the (filtered) list
-	SortDesc     bool      // reverse the active sort
+	RenderedTop  int               // Top as of the last render, for mouse hit-testing
+	Chips        []view.StatusChip // clickable status-line toggles (screen-column spans)
+	Sort         SortField         // sort field for the (filtered) list
+	SortDesc     bool              // reverse the active sort
 
 	TypeOn    bool     // type-name column filter active
 	TypeSel   string   // the type name it restricts to
@@ -65,6 +66,8 @@ type State struct {
 
 	rowCache    layout.RowMemo[view.RowCacheKey, string]
 	heightCache layout.RowMemo[view.RowCacheKey, int]
+
+	statusCache view.StatusCache // memoised status row (see view.StatusCache)
 }
 
 // DropCaches drops cached section rows and heights.
@@ -461,12 +464,13 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 		kind = "segments"
 	}
 	filterRow := st.Filter.View()
+	st.Chips = st.Chips[:0]
 	if !st.Filter.Focused() {
-		dir := "↑"
-		if st.SortDesc {
-			dir = "↓"
+		items := []view.StatusItem{
+			{Key: "t", Label: "view", Value: kind},
+			{Key: "s", Label: "sort", Value: view.SortValue(st.Sort.String(), st.SortDesc)},
 		}
-		extra := ""
+		// Segments have no type/flags facets to filter on.
 		if !st.ShowSegments {
 			tf, ff := "all", "all"
 			if st.TypeOn {
@@ -475,10 +479,12 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 			if st.FlagsOn {
 				ff = st.FlagsSel
 			}
-			extra = fmt.Sprintf("   %s type:%s   %s flags:%s", layout.CtrlKeys("t"), tf, layout.CtrlKeys("f"), ff)
+			items = append(items,
+				view.StatusItem{Key: "ctrl+t", Label: "type", Value: tf},
+				view.StatusItem{Key: "ctrl+f", Label: "flags", Value: ff},
+			)
 		}
-		filterRow = ctx.FooterStyle.Render(fmt.Sprintf("/ %s   %s (%d / %d)   t: toggle   s: sort:%s%s%s",
-			st.Filter.Value(), kind, len(st.Filtered), total, st.Sort.String(), dir, extra))
+		filterRow, st.Chips = ctx.StatusLine(&st.statusCache, st.Filter.Value(), kind, len(st.Filtered), total, items)
 	}
 
 	addrW := ctx.File.AddrHexWidth()
@@ -660,4 +666,16 @@ func (st *State) segmentRow(ctx view.Context, i, addrW int) string {
 		rowStyle.Render(fmt.Sprintf("%-12d", s.Size)),
 		rowStyle.Render(fmt.Sprintf("%-12d", s.FileSize)),
 		rowStyle.Render(align))
+}
+
+// ClickStatus toggles the status-line chip at screen column x, by handing its
+// key to Update — a click is that key arriving by mouse. Reports whether a chip
+// was hit.
+func (st *State) ClickStatus(ctx view.Context, host view.Host, x int) bool {
+	key, ok := view.ChipAt(st.Chips, x)
+	if !ok {
+		return false
+	}
+	st.Update(ctx, host, key)
+	return true
 }

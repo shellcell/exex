@@ -102,6 +102,12 @@ func buildContent(ctx view.Context, innerW int) string {
 	num := func(s string) string { return ctx.NumberStyle.Render(s) }
 	addrc := func(s string) string { return ctx.AddrStyle.Render(s) }
 	dim := func(s string) string { return ctx.ShadowStyle.Render(s) }
+	// press renders a "press <key>" hint with the key itself in the accent colour
+	// the footer and table headers use, so a key looks like a key wherever it is
+	// named. tail is any dim text following it (" — full ELF header fields").
+	press := func(key, tail string) string {
+		return dim("press ") + ctx.KeyStyle.Render(key) + dim(tail)
+	}
 
 	var b strings.Builder
 	first := true
@@ -217,11 +223,11 @@ func buildContent(ctx view.Context, innerW int) string {
 				addrc(fmt.Sprintf("@ 0x%08x", a.Offset)) + "   " +
 				num(humanBytes(a.Size))
 			if current {
-				row += "   " + ctx.InfoStyle.Render("● loaded")
+				row += "   " + ctx.InfoStyle.Render("● loaded") + dim(" · ") + press("t", " to switch slice")
 			}
-			b.WriteString(row + "\n")
+			b.WriteString(row)
+			b.WriteString("\n")
 		}
-		b.WriteString("    " + dim("press Tab to switch slice") + "\n")
 	}
 
 	if info != nil {
@@ -245,7 +251,7 @@ func buildContent(ctx view.Context, innerW int) string {
 			link += "  ·  PIE"
 		}
 		kvText("Linking", link)
-		kv("CPU features", dim("press F to detect (SSE / AVX / NEON / …) · -o cpu-features"))
+		kv("CPU features", press("⇧F", " to detect (SSE / AVX / NEON / …)"))
 
 		// Overview — sizes in the number colour, addresses in the address colour.
 		head("Overview")
@@ -271,21 +277,21 @@ func buildContent(ctx view.Context, innerW int) string {
 		// Contents — what's inside and the key that jumps there.
 		head("Contents")
 		cnt := func(label string, n int, key string) {
-			kv(label, num(fmt.Sprintf("%d", n))+"  "+dim("(press "+key+")"))
+			kv(label, num(fmt.Sprintf("%d", n))+"  "+dim("(")+press(key, "")+dim(")"))
 		}
 		cnt("Sections", len(ctx.File.Sections), "2")
 		cnt("Symbols", len(ctx.File.Symbols), "3")
-		kv("Disassembly", dim("press 4"))
-		kv("Strings", dim("press 7"))
+		kv("Disassembly", press("4", ""))
+		kv("Strings", press("7", ""))
 		if len(info.DynamicLibs) > 0 {
 			cnt("Libraries", len(info.DynamicLibs), "8")
 		}
 		if ctx.File.HasDWARF() {
-			kv("Sources", dim("press 9"))
+			kv("Sources", press("9", ""))
 		}
-		kv("Relocations", dim("press 0")) // always available; relocs build lazily on open
-		kv("Raw header", dim("press ⇧H — full "+string(ctx.File.Format)+" header fields"))
-		kv("Find anything", dim("press g — symbol / section / string / address"))
+		kv("Relocations", press("0", "")) // always available; relocs build lazily on open
+		kv("Raw header", press("⇧H", " — full "+string(ctx.File.Format)+" header fields"))
+		kv("Find anything", press("g", " — symbol / section / string / address"))
 
 		// Hardening — a badge coloured by how safe each setting is.
 		head("Hardening")
@@ -334,7 +340,7 @@ func buildContent(ctx view.Context, innerW int) string {
 			kv("Libc", v)
 		}
 		if len(info.DynamicLibs) > 0 {
-			kv("Needed libs", num(fmt.Sprintf("%d", len(info.DynamicLibs)))+"  "+dim("(press 8 to view)"))
+			kv("Needed libs", num(fmt.Sprintf("%d", len(info.DynamicLibs)))+"  "+dim("(")+press("8", " to view")+dim(")"))
 		}
 
 		// Toolchain / provenance. Compiler() scans lazily (Mach-O) and caches.
@@ -405,11 +411,12 @@ func entryValue(ctx view.Context) string {
 		val += "  " + ctx.SymStyle.Render(name)
 	}
 	// Enter follows the entry point: into disasm when possible, else into hex.
-	if ctx.CanDisasmAt != nil && ctx.CanDisasmAt(entry) {
-		val += "  " + ctx.FooterStyle.Render("↵ disassemble")
-	} else {
-		val += "  " + ctx.FooterStyle.Render("↵ hex")
+	// The key wears the accent colour, like every other key the page names.
+	action := "disassemble"
+	if ctx.CanDisasmAt == nil || !ctx.CanDisasmAt(entry) {
+		action = "hex"
 	}
+	val += "  " + ctx.KeyStyle.Render("↵") + ctx.ShadowStyle.Render(" "+action)
 	return val
 }
 

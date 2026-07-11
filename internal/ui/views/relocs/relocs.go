@@ -58,6 +58,10 @@ type State struct {
 	secSel   string   // the section it restricts to
 	secs     []string // distinct sections, for cycling
 	rowCache layout.RowMemo[view.RowCacheKey, string]
+
+	Chips []view.StatusChip // clickable status-line toggles (screen-column spans)
+
+	statusCache view.StatusCache // memoised status row (see view.StatusCache)
 }
 
 // DropCaches discards memoised rendered rows (e.g. after a theme change).
@@ -310,6 +314,7 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 	addrW := ctx.File.AddrHexWidth()
 
 	var filterRow string
+	st.Chips = st.Chips[:0]
 	if st.Filter.Focused() {
 		filterRow = st.Filter.View()
 	} else {
@@ -320,10 +325,11 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 		if st.secOn {
 			sf = st.secSel
 		}
-		filterRow = ctx.FooterStyle.Render(fmt.Sprintf(
-			"/ %s   relocations (%d / %d)   s: sort:%s   %s type:%s   %s sec:%s",
-			st.Filter.Value(), len(st.Filtered), len(rels), st.Sort.String(),
-			layout.CtrlKeys("t"), tf, layout.CtrlKeys("s"), sf))
+		filterRow, st.Chips = ctx.StatusLine(&st.statusCache, st.Filter.Value(), "relocations", len(st.Filtered), len(rels), []view.StatusItem{
+			{Key: "s", Label: "sort", Value: view.SortValue(st.Sort.String(), st.SortDesc)},
+			{Key: "ctrl+t", Label: "type", Value: tf},
+			{Key: "ctrl+s", Label: "section", Value: sf},
+		})
 	}
 	desc := st.SortDesc
 	header := ctx.TableHeader(fmt.Sprintf(" %-*s  %-24s %-12s %s",
@@ -402,4 +408,16 @@ func emptyHint(f binfile.Format) string {
 		return "No relocations — this PE has no base-relocation directory (it loads at a fixed address)."
 	}
 	return "No relocations — this binary is fully resolved (statically linked, or no dynamic fixups)."
+}
+
+// ClickStatus toggles the status-line chip at screen column x, by handing its
+// key to Update — a click is that key arriving by mouse. Reports whether a chip
+// was hit.
+func (st *State) ClickStatus(ctx view.Context, host view.Host, x int) bool {
+	key, ok := view.ChipAt(st.Chips, x)
+	if !ok {
+		return false
+	}
+	st.Update(ctx, host, key)
+	return true
 }

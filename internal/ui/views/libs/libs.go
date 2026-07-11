@@ -44,6 +44,10 @@ type State struct {
 	collapsed map[string]bool      // collapsed directory paths
 	availKind map[string]availKind // cached (filesystem-touching) classifications
 	built     bool
+
+	Chips []view.StatusChip // clickable status-line toggles (screen-column spans)
+
+	statusCache view.StatusCache // memoised status row (see view.StatusCache)
 }
 
 // libAvail classifies a library path, caching the (filesystem-touching) result.
@@ -359,23 +363,6 @@ renderRows:
 func (st *State) renderHeader(ctx view.Context) string {
 	info := ctx.File.Info
 	var b strings.Builder
-	if info.Interp != "" {
-		b.WriteString(ctx.LabelStyle.Render("Interpreter: "))
-		b.WriteString(info.Interp)
-		b.WriteString("\n")
-	}
-	if info.Libc.Kind != "" {
-		libcLine := info.Libc.Kind
-		if info.Libc.Version != "" {
-			libcLine += " " + info.Libc.Version
-		}
-		if info.Libc.Source != "" {
-			libcLine += "  " + ctx.FooterStyle.Render("("+info.Libc.Source+")")
-		}
-		b.WriteString(ctx.LabelStyle.Render("Libc:        "))
-		b.WriteString(libcLine)
-		b.WriteString("\n")
-	}
 	if len(info.RPath) > 0 {
 		b.WriteString(ctx.LabelStyle.Render("RPATH:       "))
 		b.WriteString(strings.Join(info.RPath, ":"))
@@ -386,30 +373,60 @@ func (st *State) renderHeader(ctx view.Context) string {
 		b.WriteString(strings.Join(info.RunPath, ":"))
 		b.WriteString("\n")
 	}
-	b.WriteString("\n")
+	st.Chips = st.Chips[:0]
 	if st.Filter.Focused() {
 		b.WriteString(st.Filter.View())
-		b.WriteString("\n")
-	} else if st.Filter.Value() != "" {
-		b.WriteString(ctx.FooterStyle.Render("/ " + st.Filter.Value()))
-		b.WriteString("\n")
+	} else {
+		b.WriteString(st.statusLine(ctx))
 	}
-	suffix := st.headerSuffix(ctx)
-	hdr := " " + layout.ActiveSortHeaderLabel("Needed libraries", titleWidth(), st.SortDesc) + suffix
-	b.WriteString(ctx.TableHeader(hdr))
+	b.WriteString("\n")
+	b.WriteString(ctx.TableHeader(st.titleRow(ctx)))
 	b.WriteString("\n")
 	return b.String()
 }
 
-func (st *State) headerSuffix(ctx view.Context) string {
-	suffix := ""
-	if st.Avail != view.AvailAll {
-		suffix += "  " + ctx.KeyStyle.Render(layout.CtrlKeys("p")) + ctx.FooterStyle.Render(" "+view.AvailLabel(st.Avail))
+// titleRow is the column-title line: the sortable "Needed libraries" title on
+// the left, and the interpreter (the loader that will resolve these libraries —
+// the one piece of header context worth keeping) pushed to the right edge. It is
+// dropped rather than truncated when the terminal is too narrow to hold both.
+func (st *State) titleRow(ctx view.Context) string {
+	left := " " + layout.ActiveSortHeaderLabel("Needed libraries", titleWidth(), st.SortDesc)
+	interp := ctx.File.Info.Interp
+	if interp == "" {
+		return left
 	}
+	right := "interpreter: " + interp + " "
+	gap := ctx.Width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 2 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// statusLine is the shared "/ filter   libraries (n / m)   <chips>" row. The
+// tree's fold keys live in the footer, not here, like every other tree view.
+func (st *State) statusLine(ctx view.Context) string {
+	viewLabel := "flat"
 	if st.Tree {
-		suffix += "  " + ctx.FooterStyle.Render("(tree · ←/→ fold · ↵ all below · +/− all · t flat)")
+		viewLabel = "tree"
 	}
-	return suffix
+	shown := 0
+	for _, r := range st.Rows {
+		if r.Node.Leaf >= 0 { // count libraries, not the tree's directory nodes
+			shown++
+		}
+	}
+	total := 0
+	if ctx.File.Info != nil {
+		total = len(ctx.File.Info.DynamicLibs)
+	}
+	line, chips := ctx.StatusLine(&st.statusCache, st.Filter.Value(), "libraries", shown, total, []view.StatusItem{
+		{Key: "t", Label: "view", Value: viewLabel},
+		{Key: "r", Label: "sort", Value: view.SortValue("name", st.SortDesc)},
+		{Key: "ctrl+p", Label: "avail", Value: view.AvailLabel(st.Avail)},
+	})
+	st.Chips = chips
+	return line
 }
 
 func titleWidth() int {
@@ -492,4 +509,16 @@ func (st *State) row(ctx view.Context, i int, selected bool) string {
 		return ctx.SelStyle.Render(ansi.Strip(line))
 	}
 	return ctx.SymStyle.Render(line)
+}
+
+// ClickStatus toggles the status-line chip at screen column x, by handing its
+// key to Update — a click is that key arriving by mouse. Reports whether a chip
+// was hit.
+func (st *State) ClickStatus(ctx view.Context, host view.Host, x int) bool {
+	key, ok := view.ChipAt(st.Chips, x)
+	if !ok {
+		return false
+	}
+	st.Update(ctx, host, key)
+	return true
 }

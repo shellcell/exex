@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rabarbra/exex/internal/binfile"
@@ -67,25 +66,6 @@ func (sc Scope) includes(s binfile.Symbol) bool {
 	return true
 }
 
-// FacetKind identifies a clickable toggle button on the symbols status line.
-type FacetKind int
-
-const (
-	FacetType FacetKind = iota
-	FacetScope
-	FacetSort
-	FacetSortDir
-	FacetBind
-	FacetTree
-	FacetAbbrev
-)
-
-// FacetHit is the screen-column span [Start,End) of one clickable toggle button.
-type FacetHit struct {
-	Start, End int
-	Kind       FacetKind
-}
-
 // State stores list/filter/tree state for the Symbols view.
 type State struct {
 	Filter      textinput.Model
@@ -105,8 +85,8 @@ type State struct {
 	Abbrev      bool      // global: render "(…)"/"<…>" contents as "..."
 	Ready       bool      // rows/tree have been built at least once
 
-	Rows   []layout.TreeRow // flattened visible rows (tree nodes + leaves), nav/render unit
-	Facets []FacetHit       // clickable toggle buttons on the status line (x ranges)
+	Rows  []layout.TreeRow  // flattened visible rows (tree nodes + leaves), nav/render unit
+	Chips []view.StatusChip // clickable status-line toggles (screen-column spans)
 
 	abbrevExcept map[string]bool    // per-row overrides inverting Abbrev
 	collapsed    map[string]bool    // collapsed tree node paths (persist across rebuilds)
@@ -117,6 +97,8 @@ type State struct {
 	byDisplay    []int              // all symbol indices sorted by Display(); built lazily
 	rowCache     layout.RowMemo[view.RowCacheKey, []string]
 	heightCache  layout.RowMemo[view.RowCacheKey, int]
+
+	statusCache view.StatusCache // memoised status row (see view.StatusCache)
 }
 
 // DropCaches drops cached symbol rows and heights.
@@ -177,43 +159,16 @@ func (st *State) CaretAddr(ctx view.Context) (uint64, bool) {
 	return 0, false
 }
 
-// ClickFacet toggles the facet button at screen column x on the status row,
-// returning whether a button was hit.
-func (st *State) ClickFacet(ctx view.Context, host view.Host, x int) bool {
-	for _, f := range st.Facets {
-		if x >= f.Start && x < f.End {
-			st.toggleFacet(ctx, host, f.Kind)
-			return true
-		}
+// ClickStatus toggles the status-line chip at screen column x, by handing its
+// key to Update — a click is that key arriving by mouse. Reports whether a chip
+// was hit.
+func (st *State) ClickStatus(ctx view.Context, host view.Host, x int) bool {
+	key, ok := view.ChipAt(st.Chips, x)
+	if !ok {
+		return false
 	}
-	return false
-}
-
-// toggleFacet advances the clicked toggle, mirroring its keyboard binding.
-func (st *State) toggleFacet(ctx view.Context, host view.Host, k FacetKind) {
-	if k == FacetAbbrev {
-		// Abbreviation is a pure render change: keep the cursor and skip the rebuild.
-		st.ToggleAbbrevAll(host)
-		return
-	}
-	st.Cur, st.Top = 0, 0
-	switch k {
-	case FacetType:
-		st.cycleKindFilter(host)
-	case FacetScope:
-		st.Scope = (st.Scope + 1) % 3
-		host.SetStatus("symbol scope: "+st.Scope.String(), false)
-	case FacetSort:
-		st.Sort = (st.Sort + 1) % 3
-		host.SetStatus("sort: "+st.Sort.String(), false)
-	case FacetSortDir:
-		st.SortDesc = !st.SortDesc
-	case FacetBind:
-		st.cycleBindFilter(host)
-	case FacetTree:
-		st.Tree = !st.Tree
-	}
-	st.Recompute(ctx)
+	st.Update(ctx, host, key)
+	return true
 }
 
 // abbrevActive reports whether n's brackets should be abbreviated, combining
@@ -724,62 +679,39 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 	}
 
 	filterRow := st.Filter.View()
-	st.Facets = st.Facets[:0]
+	st.Chips = st.Chips[:0]
 	if !st.Filter.Focused() {
 		kind := "all"
 		if st.KindOn {
 			kind = kindString(st.Kind)
 		}
-		var b strings.Builder
-		col := 0
-		// FooterStyle adds left/right padding, so count the *rendered* width — not
-		// the raw string — or the clickable facet ranges drift right of the chips.
-		plain := func(s string) {
-			r := ctx.FooterStyle.Render(s)
-			b.WriteString(r)
-			col += lipgloss.Width(r)
-		}
-		// Each chip is a clickable toggle: the bound key in the accent colour (like
-		// the footer hints) followed by the current value.
-		button := func(key, label string, k FacetKind) {
-			start := col
-			kr := ctx.KeyStyle.Render(key)
-			lr := ctx.FooterStyle.Render(" " + label)
-			b.WriteString(kr)
-			b.WriteString(lr)
-			col += lipgloss.Width(kr) + lipgloss.Width(lr)
-			st.Facets = append(st.Facets, FacetHit{start, col, k})
-			plain("   ")
-		}
 		bind := "all"
 		if st.BindOn {
 			bind = bindString(st.Bind)
 		}
-		treeLabel := "view:flat"
+		treeLabel := "flat"
 		if st.TreeActive() {
-			treeLabel = "view:tree"
+			treeLabel = "tree"
 		}
-		plain("/ " + st.Filter.Value() + "   ")
-		button(layout.CtrlKeys("t"), "type:"+kind, FacetType)
-		button(layout.CtrlKeys("s"), "scope:"+st.Scope.String(), FacetScope)
-		button(layout.CtrlKeys("b"), "bind:"+bind, FacetBind)
-		button("s", "sort:"+st.Sort.String(), FacetSort)
-		dir := "↑asc"
-		if st.SortDesc {
-			dir = "↓desc"
-		}
-		button("r", dir, FacetSortDir)
-		button("t", treeLabel, FacetTree)
-		argsLabel := "args:full"
+		argsLabel := "full"
 		if st.Abbrev {
-			argsLabel = "args:…"
+			argsLabel = "…"
 		}
-		button("e", argsLabel, FacetAbbrev)
+		// The house order: view · sort · facets. Every chip is clickable — the
+		// builder hands back each one's columns and the key it stands for.
+		line, chips := ctx.StatusLine(&st.statusCache, st.Filter.Value(), "symbols", len(st.Filtered), len(ctx.File.Symbols), []view.StatusItem{
+			{Key: "t", Label: "view", Value: treeLabel},
+			{Key: "s", Label: "sort", Value: view.SortValue(st.Sort.String(), st.SortDesc)},
+			{Key: "e", Label: "args", Value: argsLabel},
+			{Key: "ctrl+t", Label: "type", Value: kind},
+			{Key: "ctrl+s", Label: "scope", Value: st.Scope.String()},
+			{Key: "ctrl+b", Label: "bind", Value: bind},
+		})
+		st.Chips = chips
 		if st.Lib != "" {
-			plain("lib:" + st.Lib + " (Esc clears)   ")
+			line += ctx.FooterStyle.Padding(0).Render("   lib:" + st.Lib + " (Esc clears)")
 		}
-		plain(fmt.Sprintf("(%d / %d)", len(st.Filtered), len(ctx.File.Symbols)))
-		filterRow = b.String()
+		filterRow = line
 	}
 
 	addrW := ctx.File.AddrHexWidth()

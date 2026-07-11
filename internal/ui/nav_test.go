@@ -150,44 +150,45 @@ func TestSymbolsFacetClick(t *testing.T) {
 	m.width, m.height = 120, 20
 	m.setMode(modeSymbols)
 	m.symbols.Recompute(m.viewContext())
-	_ = m.symbols.Render(m.viewContext(), m) // populates m.symbols.Facets with x ranges
+	_ = m.symbols.Render(m.viewContext(), m) // populates m.symbols.Chips with x ranges
 
-	hit := func(k symbols.FacetKind) (int, bool) {
-		for _, fc := range m.symbols.Facets {
-			if fc.Kind == k {
-				return (fc.Start + fc.End) / 2, true
+	// The chip carrying key k, clicked in its middle.
+	hit := func(key string) (int, bool) {
+		for _, c := range m.symbols.Chips {
+			if c.Key == key {
+				return (c.Start + c.End) / 2, true
 			}
 		}
 		return 0, false
 	}
 
-	// Clicking the sort button advances the sort.
-	x, ok := hit(symbols.FacetSort)
+	// Clicking the sort chip advances the sort, exactly as pressing `s` does.
+	x, ok := hit("s")
 	if !ok {
-		t.Fatal("no sort facet rendered")
+		t.Fatal("no sort chip rendered")
 	}
 	if m.symbols.Sort != symbols.SortName {
 		t.Fatalf("precondition: sort = %v", m.symbols.Sort)
 	}
-	if !m.symbols.ClickFacet(m.viewContext(), m, x) {
-		t.Fatal("click on sort facet missed")
+	if !m.symbols.ClickStatus(m.viewContext(), m, x) {
+		t.Fatal("click on the sort chip missed")
 	}
 	if m.symbols.Sort != symbols.SortAddr {
 		t.Fatalf("sort after click = %v, want address", m.symbols.Sort)
 	}
 
-	// Clicking the tree button toggles the tree.
+	// Clicking the view chip toggles the tree.
 	_ = m.symbols.Render(m.viewContext(), m)
-	x, ok = hit(symbols.FacetTree)
+	x, ok = hit("t")
 	if !ok {
-		t.Fatal("no tree facet rendered")
+		t.Fatal("no view chip rendered")
 	}
 	was := m.symbols.Tree
-	if !m.symbols.ClickFacet(m.viewContext(), m, x) {
-		t.Fatal("click on tree facet missed")
+	if !m.symbols.ClickStatus(m.viewContext(), m, x) {
+		t.Fatal("click on the view chip missed")
 	}
 	if m.symbols.Tree == was {
-		t.Fatal("tree facet click did not toggle tree mode")
+		t.Fatal("view chip click did not toggle tree mode")
 	}
 }
 

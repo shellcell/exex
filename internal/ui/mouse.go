@@ -463,11 +463,10 @@ func (m *Model) handleClick(x, y int) bool {
 	if bodyRow < 0 || y >= m.height-1 {
 		return false
 	}
-	// The Symbols status line (first body row) carries clickable toggle buttons.
-	if m.mode == modeSymbols && bodyRow == 0 && !m.symbols.Filter.Focused() {
-		if m.symbols.ClickFacet(m.viewContext(), m, x) {
-			return true
-		}
+	// Every table view's status line carries clickable toggle chips; clicking one
+	// is that chip's key arriving by mouse.
+	if v := m.current(); bodyRow == v.statusRow() && v.clickStatus(x) {
+		return true
 	}
 	if m.isTableHeaderRow(bodyRow) {
 		m.handleSortableHeaderClick(x, bodyRow)

@@ -30,6 +30,12 @@ type modeView interface {
 	lineText() (string, bool)
 	// headerRow reports whether bodyRow is the view's clickable column header.
 	headerRow(bodyRow int) bool
+	// statusRow is the body row carrying the view's status line (its clickable
+	// toggle chips), or -1 when it has none.
+	statusRow() int
+	// clickStatus toggles the status chip at column x, reporting whether one was
+	// hit. A chip click is just its key arriving by mouse.
+	clickStatus(x int) bool
 	// sortHeaderClick handles a click at column x on body row bodyRow when it lands
 	// on a sortable column header, returning whether it was consumed.
 	sortHeaderClick(x, bodyRow int) bool
@@ -54,6 +60,38 @@ func (baseView) lineText() (string, bool)      { return "", false }
 func (baseView) headerRow(int) bool            { return false }
 func (baseView) sortHeaderClick(_, _ int) bool { return false }
 func (baseView) searchHint() string            { return "Search this view" }
+func (baseView) statusRow() int                { return -1 }
+func (baseView) clickStatus(int) bool          { return false }
+
+// statusRow / clickStatus: the table views all put their status line on the
+// first body row; Libs carries it inside its header block, just above the
+// column titles.
+
+func (sectionsView) statusRow() int { return 0 }
+func (symbolsView) statusRow() int  { return 0 }
+func (stringsView) statusRow() int  { return 0 }
+func (sourcesView) statusRow() int  { return 0 }
+func (relocsView) statusRow() int   { return 0 }
+func (v libsView) statusRow() int   { return v.libs.TitleRow(v.viewContext()) - 1 }
+
+func (v sectionsView) clickStatus(x int) bool {
+	return v.sections.ClickStatus(v.viewContext(), v.Model, x)
+}
+func (v symbolsView) clickStatus(x int) bool {
+	return v.symbols.ClickStatus(v.viewContext(), v.Model, x)
+}
+func (v stringsView) clickStatus(x int) bool {
+	return v.strs.ClickStatus(v.viewContext(), v.Model, x)
+}
+func (v sourcesView) clickStatus(x int) bool {
+	return v.sources.ClickStatus(v.viewContext(), v.Model, x)
+}
+func (v relocsView) clickStatus(x int) bool {
+	return v.relocs.ClickStatus(v.viewContext(), v.Model, x)
+}
+func (v libsView) clickStatus(x int) bool {
+	return v.libs.ClickStatus(v.viewContext(), v.Model, x)
+}
 
 func (b baseView) captureFilter(string, tea.KeyMsg) (tea.Cmd, bool) { return nil, false }
 
@@ -152,31 +190,40 @@ func (v disasmView) ensure() tea.Cmd {
 	return nil
 }
 
-// hints: view-specific footer key hints. Globals are appended by renderFooter.
+// hints: the view's own footer commands. renderFooter appends the globals
+// (? help · q quit) after a divider.
+//
+// Every view lists its hints in the same order, so the same command sits in the
+// same place as you move between views:
+//
+//	primary (↵) · navigation ([ ] ←/→) · cross-view (d/h/m ␣ f) ·
+//	view actions (x y a e i o) · toggles (t ⇥) · filter or search (/) · copy (⇧…)
+//
+// The tree modes list only the folding keys they add: the rest still apply.
 
 func (v infoView) hints() []footerHint {
 	if v.isArchive() && v.infoMembers {
 		return []footerHint{{"↑/↓", "select"}, {"↵/t", "open member"}, {"esc", "back"}}
 	}
-	hints := []footerHint{{"↵", "disasm entry"}}
+	hints := []footerHint{{"↵", "disasm entry"}, {"g", "goto"}, {"f", "find"}, {"l", "search all"}}
 	switch {
 	case v.isArchive():
 		hints = append(hints, footerHint{"t", "members"})
 	case len(v.file.FatArches) > 1:
 		hints = append(hints, footerHint{"t", "switch arch"})
 	}
-	return hints
+	return append(hints, footerHint{",", "settings"})
 }
 
 func (v sectionsView) hints() []footerHint {
-	return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"f", "find"}, {"s/r", "sort/rev"}, {"t", "sec/seg"}, {"/", "filter"}, {layout.CtrlKeys("t", "f"), "type/flags"}, {"⇧H", "header"}}
+	return []footerHint{{"↵", "open"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"f", "find"}, {"⇧H", "header"}, {"t", "view"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "f"), "type/flags"}, {"/", "filter"}}
 }
 
 func (v symbolsView) hints() []footerHint {
 	if v.symbols.TreeActive() {
-		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "flat"}}
+		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "view"}}
 	}
-	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"f", "find"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("t", "s", "b"), "type/scope/bind"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"f", "find"}, {"e", "args"}, {"t", "view"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("t", "s", "b"), "type/scope/bind"}, {"/", "filter"}, {"⇧a/⇧s", "copy"}}
 }
 
 func (v disasmView) hints() []footerHint {
@@ -186,42 +233,45 @@ func (v disasmView) hints() []footerHint {
 		return []footerHint{{"esc", "cancel"}, {"[ ]", "sym"}, {"←/→", "history"}, {"/", "search"}}
 	case v.dasm.SourceFirst && v.dasm.SrcFile != "":
 		// Source navigation leads: no disasm history, and [ ] steps mapped lines.
-		return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
-	case v.dasm.ShowSource && dwarf:
-		// Disasm-first with the source pane open.
-		return []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"␣", "open in…"}, {"f", "find"}, {"a", v.disasmAllHint()}, {"tab", "pane"}, {"⇧tab", "swap"}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+		return []footerHint{{"↵", "to disasm"}, {"[ ]", "mapped"}, {"esc", "back"}, {"⇥", "pane"}, {"⇧⇥", "swap"}, {"/", "search"}, {"⇧s", "copy"}}
 	default:
-		// Disasm-first, no pane. Offer tab to open the pane only when there is
-		// debug info to show.
-		hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"x", "xrefs"}, {"y", "syscalls"}, {"h/m", "hex/raw"}, {"␣", "open in…"}, {"f", "find"}, {"a", v.disasmAllHint()}, {"/", "search"}, {"⇧a/⇧s/⇧c", "copy"}}
+		hints := []footerHint{{"↵", "follow"}, {"[ ]", "sym"}, {"←/→", "history"}, {"h/m", "hex/raw"}, {"␣", "open in…"}, {"f", "find"}, {"x", "xrefs"}, {"y", "syscalls"}, {"a", v.disasmAllHint()}}
+		// The pane keys only mean something when there is debug info to show, but
+		// when they do they always sit in the same place.
 		if dwarf {
-			hints = append(hints, footerHint{"tab", "pane"})
+			hints = append(hints, footerHint{"⇥", "pane"})
+			if v.dasm.ShowSource {
+				hints = append(hints, footerHint{"⇧⇥", "swap"})
+			}
 		}
-		return hints
+		return append(hints, footerHint{"/", "search"}, footerHint{"⇧a/⇧s/⇧c", "copy"})
 	}
 }
 
 func (v hexView) hints() []footerHint {
-	return []footerHint{{"↵", "follow ptr"}, {"d/m", "disasm/raw"}, {"␣", "open in…"}, {"f", "find"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+	return []footerHint{{"↵", "follow ptr"}, {"[ ]", "section"}, {"d/m", "disasm/raw"}, {"␣", "open in…"}, {"f", "find"}, {"i", "inspect"}, {"t/⇧t", "ascii·interp"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 }
 
 func (v rawView) hints() []footerHint {
-	return []footerHint{{"↵", "follow ptr"}, {"d", "disasm"}, {"␣", "open in…"}, {"f", "find"}, {"[ ]", "section"}, {"t/⇧t", "ascii·interp"}, {"i", "inspect"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
+	return []footerHint{{"↵", "follow ptr"}, {"[ ]", "section"}, {"d", "disasm"}, {"␣", "open in…"}, {"f", "find"}, {"i", "inspect"}, {"t/⇧t", "ascii·interp"}, {"/", "search"}, {"⇧a/⇧s/⇧p", "copy"}}
 }
 
 func (v stringsView) hints() []footerHint {
-	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"f", "find"}, {"s/r", "sort/rev"}, {"t", "table/flow"}, {"/", "filter"}, {layout.CtrlKeys("s"), "section"}, {layout.CtrlKeys("p"), "paths"}, {"⇧a/⇧s", "copy"}}
+	return []footerHint{{"↵", "jump"}, {"d/h/m", "go to"}, {"␣", "open in…"}, {"f", "find"}, {"t", "view"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("s", "p"), "section/paths"}, {"/", "filter"}, {"⇧a/⇧s", "copy"}}
 }
 
 func (v sourcesView) hints() []footerHint {
 	if v.sources.Tree {
-		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {layout.CtrlKeys("p"), "present"}, {"t", "flat"}}
+		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "open/all below"}, {"+/−", "all"}, {"t", "view"}}
 	}
-	return []footerHint{{"↵", "open"}, {"s/r", "sort/rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("p"), "present"}, {"⇧s", "copy"}}
+	return []footerHint{{"↵", "open"}, {"t", "view"}, {"s/r", "sort/rev"}, {layout.CtrlKeys("p"), "avail"}, {"/", "filter"}, {"⇧s", "copy"}}
 }
 
 func (v libsView) hints() []footerHint {
-	return []footerHint{{"↵", "imports"}, {"o", "open"}, {"r", "rev"}, {"t", "tree"}, {"/", "filter"}, {layout.CtrlKeys("p"), "avail"}, {"⇧s", "copy"}}
+	if v.libs.Tree {
+		return []footerHint{{"←/→", "fold/unfold"}, {"↵", "all below"}, {"+/−", "all"}, {"t", "view"}}
+	}
+	return []footerHint{{"↵", "imports"}, {"o", "open"}, {"t", "view"}, {"r", "rev"}, {layout.CtrlKeys("p"), "avail"}, {"/", "filter"}, {"⇧s", "copy"}}
 }
 
 func (v relocsView) hints() []footerHint {

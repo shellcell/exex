@@ -59,6 +59,10 @@ type State struct {
 
 	rowCache    layout.RowMemo[view.RowCacheKey, string]
 	heightCache layout.RowMemo[view.RowCacheKey, int]
+
+	Chips []view.StatusChip // clickable status-line toggles (screen-column spans)
+
+	statusCache view.StatusCache // memoised status row (see view.StatusCache)
 }
 
 // DropCaches drops cached string rows and heights.
@@ -523,23 +527,22 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 	}
 
 	filterRow := st.Filter.View()
+	st.Chips = st.Chips[:0]
 	if !st.Filter.Focused() {
 		secLabel := "all"
 		if st.SecOn {
 			secLabel = st.Sec
 		}
-		dir := "↑"
-		if st.SortDesc {
-			dir = "↓"
+		viewLabel := "table"
+		if st.Compact {
+			viewLabel = "flow"
 		}
-		pathsLabel := "off"
-		if st.PathsOnly {
-			pathsLabel = "on"
-		}
-		filterRow = ctx.FooterStyle.Render(fmt.Sprintf("/ %s   (%d / %d)   ", st.Filter.Value(), len(st.Filtered), len(st.List))) +
-			ctx.KeyStyle.Render(layout.CtrlKeys("s")) + ctx.FooterStyle.Render(" section:"+secLabel) +
-			ctx.FooterStyle.Render("   ") + ctx.KeyStyle.Render(layout.CtrlKeys("p")) + ctx.FooterStyle.Render(" paths:"+pathsLabel) +
-			ctx.FooterStyle.Render("   ") + ctx.KeyStyle.Render("s") + ctx.FooterStyle.Render(" sort:"+st.Sort.String()+dir)
+		filterRow, st.Chips = ctx.StatusLine(&st.statusCache, st.Filter.Value(), "strings", len(st.Filtered), len(st.List), []view.StatusItem{
+			{Key: "t", Label: "view", Value: viewLabel},
+			{Key: "s", Label: "sort", Value: view.SortValue(st.Sort.String(), st.SortDesc)},
+			{Key: "ctrl+s", Label: "section", Value: secLabel},
+			{Key: "ctrl+p", Label: "paths", Value: view.OnOff(st.PathsOnly)},
+		})
 	}
 
 	if st.Compact {
@@ -910,4 +913,16 @@ func Sanitize(s string) string {
 		s = s[:maxLen-1] + "…"
 	}
 	return s
+}
+
+// ClickStatus toggles the status-line chip at screen column x, by handing its
+// key to Update — a click is that key arriving by mouse. Reports whether a chip
+// was hit.
+func (st *State) ClickStatus(ctx view.Context, host view.Host, x int) bool {
+	key, ok := view.ChipAt(st.Chips, x)
+	if !ok {
+		return false
+	}
+	st.Update(ctx, host, key)
+	return true
 }

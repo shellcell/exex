@@ -203,11 +203,12 @@ func (m *Model) switchMode(md mode) tea.Cmd {
 // footerHint is one "key action" pair shown in the footer.
 type footerHint struct{ key, desc string }
 
-// globalHints are the commands available everywhere; appended to every view's
-// footer so they are never missing. The full reference lives behind '?'.
-var globalHints = []footerHint{
-	{"g", "goto"}, {"␣", "open in…"}, {"f", "find here"}, {"l", "search all"}, {",", "settings"}, {"?", "help"}, {"q", "quit"},
-}
+// globalHints are appended to every view's footer, after a divider, so the way
+// out is never missing. Deliberately just two: the footer is a reminder of the
+// *view's* commands, and '?' is the complete reference — the other globals
+// (g, ␣, f, l, ,) live there rather than eating a view's hint budget on a
+// narrow terminal.
+var globalHints = []footerHint{{"?", "help"}, {"q", "quit"}}
 
 // viewHints returns the current view's primary commands (view-specific only;
 // globals are appended by renderFooter). Kept curated — the complete list is in
@@ -216,42 +217,93 @@ func (m *Model) viewHints() []footerHint {
 	return m.current().hints()
 }
 
+// renderFooter draws the hint bar. Bubble Tea re-renders the whole screen on
+// every message, but the footer only *changes* when the view's hints, the
+// terminal width or the status message do — and styling a hint means
+// serialising its colour into ANSI, per hint, per frame. So the finished bar is
+// memoised on exactly those inputs.
 func (m *Model) renderFooter() string {
+	hints := m.viewHints()
+	if m.footerCache != "" && m.footerWidth == m.width &&
+		m.footerStatus == m.status && m.footerStatusErr == m.statusError &&
+		sameHints(m.footerHints, hints) {
+		return m.footerCache
+	}
+	out := m.buildFooter(hints)
+	m.footerCache = out
+	m.footerWidth = m.width
+	m.footerStatus = m.status
+	m.footerStatusErr = m.statusError
+	m.footerHints = append(m.footerHints[:0], hints...)
+	return out
+}
+
+func sameHints(a, b []footerHint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Model) buildFooter(viewHints []footerHint) string {
 	keyStyle := m.theme.helpKeyStyle            // accent, bold
 	descStyle := m.theme.footerStyle.Padding(0) // muted, no padding
 	sep := descStyle.Render(" · ")
 
-	hints := m.viewHints()
-	if m.mode == modeInfo {
-		hints = append(hints, globalHints...)
+	render := func(hints []footerHint) []string {
+		out := make([]string, 0, len(hints))
+		for _, h := range hints {
+			out = append(out, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
+		}
+		return out
 	}
-	parts := make([]string, 0, len(hints))
-	for _, h := range hints {
-		parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
+	parts := render(viewHints)
+	// The globals are pinned to the right of the hint area rather than queued
+	// behind the view's hints: they are the way out, so they must not be the first
+	// thing an ellipsis eats on a narrow terminal. The view's own hints take the
+	// space that's left and shrink into it.
+	//
+	// They never change, so they are styled once rather than on every frame —
+	// styling a hint means serialising its colour into ANSI, and this is the
+	// hottest path in the app. clearColorCaches drops it on a theme change.
+	if m.footerGlobals == "" {
+		m.footerGlobals = descStyle.Render("│  ") + strings.Join(render(globalHints), sep)
 	}
-
-	if m.status == "" {
-		// No message: hints fill the line, shrinking with an ellipsis if too wide.
-		return layout.PadRight(" "+fitJoin(parts, sep, m.width-1), m.width)
-	}
+	globals := m.footerGlobals
+	globalsW := lipgloss.Width(globals)
 
 	// A status message dominates: it keeps its full width on the right as a badge
 	// (its semantic colour as the background — red for errors — with a contrasting
-	// foreground) and the hints shrink into whatever is left, so the two never
+	// foreground) and everything else shrinks into what is left, so the two never
 	// overlap.
-	st := m.theme.infoStyle
-	if m.statusError {
-		st = m.theme.errorStyle
+	msg, msgW := "", 0
+	if m.status != "" {
+		st := m.theme.infoStyle
+		if m.statusError {
+			st = m.theme.errorStyle
+		}
+		bg := st.GetForeground()
+		badge := lipgloss.NewStyle().Bold(true).Background(bg).Foreground(contrastOn(bg))
+		msg = badge.Render(" " + m.status + " ")
+		if lipgloss.Width(msg) > m.width {
+			msg = layout.FitANSIWidth(msg, m.width)
+		}
+		msgW = lipgloss.Width(msg)
 	}
-	bg := st.GetForeground()
-	badge := lipgloss.NewStyle().Bold(true).Background(bg).Foreground(contrastOn(bg))
-	msg := badge.Render(" " + m.status + " ")
-	if lipgloss.Width(msg) > m.width {
-		msg = layout.FitANSIWidth(msg, m.width)
+
+	avail := m.width - msgW - 1 // the leading space
+	// Too cramped to show both: the view's hints win the space, since the globals
+	// are also in '?' and on the keyboard.
+	if avail < globalsW+8 {
+		return layout.PadRight(" "+fitJoin(parts, sep, avail), m.width-msgW) + msg
 	}
-	msgW := lipgloss.Width(msg)
-	left := layout.PadRight(" "+fitJoin(parts, sep, m.width-msgW-1), m.width-msgW)
-	return left + msg
+	hints := fitJoin(parts, sep, avail-globalsW-2)
+	return layout.PadRight(" "+hints, m.width-msgW-globalsW) + globals + msg
 }
 
 // contrastOn returns near-black or near-white, whichever reads better on bg, by

@@ -9,7 +9,6 @@
 package sources
 
 import (
-	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -54,6 +53,10 @@ type State struct {
 	Avail       view.AvailFilter // availability filter: all / present / missing
 
 	collapsed map[string]bool // collapsed directory paths
+
+	Chips []view.StatusChip // clickable status-line toggles (screen-column spans)
+
+	statusCache view.StatusCache // memoised status row (see view.StatusCache)
 }
 
 // Ensure loads the source-file list once.
@@ -320,23 +323,23 @@ func (st *State) Render(ctx view.Context, host view.Host) string {
 		bodyH = 2
 	}
 	filterRow := st.Filter.View()
+	st.Chips = st.Chips[:0]
 	if !st.Filter.Focused() {
-		facet := ""
+		viewLabel := "flat"
 		if st.Tree {
-			facet = "  tree"
+			viewLabel = "tree"
 		}
-		if st.Avail != view.AvailAll {
-			facet += "  " + ctx.KeyStyle.Render(layout.CtrlKeys("p")) + " " + view.AvailLabel(st.Avail)
-		}
+		items := []view.StatusItem{{Key: "t", Label: "view", Value: viewLabel}}
+		// The tree orders itself by path; sort only applies to the flat list.
 		if !st.Tree {
-			dir := "↑"
-			if st.SortDesc {
-				dir = "↓"
-			}
-			facet += "  " + ctx.KeyStyle.Render("s") + " sort:" + st.Sort.String() + dir
+			items = append(items, view.StatusItem{
+				Key: "s", Label: "sort", Value: view.SortValue(st.Sort.String(), st.SortDesc),
+			})
 		}
-		filterRow = ctx.FooterStyle.Render(fmt.Sprintf("/ %s   (%d / %d source files)",
-			st.Filter.Value(), len(st.Filtered), len(st.Files))) + ctx.FooterStyle.Render(facet)
+		items = append(items, view.StatusItem{
+			Key: "ctrl+p", Label: "avail", Value: view.AvailLabel(st.Avail),
+		})
+		filterRow, st.Chips = ctx.StatusLine(&st.statusCache, st.Filter.Value(), "source files", len(st.Filtered), len(st.Files), items)
 	}
 
 	visible := bodyH - 1
@@ -400,4 +403,16 @@ func (st *State) row(ctx view.Context, i int, selected bool) string {
 		return ctx.SelStyle.Render(ansi.Strip(line))
 	}
 	return ctx.RowStyle.Render(line)
+}
+
+// ClickStatus toggles the status-line chip at screen column x, by handing its
+// key to Update — a click is that key arriving by mouse. Reports whether a chip
+// was hit.
+func (st *State) ClickStatus(ctx view.Context, host view.Host, x int) bool {
+	key, ok := view.ChipAt(st.Chips, x)
+	if !ok {
+		return false
+	}
+	st.Update(ctx, host, key)
+	return true
 }

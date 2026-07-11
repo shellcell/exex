@@ -108,6 +108,8 @@ func (m *Model) clearAllViewCaches() {
 // on geometry, not colour, so they're left intact.)
 func (m *Model) clearColorCaches() {
 	m.viewStylesCache = nil
+	m.footerGlobals = ""
+	m.footerCache = ""
 	m.modalStylesCache = nil
 	m.clearAllViewCaches()
 	m.dasm.AsmCache = nil
@@ -257,6 +259,15 @@ type settingsState struct {
 
 // statusState stores the footer status message.
 type statusState struct {
+	// The memoised footer (see renderFooter): the finished bar plus the inputs it
+	// was built from. Dropped by clearColorCaches on a theme change.
+	footerGlobals   string // the styled "│  ? help · q quit" tail
+	footerCache     string // the whole bar
+	footerHints     []footerHint
+	footerWidth     int
+	footerStatus    string
+	footerStatusErr bool
+
 	status      string
 	statusError bool
 	lastCopy    string // last text sent to the clipboard (test seam; see copyToClipboard)

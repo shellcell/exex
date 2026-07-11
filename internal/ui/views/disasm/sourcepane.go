@@ -12,7 +12,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/dump"
 	"github.com/rabarbra/exex/internal/ui/layout"
 	"github.com/rabarbra/exex/internal/ui/view"
 )
@@ -320,7 +319,7 @@ func (st *State) sourceAsmRow(ctx *view.Context, i, addrW, w int) string {
 		// real disassembly.
 		addrText := fmt.Sprintf("0x%0*x", addrW, inst.Addr)
 		addr := st.AddrMapStyle(ctx, inst.Addr, st.SrcFile, st.SrcCur).Render(addrText)
-		asm := st.RenderInstText(ctx, dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
+		asm := st.RenderInstText(ctx, inst.Text, inst.Class, inst.Addr)
 		var line string
 		if ColumnsFor(ctx).ByteColW > 0 {
 			line = fmt.Sprintf(" %s  %s  %s", addr, InstBytes(ctx, inst.Bytes), asm)

@@ -51,6 +51,10 @@ type State struct {
 	// AsmCache memoizes highlighted instruction text (colour-bearing: dropped
 	// on theme changes).
 	AsmCache layout.RowMemo[AsmKey, string]
+	// AnnCache memoizes an instruction's annotation, keyed by its address (see
+	// State.annotation). Not colour-bearing, but it bakes in symbol display
+	// names, so the shell drops it with the other name-dependent caches.
+	AnnCache layout.RowMemo[uint64, string]
 	// HeightCache memoizes per-instruction rendered height (it otherwise
 	// re-renders each instruction to count rows, which the scroll math calls
 	// dozens of times per wheel tick). Reset whenever Inst is replaced.

@@ -104,6 +104,7 @@ func (m *Model) CycleSetting(i, dir int) {
 // hex view is rendered uncached, so it needs no clear.
 func (m *Model) clearDisasmDisplayCaches() {
 	m.dasm.HeightCache = nil
+	m.dasm.AnnCache = nil
 	m.dasm.SourceAsmRowCache = nil
 }
 

@@ -36,10 +36,41 @@ func ColumnsFor(ctx *view.Context) Columns {
 }
 
 // RenderInstText colours an instruction's assembly text, caching the result.
+//
+// It takes the instruction's *raw* text and does the objdump-style alignment
+// inside the cache miss. Aligning first would allocate a fresh string for every
+// visible row on every frame — only to hand it straight to a cache lookup that
+// almost always hits.
 func (st *State) RenderInstText(ctx *view.Context, text string, class dis.InstClass, instAddr uint64) string {
 	return st.AsmCache.Get(AsmKey{Text: text, Addr: instAddr, Cls: class}, func() string {
-		return st.asmHighlighter(ctx).Render(text, class, st.addrSpans(ctx, text, instAddr))
+		aligned := dump.AlignAsm(text)
+		return st.asmHighlighter(ctx).Render(aligned, class, st.addrSpans(ctx, aligned, instAddr))
 	})
+}
+
+// appendAddr writes "0x" + addr, zero-padded to digits hex chars, into dst —
+// what fmt.Sprintf("0x%0*x", digits, addr) produces, without fmt's boxing and
+// intermediate string. Called for every visible row, on every frame.
+func appendAddr(dst []byte, addr uint64, digits int) []byte {
+	const hexDigits = "0123456789abcdef"
+	var tmp [16]byte // a uint64 is at most 16 hex digits
+	n := 0
+	for {
+		tmp[n] = hexDigits[addr&0xf]
+		n++
+		addr >>= 4
+		if addr == 0 {
+			break
+		}
+	}
+	dst = append(dst, '0', 'x')
+	for i := n; i < digits; i++ {
+		dst = append(dst, '0')
+	}
+	for i := n - 1; i >= 0; i-- {
+		dst = append(dst, tmp[i])
+	}
+	return dst
 }
 
 // asmHighlighter returns the assembly highlighter for the current theme and
@@ -140,6 +171,22 @@ func relocNote(ctx *view.Context, addr uint64, n int) string {
 		parts = append(parts, "→ "+target)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// annotation is annotationNote, memoised per instruction. The note is a pure
+// function of the instruction, but computing it scans the operands, resolves
+// every mapped address to a symbol and formats the offsets — and the row is
+// rebuilt on every frame. The heights and the colours were already cached; this
+// was the last per-row computation left in the scroller.
+//
+// It bakes in symbol *display* names, so it is dropped wherever those change:
+// the shell's clearSymbolNameCaches (demangle finishing, the args toggle) and
+// clearDisasmDisplayCaches (the hide-annotations setting).
+func (st *State) annotation(ctx *view.Context, inst dis.Inst) string {
+	if ctx.HideAnnotations {
+		return ""
+	}
+	return st.AnnCache.Get(inst.Addr, func() string { return annotationNote(ctx, inst) })
 }
 
 // annotationNote assembles an instruction's full annotation. A relocation
@@ -336,7 +383,7 @@ func (st *State) InstRowCount(ctx *view.Context, inst dis.Inst, w int) int {
 	// matches the styled row's — no need to render (or cache-warm) the colours here.
 	asmEnd := asmCol + min(lipgloss.Width(dump.AlignAsm(inst.Text)), max(1, w-asmCol))
 
-	note := annotationNote(ctx, inst)
+	note := st.annotation(ctx, inst)
 	if note == "" {
 		return 1
 	}
@@ -365,7 +412,8 @@ func annotationContinuationRowCount(ctx *view.Context, note string, annCol, w in
 // InstRows renders one instruction as its full set of rows: the assembly row
 // (optionally selection-highlighted) plus any annotation continuation rows.
 func (st *State) InstRows(ctx *view.Context, inst dis.Inst, w int, selected bool, targetStyle *lipgloss.Style) []string {
-	addrText := fmt.Sprintf("0x%0*x", ctx.File.AddrHexWidth(), inst.Addr)
+	var addrBuf [18]byte // "0x" + 16 hex digits
+	addrText := string(appendAddr(addrBuf[:0], inst.Addr, ctx.File.AddrHexWidth()))
 	addrCol := ctx.AddrStyle.Render(addrText)
 	if targetStyle != nil {
 		addrCol = targetStyle.Render(addrText)
@@ -373,17 +421,19 @@ func (st *State) InstRows(ctx *view.Context, inst dis.Inst, w int, selected bool
 	cols := ColumnsFor(ctx)
 	asmCol := cols.Asm
 	annCol := cols.Annotation(w)
-	asm := st.RenderInstText(ctx, dump.AlignAsm(inst.Text), inst.Class, inst.Addr)
-	note := annotationNote(ctx, inst)
+	asm := st.RenderInstText(ctx, inst.Text, inst.Class, inst.Addr)
+	note := st.annotation(ctx, inst)
 
 	asmFit := layout.FitANSIWidth(asm, max(1, w-asmCol))
 	asmEnd := asmCol + lipgloss.Width(asmFit)
 
+	// Concatenation, not Sprintf: one allocation for the joined row instead of
+	// fmt's boxing plus its own buffer, on every row of every frame.
 	var asmRow string
 	if cols.ByteColW > 0 {
-		asmRow = fmt.Sprintf(" %s  %s  ", addrCol, InstBytes(ctx, inst.Bytes)) + asmFit
+		asmRow = " " + addrCol + "  " + InstBytes(ctx, inst.Bytes) + "  " + asmFit
 	} else {
-		asmRow = fmt.Sprintf(" %s  ", addrCol) + asmFit
+		asmRow = " " + addrCol + "  " + asmFit
 	}
 	// Highlight only the assembly (prefix + code) of the selected line; the gap,
 	// the annotation, and any continuation rows stay uncoloured.

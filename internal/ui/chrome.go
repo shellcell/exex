@@ -125,7 +125,22 @@ func (m *Model) tabLead() []string {
 	}
 }
 
+// renderTabs draws the tab strip. Like the footer, it is redrawn on every
+// message but only *changes* with the active view, the width or the breadcrumb
+// — and styling a tab means serialising its colours into ANSI, twelve times a
+// frame. So the finished strip is memoised on exactly those inputs;
+// clearColorCaches drops it on a theme change.
 func (m *Model) renderTabs() string {
+	crumb := m.breadcrumb()
+	if m.tabsCache != "" && m.tabsMode == m.mode && m.tabsWidth == m.width && m.tabsCrumb == crumb {
+		return m.tabsCache
+	}
+	out := m.buildTabs(crumb)
+	m.tabsCache, m.tabsMode, m.tabsWidth, m.tabsCrumb = out, m.mode, m.width, crumb
+	return out
+}
+
+func (m *Model) buildTabs(crumb string) string {
 	compact := m.tabsCompact()
 	segs := m.tabLead()
 	for _, t := range tabItems {
@@ -135,10 +150,10 @@ func (m *Model) renderTabs() string {
 	row := lipgloss.JoinHorizontal(lipgloss.Left, segs...)
 	// When we've descended into another file (a dependency), show the breadcrumb
 	// right-aligned in the tab strip so "where am I" is always visible.
-	if bc := m.breadcrumb(); bc != "" {
+	if crumb != "" {
 		avail := m.width - lipgloss.Width(row) - 2
 		if avail >= 14 {
-			crumb := m.theme.footerStyle.Render(truncLeftWidth(bc, avail-9)) + m.theme.helpKeyStyle.Render(" ^O")
+			crumb := m.theme.footerStyle.Render(truncLeftWidth(crumb, avail-9)) + m.theme.helpKeyStyle.Render(" ^O")
 			gap := max(1, m.width-lipgloss.Width(row)-lipgloss.Width(crumb))
 			return row + strings.Repeat(" ", gap) + crumb
 		}

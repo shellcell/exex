@@ -92,6 +92,7 @@ type layoutState struct {
 // colour cache is keyed by raw instruction text, which carries no symbol name.)
 func (m *Model) clearSymbolNameCaches() {
 	m.dasm.HeightCache = nil
+	m.dasm.AnnCache = nil // annotations name their target symbol
 	m.relocs.DropCaches() // reloc bind targets render demangled/abbreviated names
 }
 
@@ -110,6 +111,7 @@ func (m *Model) clearColorCaches() {
 	m.viewStylesCache = nil
 	m.footerGlobals = ""
 	m.footerCache = ""
+	m.tabsCache = ""
 	m.modalStylesCache = nil
 	m.clearAllViewCaches()
 	m.dasm.AsmCache = nil
@@ -267,6 +269,12 @@ type statusState struct {
 	footerWidth     int
 	footerStatus    string
 	footerStatusErr bool
+
+	// The memoised tab strip (see renderTabs), with the inputs it was built from.
+	tabsCache string
+	tabsMode  mode
+	tabsWidth int
+	tabsCrumb string
 
 	status      string
 	statusError bool

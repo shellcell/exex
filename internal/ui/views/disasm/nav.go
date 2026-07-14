@@ -7,9 +7,9 @@ package disasm
 // jumps) stays in the shell — it decides *where* to go; State moves there.
 
 import (
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/explorer"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // Host is what navigation needs back from the shell.

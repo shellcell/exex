@@ -12,9 +12,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/dyldcache"
-	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/dyldcache"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 // openSymbolsForLib shows the Symbols view filtered to the imports bound to lib.

@@ -11,8 +11,8 @@ package dump
 import (
 	"os"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/dyldcache"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/dyldcache"
 )
 
 // cacheScanner lazily opens the host dyld shared cache matching a binary's

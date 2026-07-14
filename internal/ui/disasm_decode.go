@@ -8,11 +8,11 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/explorer"
-	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/explorer"
+	disasmview "github.com/shellcell/exex/internal/ui/views/disasm"
 )
 
 // functionInsts decodes the instructions making up sym's extent, fresh from the

@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"strings"
 
-	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
-	"github.com/rabarbra/exex/internal/ui/scope"
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	findtomodal "github.com/shellcell/exex/internal/ui/modals/findto"
+	"github.com/shellcell/exex/internal/ui/scope"
+	"github.com/shellcell/exex/internal/ui/views/hexraw"
 )
 
 // openFindModal collects the search seeds available at the caret and opens the

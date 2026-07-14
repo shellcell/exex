@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 // BenchmarkDisasmDump streams the disasm dump of EXEX_BENCH_BIN; set

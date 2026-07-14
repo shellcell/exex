@@ -8,9 +8,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/rabarbra/exex/internal/chromalexers"
-	"github.com/rabarbra/exex/internal/chromastyles"
-	"github.com/rabarbra/exex/internal/theme"
+	"github.com/shellcell/exex/internal/chromalexers"
+	"github.com/shellcell/exex/internal/chromastyles"
+	"github.com/shellcell/exex/internal/theme"
 )
 
 // HighlightLines returns ANSI-styled source lines without using a cache. It uses

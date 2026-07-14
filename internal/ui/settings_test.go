@@ -3,8 +3,8 @@ package ui
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
 )
 
 func TestSettingsCycleAndPersist(t *testing.T) {

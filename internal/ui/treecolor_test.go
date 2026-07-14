@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/config"
+	"github.com/shellcell/exex/internal/config"
 )
 
 // TestTreeNodeColor locks in the tree-group-row colour: a blue that matches the

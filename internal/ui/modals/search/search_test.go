@@ -8,8 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/bytesearch"
-	"github.com/rabarbra/exex/internal/ui/modal"
+	"github.com/shellcell/exex/internal/bytesearch"
+	"github.com/shellcell/exex/internal/ui/modal"
 )
 
 type submitted struct {

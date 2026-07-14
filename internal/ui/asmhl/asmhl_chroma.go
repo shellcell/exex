@@ -12,11 +12,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/rabarbra/exex/internal/arch"
-	"github.com/rabarbra/exex/internal/chromalexers"
-	"github.com/rabarbra/exex/internal/chromastyles"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/syntax"
+	"github.com/shellcell/exex/internal/arch"
+	"github.com/shellcell/exex/internal/chromalexers"
+	"github.com/shellcell/exex/internal/chromastyles"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/syntax"
 )
 
 // lexers caches the Chroma asm lexer per architecture. Keying by arch (rather

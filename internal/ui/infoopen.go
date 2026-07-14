@@ -8,7 +8,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 func (m *Model) updateInfo(msg tea.KeyMsg, key string) (tea.Model, tea.Cmd) {

@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 func openLifetimeTestModel(t *testing.T) *Model {

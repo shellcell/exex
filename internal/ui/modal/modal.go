@@ -16,8 +16,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // Context is a per-frame snapshot of the inputs a modal renders from. It is

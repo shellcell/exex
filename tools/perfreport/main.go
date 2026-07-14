@@ -24,10 +24,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/ui"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/ui"
 )
 
 // nonDisasmViews are the buffered views (everything dump.View handles). The two

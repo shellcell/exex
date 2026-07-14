@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 func TestResolveLibPathWithRPath(t *testing.T) {

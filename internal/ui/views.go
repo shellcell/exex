@@ -6,8 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/views/hexraw"
 )
 
 // modeView is the per-view behaviour behind the mode dispatch. Each concrete

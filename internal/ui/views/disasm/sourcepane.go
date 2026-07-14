@@ -12,8 +12,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // gutterWidth is the visible width of the source line-number gutter

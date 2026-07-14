@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // abbrevMinInner is the smallest "(…)"/"<…>" content (in bytes, brackets excluded)

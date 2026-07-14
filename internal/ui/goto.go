@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
-	"github.com/rabarbra/exex/internal/ui/scope"
-	"github.com/rabarbra/exex/internal/ui/views/strs"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/layout"
+	palettemodal "github.com/shellcell/exex/internal/ui/modals/palette"
+	"github.com/shellcell/exex/internal/ui/scope"
+	"github.com/shellcell/exex/internal/ui/views/strs"
 )
 
 // gotoMaxResults bounds how many matches we keep (the list scrolls; the visible

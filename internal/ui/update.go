@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 func (m *Model) Init() tea.Cmd {

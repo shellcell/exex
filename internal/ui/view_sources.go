@@ -12,8 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	sourceutil "github.com/rabarbra/exex/internal/sourcefiles"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	sourceutil "github.com/shellcell/exex/internal/sourcefiles"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // srcMatch is one hit from a cross-source grep.

@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // TestDecodeRangeMatchesWindow guards the xref speed-up: DecodeRange (small

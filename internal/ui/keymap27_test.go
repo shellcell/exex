@@ -6,9 +6,9 @@ package ui
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/views/sections"
-	"github.com/rabarbra/exex/internal/ui/views/symbols"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/views/sections"
+	"github.com/shellcell/exex/internal/ui/views/symbols"
 )
 
 func newTestModel(t *testing.T, f *binfile.File) *Model {

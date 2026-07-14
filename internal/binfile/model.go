@@ -19,7 +19,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/rabarbra/exex/internal/arch"
+	"github.com/shellcell/exex/internal/arch"
 )
 
 // Format identifies the container the binary was loaded from.

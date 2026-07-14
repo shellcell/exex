@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/view"
-	"github.com/rabarbra/exex/internal/ui/views/sources"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/ui/views/sources"
 )
 
 func TestSourcesAvailFilter(t *testing.T) {

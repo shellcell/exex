@@ -8,8 +8,8 @@ package disasm
 import (
 	"path/filepath"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // SourceState is the split pane's slice of the disasm view state: which file

@@ -14,9 +14,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // Mode selects which byte source a method operates on.

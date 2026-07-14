@@ -7,9 +7,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/theme"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/theme"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 func TestPresetColorsLookup(t *testing.T) {

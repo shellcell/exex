@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
 )
 
 func settleBenchmarkProgram(model tea.Model, initial tea.Cmd) tea.Model {

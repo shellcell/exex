@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 // stringsModel builds a Strings-view Model whose entries point into a synthesized

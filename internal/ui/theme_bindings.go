@@ -19,8 +19,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/theme"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/theme"
 )
 
 // derived holds a palette plus the handful of composite colours the role

@@ -9,9 +9,9 @@ import (
 	"golang.org/x/arch/arm64/arm64asm"
 	"golang.org/x/arch/x86/x86asm"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/cpufeat"
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/cpufeat"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 func TestClassifyX86InstMatchesTextClassifierSamples(t *testing.T) {

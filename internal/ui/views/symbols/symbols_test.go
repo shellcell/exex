@@ -6,8 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // nopHost satisfies view.Host for tests that only need the state changes.

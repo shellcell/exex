@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 func TestRelocsDump(t *testing.T) {

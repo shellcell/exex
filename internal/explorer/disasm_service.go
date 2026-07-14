@@ -6,8 +6,8 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // DisasmService owns bounded disassembly window decoding and its cache. It is

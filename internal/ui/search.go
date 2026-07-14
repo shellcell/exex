@@ -9,9 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	searchutil "github.com/rabarbra/exex/internal/bytesearch"
-	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	searchutil "github.com/shellcell/exex/internal/bytesearch"
+	searchmodal "github.com/shellcell/exex/internal/ui/modals/search"
+	"github.com/shellcell/exex/internal/ui/views/hexraw"
 )
 
 // openSearch opens the in-view search prompt.

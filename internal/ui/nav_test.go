@@ -7,11 +7,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/view"
-	"github.com/rabarbra/exex/internal/ui/views/sources"
-	"github.com/rabarbra/exex/internal/ui/views/symbols"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/ui/views/sources"
+	"github.com/shellcell/exex/internal/ui/views/symbols"
 )
 
 func TestSymbolsTreeGrouping(t *testing.T) {

@@ -16,9 +16,9 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"github.com/charmbracelet/x/ansi"
 
-	sourceutil "github.com/rabarbra/exex/internal/sourcefiles"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/view"
+	sourceutil "github.com/shellcell/exex/internal/sourcefiles"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // SortField is the flat-list order of the source files.

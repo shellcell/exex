@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/rabarbra/exex/internal/chromastyles"
+	"github.com/shellcell/exex/internal/chromastyles"
 )
 
 func TestHighlightLines(t *testing.T) {

@@ -3,10 +3,10 @@ package disasm
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	dis "github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
-	"github.com/rabarbra/exex/internal/testbin"
+	"github.com/shellcell/exex/internal/binfile"
+	dis "github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/testbin"
 )
 
 type fakeHost struct {

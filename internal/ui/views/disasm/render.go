@@ -14,12 +14,12 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	dis "github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/ui/asmhl"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/binfile"
+	dis "github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/ui/asmhl"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // ColumnsFor is the row geometry for the current file and byte-column

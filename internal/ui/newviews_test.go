@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 // TestSectionsHeaderMode cycles the Sections view's `t` toggle to the raw-header

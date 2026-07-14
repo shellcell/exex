@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 // TestDisasmRenderWidthMatchesTheRenderedSplit pins RenderWidth — which the

@@ -14,9 +14,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	xrefmodal "github.com/shellcell/exex/internal/ui/modals/xref"
 )
 
 // xrefMaxHits caps how many references are collected (the modal scrolls).

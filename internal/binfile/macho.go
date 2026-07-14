@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/arch"
+	"github.com/shellcell/exex/internal/arch"
 )
 
 // Mach-O magic numbers (thin, both byte orders, plus the fat headers).

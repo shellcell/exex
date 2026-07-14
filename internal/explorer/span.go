@@ -1,8 +1,8 @@
 package explorer
 
 import (
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // Span is a decoded, bounded slice of the executable image: the instructions

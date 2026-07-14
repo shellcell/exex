@@ -3,7 +3,7 @@ package theme
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/chromasubset"
+	"github.com/shellcell/exex/internal/chromasubset"
 )
 
 // TestNamesMatchManifest pins palettes_gen.go to the curated manifest. This

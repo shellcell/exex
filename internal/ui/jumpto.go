@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
+	"github.com/shellcell/exex/internal/binfile"
+	jumptomodal "github.com/shellcell/exex/internal/ui/modals/jumpto"
 )
 
 // modeDigit is the view-switch digit for a mode (matching defaultKeyMap), shown

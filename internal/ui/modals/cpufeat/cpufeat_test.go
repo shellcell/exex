@@ -3,8 +3,8 @@ package cpufeat
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/ui/modal"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/ui/modal"
 )
 
 // fakeHost records what the modal asked the shell to do. Before the extraction

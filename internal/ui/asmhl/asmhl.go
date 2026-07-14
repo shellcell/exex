@@ -15,8 +15,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/arch"
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/arch"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // Span marks a run of instruction text — a followable mapped address — that

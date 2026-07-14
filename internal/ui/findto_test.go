@@ -1,10 +1,11 @@
 package ui
 
 import (
-	tea "charm.land/bubbletea/v2"
-	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
-	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	findresultsmodal "github.com/shellcell/exex/internal/ui/modals/findresults"
+	findtomodal "github.com/shellcell/exex/internal/ui/modals/findto"
 )
 
 // TestFindModalSeedsAndSearch: f collects search seeds from the caret and, on

@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
+	jumptomodal "github.com/shellcell/exex/internal/ui/modals/jumpto"
 )
 
 // TestJumpModalFromDisasm: the cross-view "open caret in…" modal opens on the

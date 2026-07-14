@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/modal"
-	"github.com/rabarbra/exex/internal/ui/modals/textoverlay"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/modal"
+	"github.com/shellcell/exex/internal/ui/modals/textoverlay"
 )
 
 // fieldKeyWidth is the aligned width of the field-name column.

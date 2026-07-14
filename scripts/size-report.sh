@@ -37,7 +37,7 @@ breakdown() {
 	  else if (n ~ /yaml/)                         b="yaml.v3 (config)"
 	  else if (n ~ /atotto\/clipboard/)            b="clipboard"
 	  else if (n ~ /golang.org\/x\/sys/)           b="x/sys"
-	  else if (n ~ /rabarbra\/exex/)               b="exex (our code)"
+	  else if (n ~ /shellcell\/exex/)               b="exex (our code)"
 	  else if (n ~ /^go:string/)                   b="Go: strings + embedded data"
 	  else if (n ~ /^go:func/)                     b="Go: func metadata"
 	  else if (n ~ /^type:|^go:itab|^gcbits|^go:map/) b="Go: type/reflect metadata"

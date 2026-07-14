@@ -16,13 +16,13 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/bytesearch"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
-	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
-	"github.com/rabarbra/exex/internal/ui/scope"
-	"github.com/rabarbra/exex/internal/ui/views/strs"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/bytesearch"
+	"github.com/shellcell/exex/internal/ui/layout"
+	findresultsmodal "github.com/shellcell/exex/internal/ui/modals/findresults"
+	findtomodal "github.com/shellcell/exex/internal/ui/modals/findto"
+	"github.com/shellcell/exex/internal/ui/scope"
+	"github.com/shellcell/exex/internal/ui/views/strs"
 )
 
 // findMaxPerFacet caps hits collected per source, so a value that appears

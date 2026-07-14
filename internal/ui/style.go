@@ -1,12 +1,13 @@
 package ui
 
 import (
-	"github.com/rabarbra/exex/internal/ui/layout"
 	"strings"
+
+	"github.com/shellcell/exex/internal/ui/layout"
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/config"
+	"github.com/shellcell/exex/internal/config"
 )
 
 // Theme contains all Lip Gloss styles used by a Model.

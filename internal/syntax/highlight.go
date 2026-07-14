@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/rabarbra/exex/internal/theme"
+	"github.com/shellcell/exex/internal/theme"
 )
 
 // defaultTheme is the style used when the caller names none.

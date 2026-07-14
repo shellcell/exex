@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/binfile"
 )
 
 func benchmarkDisasmSearchStep(b *testing.B, query string) {

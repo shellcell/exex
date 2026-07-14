@@ -5,8 +5,8 @@ package ui
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/chromastyles"
-	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
+	"github.com/shellcell/exex/internal/chromastyles"
+	settingsmodal "github.com/shellcell/exex/internal/ui/modals/settings"
 )
 
 // TestSettingsThemesAreAllBundled is the guard for the two-registry bug: the

@@ -14,10 +14,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 type disasmSearchHit struct {

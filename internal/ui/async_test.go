@@ -3,12 +3,12 @@ package ui
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/explorer"
-	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
-	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/explorer"
+	syscallsmodal "github.com/shellcell/exex/internal/ui/modals/syscalls"
+	xrefmodal "github.com/shellcell/exex/internal/ui/modals/xref"
 )
 
 func TestAsyncMessagesIgnoreStaleFile(t *testing.T) {

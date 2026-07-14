@@ -6,9 +6,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // chipsFor renders a view and returns the chips its status line published.

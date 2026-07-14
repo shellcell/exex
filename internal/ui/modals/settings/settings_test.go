@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/ui/modal"
+	"github.com/shellcell/exex/internal/ui/modal"
 )
 
 // fakeHost records what the overlay asked the shell to do. Before the extraction

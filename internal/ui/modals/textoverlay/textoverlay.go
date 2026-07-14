@@ -7,7 +7,7 @@
 // everything else lives here.
 package textoverlay
 
-import "github.com/rabarbra/exex/internal/ui/layout"
+import "github.com/shellcell/exex/internal/ui/layout"
 
 // chromeRows is how many rows the title, footer, border and padding cost, and so
 // how much of the terminal's height the body cannot use.

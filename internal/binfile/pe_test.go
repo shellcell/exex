@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/arch"
+	"github.com/shellcell/exex/internal/arch"
 )
 
 // TestOpenPE cross-compiles a tiny Go program to a Windows PE and opens it,

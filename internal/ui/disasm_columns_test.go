@@ -6,9 +6,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/dump"
-	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/dump"
+	disasmview "github.com/shellcell/exex/internal/ui/views/disasm"
 )
 
 // TestAsmColumnMatchesTheRenderedPrefix ties Columns.Asm to the row format.

@@ -11,7 +11,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/theme"
+	"github.com/shellcell/exex/internal/theme"
 )
 
 var (

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rabarbra/exex/internal/arch"
+	"github.com/shellcell/exex/internal/arch"
 )
 
 //go:embed tables

@@ -5,8 +5,8 @@ package syntax
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/chromalexers"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/chromalexers"
 )
 
 // langSample maps every source language exex can identify from DWARF

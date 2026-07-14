@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/dyldcache"
-	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/dyldcache"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 // TestExtractedDylibParses is the end-to-end check for dyld-cache un-sharing:

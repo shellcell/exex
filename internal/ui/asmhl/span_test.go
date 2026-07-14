@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // These run under both build tags: whichever highlighter is compiled in must

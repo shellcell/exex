@@ -3,7 +3,7 @@ package explorer_test
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 // hits builds a cache pre-loaded with the given addresses, in one Add.

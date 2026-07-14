@@ -5,8 +5,8 @@ import (
 	"debug/elf"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/testbin"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/testbin"
 )
 
 // TestTinyELF64IsDeterministic is the property the golden-frame tests rest on.

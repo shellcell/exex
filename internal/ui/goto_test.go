@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
+	"github.com/shellcell/exex/internal/binfile"
+	palettemodal "github.com/shellcell/exex/internal/ui/modals/palette"
 )
 
 func TestResolveSymbolGoto(t *testing.T) {

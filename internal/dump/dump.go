@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 // dumpMaxBytes bounds the decode window used for one-shot function dumps.

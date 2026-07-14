@@ -25,7 +25,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 
-	"github.com/rabarbra/exex/internal/chromasubset"
+	"github.com/shellcell/exex/internal/chromasubset"
 )
 
 type pal struct {

@@ -7,8 +7,8 @@ package ui
 // itself lives in internal/ui/views/symbols.
 
 import (
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/views/symbols"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/views/symbols"
 )
 
 // canDisasmAt reports whether addr can actually be disassembled: there is a

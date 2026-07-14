@@ -10,7 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	disasmview "github.com/rabarbra/exex/internal/ui/views/disasm"
+	disasmview "github.com/shellcell/exex/internal/ui/views/disasm"
 )
 
 // targetAnnotation labels a follow-able address with whatever the reader is

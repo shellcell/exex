@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 func TestInfoViewUsesThemeBodyForeground(t *testing.T) {

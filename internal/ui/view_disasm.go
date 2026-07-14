@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/dump"
 )
 
 func (m *Model) updateDisasm(key string) (tea.Model, tea.Cmd) {

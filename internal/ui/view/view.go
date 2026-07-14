@@ -19,9 +19,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/asmhl"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/asmhl"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // Context is a per-frame snapshot of the inputs a view renders from, plus the

@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
+	"github.com/shellcell/exex/internal/binfile"
+	findresultsmodal "github.com/shellcell/exex/internal/ui/modals/findresults"
 )
 
 // TestTextMatcherCaseSensitivity covers the predicate shared by the disasm and

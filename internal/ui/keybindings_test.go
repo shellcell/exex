@@ -15,12 +15,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/ui/view"
-	"github.com/rabarbra/exex/internal/ui/views/sources"
-	"github.com/rabarbra/exex/internal/ui/views/strs"
-	"github.com/rabarbra/exex/internal/ui/views/symbols"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/ui/views/sources"
+	"github.com/shellcell/exex/internal/ui/views/strs"
+	"github.com/shellcell/exex/internal/ui/views/symbols"
 )
 
 // kp converts a chord description to the KeyPressMsg a terminal would send.

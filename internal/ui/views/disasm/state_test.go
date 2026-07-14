@@ -3,8 +3,8 @@ package disasm
 import (
 	"testing"
 
-	dis "github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
+	dis "github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 func pushed(addrs ...uint64) *State {

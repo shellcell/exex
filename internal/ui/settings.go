@@ -14,10 +14,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/syntax"
-	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/syntax"
+	settingsmodal "github.com/shellcell/exex/internal/ui/modals/settings"
+	"github.com/shellcell/exex/internal/ui/views/hexraw"
 )
 
 func (m *Model) openSettings() { m.settings.Open() }

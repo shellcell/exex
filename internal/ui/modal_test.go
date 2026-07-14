@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
+	"github.com/shellcell/exex/internal/binfile"
+	xrefmodal "github.com/shellcell/exex/internal/ui/modals/xref"
 )
 
 // tabInfoX is an x coordinate inside the "Info" tab of the row-0 tab strip, for

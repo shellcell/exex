@@ -1,22 +1,23 @@
 package ui
 
 import (
-	searchutil "github.com/rabarbra/exex/internal/bytesearch"
-	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	searchutil "github.com/shellcell/exex/internal/bytesearch"
+	searchmodal "github.com/shellcell/exex/internal/ui/modals/search"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/views/hexraw"
 )
 
 const testBytesPerHexRow = 16

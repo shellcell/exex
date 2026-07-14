@@ -6,8 +6,8 @@ package ui
 import (
 	"fmt"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 // loadDisasmAt moves the disasm cursor to addr and records the jump in the

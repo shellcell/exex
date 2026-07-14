@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
-	"github.com/rabarbra/exex/internal/testbin"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/testbin"
 )
 
 // newFixtureService decodes internal/testbin's hand-built ELF, whose .text is a

@@ -1,10 +1,10 @@
 package disasm
 
 import (
-	dis "github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
-	"github.com/rabarbra/exex/internal/ui/asmhl"
-	"github.com/rabarbra/exex/internal/ui/layout"
+	dis "github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/ui/asmhl"
+	"github.com/shellcell/exex/internal/ui/layout"
 )
 
 // HistoryCap caps the depth of the back/forward stack.

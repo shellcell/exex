@@ -8,16 +8,16 @@ package ui
 // It mirrors viewcontext.go, which does the same for the top-level views.
 
 import (
-	"github.com/rabarbra/exex/internal/ui/modal"
-	findquerymodal "github.com/rabarbra/exex/internal/ui/modals/findquery"
-	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
-	findtomodal "github.com/rabarbra/exex/internal/ui/modals/findto"
-	jumptomodal "github.com/rabarbra/exex/internal/ui/modals/jumpto"
-	palettemodal "github.com/rabarbra/exex/internal/ui/modals/palette"
-	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
-	settingsmodal "github.com/rabarbra/exex/internal/ui/modals/settings"
-	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/ui/modal"
+	findquerymodal "github.com/shellcell/exex/internal/ui/modals/findquery"
+	findresultsmodal "github.com/shellcell/exex/internal/ui/modals/findresults"
+	findtomodal "github.com/shellcell/exex/internal/ui/modals/findto"
+	jumptomodal "github.com/shellcell/exex/internal/ui/modals/jumpto"
+	palettemodal "github.com/shellcell/exex/internal/ui/modals/palette"
+	searchmodal "github.com/shellcell/exex/internal/ui/modals/search"
+	settingsmodal "github.com/shellcell/exex/internal/ui/modals/settings"
+	syscallsmodal "github.com/shellcell/exex/internal/ui/modals/syscalls"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // The shell is the Host for every contract; assert it here so a change to any of

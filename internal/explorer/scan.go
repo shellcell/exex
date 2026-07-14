@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // scanLead is the resync context decoded before each scan chunk; small (vs the

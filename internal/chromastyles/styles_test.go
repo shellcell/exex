@@ -3,7 +3,7 @@ package chromastyles
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/chromasubset"
+	"github.com/shellcell/exex/internal/chromasubset"
 )
 
 func TestCuratedStyles(t *testing.T) {

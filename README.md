@@ -34,7 +34,7 @@ tradeoffs against binutils, debuggers and RE platforms.
 
 ```sh
 brew install shellcell/tap/exex              # Homebrew
-go install github.com/rabarbra/exex@latest   # Go
+go install github.com/shellcell/exex@latest   # Go
 ```
 
 Or download the asset for your OS/arch from [Releases](../../releases):

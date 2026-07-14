@@ -16,9 +16,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/dump"
-	syscallsmodal "github.com/rabarbra/exex/internal/ui/modals/syscalls"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/dump"
+	syscallsmodal "github.com/shellcell/exex/internal/ui/modals/syscalls"
 )
 
 // syscallMaxHits caps how many syscall sites are collected (the modal scrolls).

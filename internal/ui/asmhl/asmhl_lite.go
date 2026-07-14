@@ -11,8 +11,8 @@ package asmhl
 import (
 	"strings"
 
-	"github.com/rabarbra/exex/internal/arch"
-	"github.com/rabarbra/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/arch"
+	"github.com/shellcell/exex/internal/disasm"
 )
 
 // operandKeywords are operand-position size/scope specifiers that read better

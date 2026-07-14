@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/ui/modal"
-	"github.com/rabarbra/exex/internal/ui/scope"
+	"github.com/shellcell/exex/internal/ui/modal"
+	"github.com/shellcell/exex/internal/ui/scope"
 )
 
 type fakeHost struct {

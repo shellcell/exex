@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/testbin"
-	findresultsmodal "github.com/rabarbra/exex/internal/ui/modals/findresults"
-	xrefmodal "github.com/rabarbra/exex/internal/ui/modals/xref"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/testbin"
+	findresultsmodal "github.com/shellcell/exex/internal/ui/modals/findresults"
+	xrefmodal "github.com/shellcell/exex/internal/ui/modals/xref"
 )
 
 // Golden-frame tests.

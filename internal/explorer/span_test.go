@@ -3,10 +3,10 @@ package explorer_test
 import (
 	"testing"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/explorer"
-	"github.com/rabarbra/exex/internal/testbin"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/testbin"
 )
 
 func fixtureService(t *testing.T) *binfile.File {

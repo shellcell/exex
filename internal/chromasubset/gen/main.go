@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rabarbra/exex/internal/chromasubset"
+	"github.com/shellcell/exex/internal/chromasubset"
 )
 
 func main() {

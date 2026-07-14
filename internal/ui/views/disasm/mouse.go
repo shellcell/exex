@@ -10,8 +10,8 @@ package disasm
 // derived from the Context rather than passed in.
 
 import (
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/view"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/view"
 )
 
 // RenderWidth is the width the instruction scroller renders at: half the

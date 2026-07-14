@@ -7,10 +7,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/ui/views/sections"
-	"github.com/rabarbra/exex/internal/ui/views/strs"
-	"github.com/rabarbra/exex/internal/ui/views/symbols"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/ui/views/sections"
+	"github.com/shellcell/exex/internal/ui/views/strs"
+	"github.com/shellcell/exex/internal/ui/views/symbols"
 )
 
 func wheelDownModel() *Model {

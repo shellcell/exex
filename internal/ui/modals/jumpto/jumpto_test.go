@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/ui/modal"
+	"github.com/shellcell/exex/internal/ui/modal"
 )
 
 type fakeHost struct {

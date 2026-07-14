@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/rabarbra/exex/internal/binfile"
+import "github.com/shellcell/exex/internal/binfile"
 
 // Shell-side byte-view routing shared across views. The Hex/Raw rendering and
 // cursor mechanics live in internal/ui/views/hexraw; these helpers only perform

@@ -22,11 +22,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rabarbra/exex/internal/arch"
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/disasm"
-	"github.com/rabarbra/exex/internal/dump"
-	"github.com/rabarbra/exex/internal/explorer"
+	"github.com/shellcell/exex/internal/arch"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/disasm"
+	"github.com/shellcell/exex/internal/dump"
+	"github.com/shellcell/exex/internal/explorer"
 )
 
 // goFormatFor maps a Go GOOS to the container format exex should detect, and

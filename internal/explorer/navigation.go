@@ -2,7 +2,7 @@
 // by the TUI.
 package explorer
 
-import "github.com/rabarbra/exex/internal/binfile"
+import "github.com/shellcell/exex/internal/binfile"
 
 // DefaultExecAddr resolves a guaranteed-executable address for the disasm view
 // to land on, honouring the requested strategy and falling back down a sensible

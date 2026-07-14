@@ -11,8 +11,8 @@ package ui
 import (
 	"strings"
 
-	"github.com/rabarbra/exex/internal/config"
-	"github.com/rabarbra/exex/internal/theme"
+	"github.com/shellcell/exex/internal/config"
+	"github.com/shellcell/exex/internal/theme"
 )
 
 // Solarized base tones + accents.

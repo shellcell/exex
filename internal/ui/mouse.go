@@ -11,11 +11,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/rabarbra/exex/internal/ui/layout"
-	"github.com/rabarbra/exex/internal/ui/modal"
-	searchmodal "github.com/rabarbra/exex/internal/ui/modals/search"
-	"github.com/rabarbra/exex/internal/ui/modals/textoverlay"
-	"github.com/rabarbra/exex/internal/ui/views/hexraw"
+	"github.com/shellcell/exex/internal/ui/layout"
+	"github.com/shellcell/exex/internal/ui/modal"
+	searchmodal "github.com/shellcell/exex/internal/ui/modals/search"
+	"github.com/shellcell/exex/internal/ui/modals/textoverlay"
+	"github.com/shellcell/exex/internal/ui/views/hexraw"
 )
 
 // doubleClickWindow is how close two clicks must be (in time, on the same row)

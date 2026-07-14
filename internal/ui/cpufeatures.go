@@ -14,8 +14,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rabarbra/exex/internal/binfile"
-	"github.com/rabarbra/exex/internal/dump"
+	"github.com/shellcell/exex/internal/binfile"
+	"github.com/shellcell/exex/internal/dump"
 )
 
 // cpufeatState holds the CPU-feature scan's async bookkeeping. The overlay's own

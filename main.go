@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,13 +24,20 @@ import (
 	"github.com/shellcell/exex/internal/ui"
 )
 
+// version is the release tag (vX.Y.Z), injected at build time via
+// -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	var debugPath, searchString, archName, syscallTables string
+	var showVersion bool
 	flag.StringVar(&debugPath, "debug", "", "path to an external debug-symbols file or directory (ELF .debug / Mach-O .dSYM)")
 	flag.StringVar(&debugPath, "d", "", "shorthand for -debug")
 	flag.StringVar(&searchString, "s", "", "search printable strings: open the match in Hex, or the Strings view filtered when several match")
 	flag.StringVar(&archName, "arch", "", "for a universal (fat) Mach-O, which architecture slice to open (e.g. x86_64, arm64)")
 	flag.StringVar(&syscallTables, "syscall-tables", "", "directory of custom syscall-name tables; files named <os>-<arch> (e.g. linux-amd64), one \"<num> <name>\" per line, override the built-ins")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&showVersion, "v", false, "shorthand for -version")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [-debug PATH] [-s STRING] [-arch NAME] [-o [VIEW]] <binary> [goto]\n", os.Args[0])
 		fmt.Fprintln(os.Stderr, "  <binary>  path to an ELF/Mach-O/PE file, or a command name on $PATH")
@@ -46,6 +54,11 @@ func main() {
 	// after the binary path (e.g. `exex <binary> -s foo`) would be misread as a
 	// positional. Reorder so flags can appear in any position.
 	flag.CommandLine.Parse(reorderArgs(rawArgs))
+
+	if showVersion {
+		fmt.Printf("exex %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
 
 	args := flag.Args()
 	if len(args) < 1 || len(args) > 2 {

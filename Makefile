@@ -1,8 +1,8 @@
 BINARY := exex
-# Strip the symbol table (-s) and DWARF (-w) from release builds.
-LDFLAGS := -s -w
 DIST := dist
-VERSION ?= dev
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf dev)
+# Strip the symbol table (-s) and DWARF (-w) from release builds; inject the version.
+LDFLAGS := -s -w -X main.version=$(VERSION)
 # Platforms built by `make release`.
 RELEASE_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/386 linux/arm
 # Man page and its install location (override with `make install-man MANPREFIX=...`).
@@ -84,15 +84,17 @@ release:
 	    tags=""; suffix=""; \
 	    if [ "$$variant" = lite ]; then tags="-tags lite"; suffix="-lite"; fi; \
 	    bin=$(BINARY); [ "$$os" = windows ] && bin=$(BINARY).exe; \
-	    stage=$$(mktemp -d); \
-	    cp docs/config.example.yaml README.md LICENSE $(MANPAGE) "$$stage/" 2>/dev/null || true; \
-	    cp -r completions "$$stage/" 2>/dev/null || true; \
+	    name=$(BINARY)-$(VERSION)-$$os-$$arch$$suffix; \
+	    tmp=$$(mktemp -d); stage="$$tmp/$$name"; \
+	    mkdir -p "$$stage/man/man1" "$$stage/completions"; \
+	    cp docs/config.example.yaml README.md LICENSE "$$stage/" 2>/dev/null || true; \
+	    cp $(MANPAGE) "$$stage/man/man1/$(BINARY).1" 2>/dev/null || true; \
+	    cp completions/* "$$stage/completions/" 2>/dev/null || true; \
 	    echo "building $$os/$$arch ($$variant)"; \
 	    CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 	      go build $$tags -trimpath -ldflags="$(LDFLAGS)" -o "$$stage/$$bin" . || exit 1; \
-	    name=$(BINARY)-$(VERSION)-$$os-$$arch$$suffix; \
-		tar -czf "$(DIST)/$$name.tar.gz" -C "$$stage" .; \
-	    rm -rf "$$stage"; \
+	    tar -czf "$(DIST)/$$name.tar.gz" -C "$$tmp" "$$name"; \
+	    rm -rf "$$tmp"; \
 	  done; \
 	done
 	cd $(DIST) && { command -v sha256sum >/dev/null 2>&1 && sha256sum * || shasum -a 256 *; } > checksums.txt

@@ -1,0 +1,36 @@
+# nfpm configuration for building .deb, .rpm and .apk packages.
+#
+# Driven by environment variables so one config covers every arch:
+#   PKG_VERSION  package version (without a leading "v")
+#   PKG_ARCH     nfpm arch, e.g. amd64, arm64
+#   PKG_BIN      path to the prebuilt exex binary for that arch
+#
+# See the `packages` target in the Makefile, which sets these per build.
+name: exex
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+section: utils
+priority: optional
+maintainer: Polina Simonenko <rabarbrablad@gmail.com>
+description: |
+  Terminal UI for exploring ELF, Mach-O and PE binaries.
+  exex presents the file header, sections, segments, symbols, disassembly,
+  hex and string dumps, dynamic libraries and DWARF-driven source mapping of
+  executable files in a keyboard- and mouse-driven terminal interface.
+vendor: shellcell
+homepage: https://github.com/shellcell/exex
+license: MIT
+contents:
+  - src: ${PKG_BIN}
+    dst: /usr/bin/exex
+  - src: ./docs/exex.1
+    dst: /usr/share/man/man1/exex.1
+  - src: ./docs/config.example.yaml
+    dst: /usr/share/exex/config.example.yaml
+  - src: ./completions/exex.bash
+    dst: /usr/share/bash-completion/completions/exex
+  - src: ./completions/exex.fish
+    dst: /usr/share/fish/vendor_completions.d/exex.fish
+  - src: ./completions/_exex
+    dst: /usr/share/zsh/site-functions/_exex

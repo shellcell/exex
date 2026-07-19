@@ -23,6 +23,15 @@ jobs:
       - name: Build release archives
         run: make release VERSION="${GITHUB_REF_NAME}"
 
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Install gettext
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
+      - name: Build distro packages (.deb/.rpm/.apk)
+        run: make packages VERSION="${GITHUB_REF_NAME}"
+
       # Record this release's performance (all views, startup, memory) in the run
       # summary, measured against the native build of exex itself.
       - name: Performance report
@@ -47,3 +56,33 @@ jobs:
             -f event_type=bump-formula \
             -f 'client_payload[formula]=exex' \
             -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+
+  publish-packages:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger package repo publish
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          gh api repos/shellcell/packages/dispatches \
+            -f event_type=publish-packages \
+            -f "client_payload[project]=${GITHUB_REPOSITORY#*/}" \
+            -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+
+  aur-bump:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger AUR bumps (source + -bin)
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          name="${GITHUB_REPOSITORY#*/}"
+          ver="${GITHUB_REF_NAME#v}"
+          for pkg in "$name" "$name-bin"; do
+            gh api repos/shellcell/aur/dispatches \
+              -f event_type=aur-bump \
+              -f "client_payload[package]=$pkg" \
+              -f "client_payload[version]=$ver"
+          done

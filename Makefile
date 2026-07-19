@@ -13,7 +13,7 @@ BASHCOMPDIR ?= /usr/local/etc/bash_completion.d
 ZSHCOMPDIR ?= /usr/local/share/zsh/site-functions
 FISHCOMPDIR ?= /usr/local/share/fish/vendor_completions.d
 
-.PHONY: build lite install install-man install-completions test test-cross lint-docs size-report perf-report clean release
+.PHONY: build lite install install-man install-completions test test-cross lint-docs size-report perf-report clean release packages
 
 # Full build: includes Chroma syntax highlighting (source pane + asm colours).
 build:
@@ -99,3 +99,26 @@ release:
 	done
 	cd $(DIST) && { command -v sha256sum >/dev/null 2>&1 && sha256sum * || shasum -a 256 *; } > checksums.txt
 	@ls -lh $(DIST)
+
+# Build .deb/.rpm/.apk packages with nfpm. Linux binaries are built fresh here
+# (release stages its builds in throwaway temp dirs), and the rendered nfpm
+# configs stay out of $(DIST) because the release workflow uploads dist/*.
+NFPM_ARCHES ?= amd64 arm64
+PKG_VERSION ?= $(patsubst v%,%,$(VERSION))
+
+packages:
+	@command -v nfpm >/dev/null 2>&1 || { printf 'nfpm is required to build packages: https://nfpm.goreleaser.com\n'; exit 1; }
+	@mkdir -p $(DIST)
+	@for arch in $(NFPM_ARCHES); do \
+	  tmp=$$(mktemp -d); \
+	  echo "building linux/$$arch for packages"; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch \
+	    go build -trimpath -ldflags="$(LDFLAGS)" -o "$$tmp/$(BINARY)" . || exit 1; \
+	  for fmt in deb rpm apk; do \
+	    echo "packaging $$arch ($$fmt)"; \
+	    PKG_VERSION="$(PKG_VERSION)" PKG_ARCH="$$arch" PKG_BIN="$$tmp/$(BINARY)" \
+	      envsubst < nfpm.yaml > "$$tmp/nfpm.yaml"; \
+	    nfpm package -f "$$tmp/nfpm.yaml" -p "$$fmt" -t "$(DIST)" || exit 1; \
+	  done; \
+	  rm -rf "$$tmp"; \
+	done

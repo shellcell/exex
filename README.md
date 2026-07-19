@@ -32,12 +32,48 @@ tradeoffs against binutils, debuggers and RE platforms.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
 ```sh
-brew install shellcell/tap/exex              # Homebrew
-go install github.com/shellcell/exex@latest   # Go
+brew install shellcell/tap/exex
 ```
 
-Or download the asset for your OS/arch from [Releases](../../releases):
+### Linux packages (apt / dnf / apk)
+
+Enable the shellcell repository once — setup instructions at
+<https://packages.shellcell.dev> — then:
+
+```sh
+sudo apt install exex   # Debian / Ubuntu
+sudo dnf install exex   # Fedora / RHEL
+sudo apk add exex       # Alpine
+```
+
+### Arch (AUR)
+
+With an AUR helper (e.g. `paru` or `yay`):
+
+```sh
+paru -S exex       # builds from source
+paru -S exex-bin   # prebuilt binary
+```
+
+Or manually:
+
+```sh
+git clone https://aur.archlinux.org/exex.git   # or exex-bin.git
+cd exex && makepkg -si
+```
+
+### Go
+
+```sh
+go install github.com/shellcell/exex@latest
+```
+
+### Prebuilt binaries
+
+Download the asset for your OS/arch from [Releases](../../releases):
 
 ```sh
 tar -xzf exex-<version>-<os>-<arch>.tar.gz
@@ -45,7 +81,7 @@ chmod +x exex && sudo mv exex /usr/local/bin/
 shasum -a 256 -c checksums.txt        # optional
 ```
 
-Or build from source:
+### From source
 
 ```sh
 make build       # -> ./exex
